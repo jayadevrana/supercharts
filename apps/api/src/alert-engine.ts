@@ -214,13 +214,43 @@ export class AlertEngine {
       this.broadcast(alert.userId, event);
     }
 
-    // Telegram delivery.
+    // Telegram delivery — prefer the explicitly-chosen bot id, fall back to the
+    // user's first enabled telegram_bots row, fall back further to the legacy
+    // singleton telegram_configs row for backwards compat.
     if (alert.config.delivery.telegram) {
-      const cfg = this.db.raw
-        .prepare(
-          'SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_configs WHERE user_id = ?',
-        )
-        .get(alert.userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+      const chosenId = alert.config.delivery.telegramBotId;
+      let cfg:
+        | { botToken: string; chatId: string; enabled: number }
+        | undefined;
+      if (chosenId) {
+        cfg = this.db.raw
+          .prepare(
+            'SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots WHERE id = ? AND user_id = ?',
+          )
+          .get(chosenId, alert.userId) as
+          | { botToken: string; chatId: string; enabled: number }
+          | undefined;
+      }
+      if (!cfg) {
+        cfg = this.db.raw
+          .prepare(
+            `SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots
+             WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+          )
+          .get(alert.userId) as
+          | { botToken: string; chatId: string; enabled: number }
+          | undefined;
+      }
+      if (!cfg) {
+        // Legacy singleton fallback.
+        cfg = this.db.raw
+          .prepare(
+            'SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_configs WHERE user_id = ?',
+          )
+          .get(alert.userId) as
+          | { botToken: string; chatId: string; enabled: number }
+          | undefined;
+      }
       if (!cfg || cfg.enabled !== 1) {
         this.markTelegram(event.id, 'disabled');
         return;

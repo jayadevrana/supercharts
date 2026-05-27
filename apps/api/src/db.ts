@@ -199,6 +199,23 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Multi-bot support: one row per (user, bot). Users can route different alert
+    -- groups to different bots (e.g. "Default" for swing trades, "Scalp" for 30m
+    -- crosses). Backwards-compat: the singleton telegram_configs row migrates here
+    -- as label = 'Default' on first boot via the JS code below the exec() block.
+    CREATE TABLE IF NOT EXISTS telegram_bots (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      label      TEXT NOT NULL,
+      bot_token  TEXT NOT NULL,
+      chat_id    TEXT NOT NULL,
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_telegram_bots_user ON telegram_bots(user_id);
+
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_id     TEXT PRIMARY KEY,
       theme       TEXT NOT NULL DEFAULT 'dark',
@@ -262,6 +279,34 @@ function migrate(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_indlayout_user ON indicator_layouts(user_id, pane_id);
   `);
+
+  // Backfill telegram_bots from the legacy singleton config so existing setups don't
+  // lose their bot when multi-bot support ships. Idempotent — only inserts when the
+  // user has a telegram_configs row but zero telegram_bots rows.
+  try {
+    const legacy = db
+      .prepare(
+        `SELECT user_id as userId, bot_token as botToken, chat_id as chatId, enabled, updated_at as updatedAt
+         FROM telegram_configs`,
+      )
+      .all() as Array<{
+      userId: string; botToken: string; chatId: string; enabled: number; updatedAt: number;
+    }>;
+    for (const row of legacy) {
+      const has = db
+        .prepare('SELECT 1 FROM telegram_bots WHERE user_id = ? LIMIT 1')
+        .get(row.userId);
+      if (has) continue;
+      const id = `tb_${row.userId}_default`;
+      db.prepare(
+        `INSERT INTO telegram_bots (id, user_id, label, bot_token, chat_id, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(id, row.userId, 'Default', row.botToken, row.chatId, row.enabled, row.updatedAt, row.updatedAt);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[db] telegram_bots backfill skipped:', err);
+  }
 
   // Idempotent column additions for older DBs created before MA-cross alerts shipped.
   // SQLite's ALTER TABLE ADD COLUMN is safe but errors if the column already exists,

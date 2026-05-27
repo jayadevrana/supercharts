@@ -29,6 +29,7 @@ const maCrossConfigSchema = z.object({
   delivery: z.object({
     web: z.boolean().default(true),
     telegram: z.boolean().default(false),
+    telegramBotId: z.string().optional(),
   }),
   timezone: z.string().min(2).max(40).default('UTC'),
   style: z
@@ -62,6 +63,30 @@ const telegramConfigSchema = z.object({
   chatId: z.string().min(1).max(64),
   enabled: z.boolean().default(true),
 });
+
+const telegramBotCreateSchema = z.object({
+  label: z.string().min(1).max(64),
+  botToken: z.string().min(20).max(120),
+  chatId: z.string().min(1).max(64),
+  enabled: z.boolean().default(true),
+});
+
+const telegramBotUpdateSchema = z.object({
+  label: z.string().min(1).max(64).optional(),
+  botToken: z.string().min(20).max(120).optional(),
+  chatId: z.string().min(1).max(64).optional(),
+  enabled: z.boolean().optional(),
+});
+
+interface TelegramBotRow {
+  id: string;
+  label: string;
+  botToken: string;
+  chatId: string;
+  enabled: number;
+  createdAt: number;
+  updatedAt: number;
+}
 
 interface TelegramConfigRow {
   botToken: string;
@@ -469,6 +494,180 @@ export function alertRoutes(fastify: FastifyInstance, db: AppDB, engine: AlertEn
     } catch (err) {
       reply.code(400);
       return { error: 'telegram_send_failed', message: err instanceof Error ? err.message : 'unknown' };
+    }
+  });
+
+  /* ─── Multi-bot CRUD ─── */
+  // List all bots for this user. Tokens never leak — only a 4-char suffix surfaces.
+  fastify.get('/api/alerts/telegram/bots', async (req) => {
+    const user = getUser(req, db);
+    const rows = db.raw
+      .prepare(
+        `SELECT id, label, bot_token as botToken, chat_id as chatId, enabled,
+                created_at as createdAt, updated_at as updatedAt
+         FROM telegram_bots WHERE user_id = ? ORDER BY created_at ASC`,
+      )
+      .all(user.id) as TelegramBotRow[];
+    return {
+      items: rows.map((r) => ({
+        id: r.id,
+        label: r.label,
+        botTokenSuffix: r.botToken.slice(-4),
+        chatId: r.chatId,
+        enabled: r.enabled === 1,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      })),
+    };
+  });
+
+  fastify.post('/api/alerts/telegram/bots', async (req, reply) => {
+    const user = getUser(req, db);
+    const parsed = telegramBotCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload', details: parsed.error.flatten() };
+    }
+    // Validate the token via getMe before saving — catches typos at write time so the
+    // user finds out immediately, not on the first crossover fire days later.
+    try {
+      await getTelegramBotInfo(parsed.data.botToken);
+    } catch (err) {
+      reply.code(400);
+      return {
+        error: 'telegram_token_invalid',
+        message: err instanceof Error ? err.message : 'invalid_bot_token',
+      };
+    }
+    const id = `tb_${nanoid(12)}`;
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `INSERT INTO telegram_bots (id, user_id, label, bot_token, chat_id, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, user.id, parsed.data.label, parsed.data.botToken, parsed.data.chatId, parsed.data.enabled ? 1 : 0, now, now);
+    return {
+      id,
+      label: parsed.data.label,
+      botTokenSuffix: parsed.data.botToken.slice(-4),
+      chatId: parsed.data.chatId,
+      enabled: parsed.data.enabled,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+
+  fastify.put('/api/alerts/telegram/bots/:id', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const parsed = telegramBotUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload', details: parsed.error.flatten() };
+    }
+    const existing = db.raw
+      .prepare(
+        `SELECT id, label, bot_token as botToken, chat_id as chatId, enabled,
+                created_at as createdAt, updated_at as updatedAt
+         FROM telegram_bots WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, user.id) as TelegramBotRow | undefined;
+    if (!existing) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    const next = {
+      label: parsed.data.label ?? existing.label,
+      botToken: parsed.data.botToken ?? existing.botToken,
+      chatId: parsed.data.chatId ?? existing.chatId,
+      enabled: parsed.data.enabled ?? existing.enabled === 1,
+    };
+    if (parsed.data.botToken && parsed.data.botToken !== existing.botToken) {
+      try {
+        await getTelegramBotInfo(parsed.data.botToken);
+      } catch (err) {
+        reply.code(400);
+        return {
+          error: 'telegram_token_invalid',
+          message: err instanceof Error ? err.message : 'invalid_bot_token',
+        };
+      }
+    }
+    const now = Date.now();
+    db.raw
+      .prepare(
+        `UPDATE telegram_bots SET label = ?, bot_token = ?, chat_id = ?, enabled = ?, updated_at = ?
+         WHERE id = ? AND user_id = ?`,
+      )
+      .run(next.label, next.botToken, next.chatId, next.enabled ? 1 : 0, now, id, user.id);
+    return {
+      id,
+      label: next.label,
+      botTokenSuffix: next.botToken.slice(-4),
+      chatId: next.chatId,
+      enabled: next.enabled,
+      createdAt: existing.createdAt,
+      updatedAt: now,
+    };
+  });
+
+  fastify.delete('/api/alerts/telegram/bots/:id', async (req) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    db.raw.prepare('DELETE FROM telegram_bots WHERE id = ? AND user_id = ?').run(id, user.id);
+    return { ok: true };
+  });
+
+  fastify.post('/api/alerts/telegram/bots/:id/test', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const row = db.raw
+      .prepare(
+        'SELECT label, bot_token as botToken, chat_id as chatId FROM telegram_bots WHERE id = ? AND user_id = ?',
+      )
+      .get(id, user.id) as { label: string; botToken: string; chatId: string } | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    try {
+      await sendTelegramMessage({
+        botToken: row.botToken,
+        chatId: row.chatId,
+        text: `✅ <b>SuperCharts</b> · ${row.label}\nThis bot is wired correctly and will receive alerts.`,
+      });
+      return { ok: true };
+    } catch (err) {
+      reply.code(400);
+      return { error: 'telegram_send_failed', message: err instanceof Error ? err.message : 'unknown' };
+    }
+  });
+
+  /** Auto-detect chat ID for a bot token that hasn't been saved yet (used by Add Bot flow). */
+  fastify.post('/api/alerts/telegram/bots/discover-chat', async (req, reply) => {
+    const body = (req.body ?? {}) as { botToken?: string };
+    if (!body.botToken) {
+      reply.code(400);
+      return { error: 'no_bot_token' };
+    }
+    try {
+      const chats = await discoverTelegramChats(body.botToken);
+      if (chats.length === 0) {
+        reply.code(404);
+        return {
+          error: 'no_chats_yet',
+          message:
+            'Open Telegram and send any message (e.g. /start) to your bot first, then try again.',
+        };
+      }
+      return { chats };
+    } catch (err) {
+      reply.code(400);
+      return {
+        error: 'telegram_discover_failed',
+        message: err instanceof Error ? err.message : 'unknown',
+      };
     }
   });
 }

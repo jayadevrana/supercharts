@@ -47,27 +47,29 @@ import {
   bulkSubscribeAlerts,
   clearAlertEvents,
   createAlert,
+  createTelegramBot,
   createWatchlist,
   deleteAlert,
   deleteAlertEvent,
-  deleteTelegramConfig,
+  deleteTelegramBot,
   deleteWatchlist,
-  discoverTelegramChats,
+  discoverTelegramChatsForBot,
   fetchAlertEvents,
   fetchAlerts,
-  fetchTelegramConfig,
+  fetchTelegramBots,
   fetchWatchlists,
   MA_SOURCE_OPTIONS,
   MA_TYPE_OPTIONS,
-  saveTelegramConfig,
-  sendTelegramTest,
+  testTelegramBot,
   TIMEZONE_OPTIONS,
   toggleAlert,
   updateAlert,
+  updateTelegramBot,
   updateWatchlist,
   type DiscoveredChat,
   type Watchlist,
 } from '@/lib/alerts';
+import type { TelegramBot } from '@supercharts/types';
 import { toast } from '@/components/use-toast';
 import type {
   AlertDefinition,
@@ -649,240 +651,293 @@ function telegramBadge(e: AlertEvent): React.ReactNode {
   return null;
 }
 
-/* ────────────────────────────────────────────────────────── Telegram setup */
+/* ────────────────────────────────────────────────────────── Telegram setup (multi-bot)
+ *
+ * Users may run several bots — one for swing alerts, another for scalp, etc. — and
+ * route specific alert groups to specific bots. This panel lists saved bots and
+ * surfaces an inline "+ Add bot" form. Per-bot Test / Toggle / Delete inline.
+ *
+ * The legacy single-bot `TelegramSetup` was deleted — backwards compat is handled at
+ * the DB layer (migration backfills the legacy row into telegram_bots as "Default").
+ */
 
 function TelegramSetup() {
-  const [cfg, setCfg] = useState<TelegramConfig | null>(null);
-  const [botToken, setBotToken] = useState('');
-  const [chatId, setChatId] = useState('');
-  const [enabled, setEnabled] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [discovered, setDiscovered] = useState<DiscoveredChat[] | null>(null);
+  const [bots, setBots] = useState<TelegramBot[] | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const c = await fetchTelegramConfig();
-      setCfg(c);
-      if (c.chatId) setChatId(c.chatId);
-      if (c.enabled !== undefined) setEnabled(c.enabled);
+      const items = await fetchTelegramBots();
+      setBots(items);
     } catch {
-      setCfg({ configured: false, enabled: false });
+      setBots([]);
     }
   }, []);
+
   useEffect(() => {
     void reload();
   }, [reload]);
 
-  const handleDiscover = async () => {
-    if (!botToken && !cfg?.configured) {
-      toast({
-        title: 'Paste the bot token first',
-        description: 'Then click "Auto-detect chat ID".',
-        tone: 'warn',
-      });
-      return;
-    }
+  if (!bots) {
+    return (
+      <div className="flex h-32 items-center justify-center text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3 px-4 py-3 text-xs">
+      <div className="rounded-md border border-border/70 bg-surface-raised p-3">
+        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
+          How to add a bot
+        </div>
+        <ol className="ml-4 list-decimal space-y-1 text-[11px] text-muted-foreground">
+          <li>Open Telegram and message <code className="text-foreground">@BotFather</code> → <code className="text-foreground">/newbot</code>.</li>
+          <li>Copy the token. Start a chat with the new bot and send any message.</li>
+          <li>Click "<strong>+ Add bot</strong>" below, paste the token, hit <strong>Auto-detect</strong>, name it (e.g. "Scalp", "Swing"), save.</li>
+          <li>When creating an alert, pick which bot delivers it.</li>
+        </ol>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          {bots.length} bot{bots.length === 1 ? '' : 's'}
+        </div>
+        <Button size="sm" onClick={() => setAdding(true)} disabled={adding} className="gap-1">
+          <Plus className="h-3.5 w-3.5" /> Add bot
+        </Button>
+      </div>
+
+      {adding ? (
+        <AddBotForm
+          onClose={() => setAdding(false)}
+          onCreated={async () => {
+            await reload();
+            setAdding(false);
+          }}
+        />
+      ) : null}
+
+      {bots.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-10 text-center">
+          <div className="rounded-full bg-accent/10 p-3">
+            <SatelliteDish className="h-5 w-5 text-accent" />
+          </div>
+          <div className="text-sm font-medium">No Telegram bots yet</div>
+          <div className="text-muted-foreground">
+            Add one to start receiving alerts on your phone.
+          </div>
+        </div>
+      ) : (
+        <div className="divide-y divide-border/60 rounded-md border border-border/70">
+          {bots.map((b) => (
+            <BotRow key={b.id} bot={b} onChange={reload} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BotRow({ bot, onChange }: { bot: TelegramBot; onChange: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async () => {
     setBusy(true);
     try {
-      const chats = await discoverTelegramChats(botToken || undefined);
-      if (chats.length === 0) {
-        toast({
-          title: 'No chats found yet',
-          description: 'Open Telegram, send any message (e.g. /start) to your bot, then try again.',
-          tone: 'warn',
-          durationMs: 6000,
-        });
-      } else if (chats.length === 1) {
-        setChatId(chats[0]!.chatId);
-        setDiscovered(chats);
-        toast({
-          title: 'Chat ID detected',
-          description: describeChat(chats[0]!),
-          tone: 'success',
-        });
-      } else {
-        setDiscovered(chats);
-        toast({
-          title: `${chats.length} chats found`,
-          description: 'Pick the chat you want alerts sent to.',
-          tone: 'success',
-        });
-      }
+      await updateTelegramBot(bot.id, { enabled: !bot.enabled });
+      await onChange();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Surface the server-side hint ("Send any message…") if it bubbles up.
-      toast({ title: 'Auto-detect failed', description: msg, tone: 'error' });
+      toast({ title: 'Toggle failed', description: String(err), tone: 'error' });
     } finally {
       setBusy(false);
     }
   };
 
-  const handleSave = async () => {
-    if (botToken.length < 20 && !cfg?.configured) {
-      toast({ title: 'Invalid bot token', description: 'Get one from @BotFather.', tone: 'error' });
-      return;
-    }
-    if (chatId.length < 1) {
-      toast({ title: 'Chat ID required', tone: 'error' });
-      return;
-    }
+  const test = async () => {
     setBusy(true);
     try {
-      // If the bot token field is empty but credentials already exist, the server
-      // route would require a token. Re-saving with the same field would fail —
-      // guard the UI from that confusion by only sending botToken when supplied.
-      if (!botToken && cfg?.configured) {
-        // Use the existing PUT-style flow via POST with token? Backend expects a token,
-        // so prompt user to re-enter for now.
-        toast({
-          title: 'Re-enter the bot token',
-          description: 'For security we never echo it back — paste it again to save changes.',
-          tone: 'warn',
-        });
-        setBusy(false);
-        return;
-      }
-      const c = await saveTelegramConfig({ botToken, chatId, enabled });
-      setCfg(c);
-      setBotToken('');
-      toast({ title: 'Telegram configured', description: `Bot ending in ${c.botTokenSuffix}`, tone: 'success' });
+      await testTelegramBot(bot.id);
+      toast({ title: `${bot.label} · test sent`, description: 'Check your Telegram.', tone: 'success' });
     } catch (err) {
-      toast({ title: 'Could not save', description: String(err), tone: 'error' });
+      toast({ title: `${bot.label} · test failed`, description: String(err), tone: 'error' });
     } finally {
       setBusy(false);
     }
   };
 
-  const handleTest = async () => {
+  const remove = async () => {
+    if (
+      !window.confirm(
+        `Delete bot "${bot.label}"?\n\nAlerts routed to this bot will fall back to your first enabled bot.`,
+      )
+    )
+      return;
     setBusy(true);
     try {
-      await sendTelegramTest();
-      toast({ title: 'Test sent ✅', description: 'Check your Telegram chat.', tone: 'success' });
+      await deleteTelegramBot(bot.id);
+      await onChange();
+      toast({ title: 'Bot deleted', tone: 'success' });
     } catch (err) {
-      toast({ title: 'Telegram test failed', description: String(err), tone: 'error' });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!window.confirm('Delete the saved Telegram credentials?')) return;
-    setBusy(true);
-    try {
-      await deleteTelegramConfig();
-      setCfg({ configured: false, enabled: false });
-      setBotToken('');
-      setChatId('');
-      toast({ title: 'Telegram credentials removed', tone: 'success' });
-    } catch (err) {
-      toast({ title: 'Failed', description: String(err), tone: 'error' });
+      toast({ title: 'Delete failed', description: String(err), tone: 'error' });
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="space-y-4 px-4 py-4 text-xs">
-      <div className="rounded-md border border-border/70 bg-surface-raised p-3">
-        <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground">
-          How to set up
+    <div className="flex items-center gap-3 px-3 py-2">
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold">{bot.label}</span>
+          <Badge tone={bot.enabled ? 'bull' : 'muted'}>{bot.enabled ? 'LIVE' : 'PAUSED'}</Badge>
         </div>
-        <ol className="ml-4 list-decimal space-y-1 text-[11px] text-muted-foreground">
-          <li>Open Telegram and message <code className="text-foreground">@BotFather</code> → <code className="text-foreground">/newbot</code>.</li>
-          <li>Copy the token it gives you (looks like <code>1234567:AAB…</code>).</li>
-          <li>Start a chat with your new bot, send any message.</li>
-          <li>Open <code className="text-foreground">https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> in your browser — copy the <code>chat.id</code>.</li>
-          <li>Paste the token + chat ID below and hit Save.</li>
-        </ol>
+        <div className="text-[10px] text-muted-foreground">
+          bot <code>•••{bot.botTokenSuffix}</code> · chat <code>{bot.chatId}</code>
+        </div>
       </div>
-      <div className="space-y-3">
-        <Field label="Bot token (@BotFather)">
+      <Button size="sm" variant="ghost" onClick={test} disabled={busy} className="gap-1 px-2" title="Send test message">
+        <Send className="h-3.5 w-3.5" />
+      </Button>
+      <Button size="sm" variant="ghost" onClick={toggle} disabled={busy} className="px-2" title={bot.enabled ? 'Pause' : 'Start'}>
+        <Power className={`h-3.5 w-3.5 ${bot.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
+      </Button>
+      <Button size="sm" variant="ghost" onClick={remove} disabled={busy} className="px-2" title="Delete">
+        <Trash2 className="h-3.5 w-3.5 text-bear" />
+      </Button>
+    </div>
+  );
+}
+
+function AddBotForm({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => Promise<void>;
+}) {
+  const [label, setLabel] = useState('');
+  const [botToken, setBotToken] = useState('');
+  const [chatId, setChatId] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const discover = async () => {
+    if (botToken.length < 20) {
+      toast({ title: 'Paste a bot token first', tone: 'warn' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const chats = await discoverTelegramChatsForBot(botToken);
+      if (chats.length === 0) {
+        toast({
+          title: 'No chats yet',
+          description: 'Send /start to the bot in Telegram first.',
+          tone: 'warn',
+          durationMs: 6000,
+        });
+      } else {
+        // Single-chat case → fill directly; multi-chat → fill first and show picker.
+        setChatId(chats[0]!.chatId);
+        toast({
+          title: chats.length === 1 ? 'Chat detected' : `${chats.length} chats found`,
+          description: describeChat(chats[0]!),
+          tone: 'success',
+        });
+      }
+    } catch (err) {
+      toast({ title: 'Auto-detect failed', description: String(err), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (!label.trim()) {
+      toast({ title: 'Give the bot a label', tone: 'warn' });
+      return;
+    }
+    if (botToken.length < 20) {
+      toast({ title: 'Invalid bot token', tone: 'error' });
+      return;
+    }
+    if (!chatId.trim()) {
+      toast({ title: 'Chat ID required', tone: 'error' });
+      return;
+    }
+    setBusy(true);
+    try {
+      await createTelegramBot({ label: label.trim(), botToken, chatId: chatId.trim(), enabled: true });
+      toast({ title: 'Bot added', description: label, tone: 'success' });
+      await onCreated();
+    } catch (err) {
+      toast({ title: 'Could not add bot', description: String(err), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-md border border-accent/40 bg-accent/5 p-3">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-accent">Add bot</div>
+      <Field label="Label (e.g. Default, Scalp, Swing)">
+        <Input
+          autoComplete="off"
+          name={`bot-label-${Math.random().toString(36).slice(2, 7)}`}
+          spellCheck={false}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Scalp"
+        />
+      </Field>
+      <Field label="Bot token (@BotFather)">
+        <Input
+          type="password"
+          autoComplete="off"
+          name={`bot-token-${Math.random().toString(36).slice(2, 7)}`}
+          spellCheck={false}
+          value={botToken}
+          onChange={(e) => setBotToken(e.target.value)}
+          placeholder="123456:AABBCC…"
+        />
+      </Field>
+      <Field label="Chat ID">
+        <div className="flex gap-2">
           <Input
-            type="password"
-            placeholder={cfg?.configured ? `••••••••${cfg.botTokenSuffix ?? ''}` : '123456:AABBCC…'}
-            value={botToken}
-            onChange={(e) => setBotToken(e.target.value)}
             autoComplete="off"
+            name={`bot-chat-${Math.random().toString(36).slice(2, 7)}`}
+            spellCheck={false}
+            value={chatId}
+            onChange={(e) => setChatId(e.target.value)}
+            placeholder="Auto-detect or paste"
           />
-        </Field>
-        <Field label="Chat ID">
-          <div className="flex gap-2">
-            <Input
-              placeholder="Auto-detect or paste · 123456789 / -1001234567890"
-              value={chatId}
-              onChange={(e) => setChatId(e.target.value)}
-              autoComplete="off"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={handleDiscover}
-              disabled={busy}
-              className="shrink-0 gap-1 whitespace-nowrap"
-              title="Poll Telegram getUpdates for the chat that messaged this bot."
-            >
-              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
-              Auto-detect
-            </Button>
-          </div>
-          <p className="mt-1 text-[10px] text-muted-foreground">
-            Send any message (e.g. <code>/start</code>) to your bot in Telegram, then click Auto-detect.
-          </p>
-        </Field>
-        {discovered && discovered.length > 1 ? (
-          <div className="rounded-md border border-border/70 bg-surface-raised p-2">
-            <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              {discovered.length} chats found · pick one
-            </div>
-            <div className="space-y-1">
-              {discovered.map((c) => (
-                <button
-                  key={c.chatId}
-                  onClick={() => setChatId(c.chatId)}
-                  className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-left text-xs hover:border-accent/60 ${
-                    chatId === c.chatId ? 'border-accent bg-accent/10' : 'border-border/60'
-                  }`}
-                >
-                  <span>{describeChat(c)}</span>
-                  <code className="text-[10px] text-muted-foreground">{c.chatId}</code>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <div className="flex items-center justify-between rounded-md border border-border/70 bg-surface-raised px-3 py-2">
-          <div className="text-xs">
-            <div className="font-semibold">Telegram alerts enabled</div>
-            <div className="text-muted-foreground">Master switch — pauses ALL telegram delivery without deleting credentials.</div>
-          </div>
-          <Switch checked={enabled} onCheckedChange={setEnabled} />
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
-          {cfg?.configured ? (
-            <>
-              <Button size="sm" variant="ghost" onClick={handleTest} disabled={busy} className="gap-1">
-                <Send className="h-3.5 w-3.5" /> Send test
-              </Button>
-              <Button size="sm" variant="ghost" onClick={handleDelete} disabled={busy} className="gap-1 text-bear">
-                <Trash2 className="h-3.5 w-3.5" /> Remove
-              </Button>
-            </>
-          ) : null}
-          <Button size="sm" onClick={handleSave} disabled={busy} className="gap-1">
-            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-            Save
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={discover}
+            disabled={busy}
+            className="shrink-0 gap-1 whitespace-nowrap"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wand2 className="h-3.5 w-3.5" />}
+            Auto-detect
           </Button>
         </div>
-        {cfg?.configured ? (
-          <div className="text-[10px] text-muted-foreground">
-            Saved · bot <code>•••{cfg.botTokenSuffix}</code> · chat <code>{cfg.chatId}</code>
-          </div>
-        ) : null}
+      </Field>
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <Button size="sm" variant="ghost" onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={save} disabled={busy} className="gap-1">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          Save bot
+        </Button>
       </div>
     </div>
   );
 }
+
 
 /* ────────────────────────────────────────────────────────── Watchlists */
 

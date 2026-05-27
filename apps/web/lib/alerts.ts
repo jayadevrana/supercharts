@@ -4,6 +4,7 @@ import type {
   AlertEvent,
   Interval,
   MaCrossAlertConfig,
+  TelegramBot,
   TelegramConfig,
 } from '@supercharts/types';
 
@@ -143,6 +144,54 @@ export async function deleteTelegramConfig(): Promise<void> {
 
 export async function sendTelegramTest(): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>('/alerts/telegram/test', { method: 'POST', body: '{}' });
+}
+
+/* ────── Multi-bot ────── */
+
+export async function fetchTelegramBots(): Promise<TelegramBot[]> {
+  const r = await api<{ items: TelegramBot[] }>('/alerts/telegram/bots');
+  return r.items;
+}
+
+export async function createTelegramBot(payload: {
+  label: string;
+  botToken: string;
+  chatId: string;
+  enabled?: boolean;
+}): Promise<TelegramBot> {
+  return api<TelegramBot>('/alerts/telegram/bots', {
+    method: 'POST',
+    body: JSON.stringify({ enabled: true, ...payload }),
+  });
+}
+
+export async function updateTelegramBot(
+  id: string,
+  patch: Partial<{ label: string; botToken: string; chatId: string; enabled: boolean }>,
+): Promise<TelegramBot> {
+  return api<TelegramBot>(`/alerts/telegram/bots/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteTelegramBot(id: string): Promise<void> {
+  await api(`/alerts/telegram/bots/${id}`, { method: 'DELETE' });
+}
+
+export async function testTelegramBot(id: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>(`/alerts/telegram/bots/${id}/test`, {
+    method: 'POST',
+    body: '{}',
+  });
+}
+
+export async function discoverTelegramChatsForBot(botToken: string): Promise<DiscoveredChat[]> {
+  const r = await api<{ chats: DiscoveredChat[] }>('/alerts/telegram/bots/discover-chat', {
+    method: 'POST',
+    body: JSON.stringify({ botToken }),
+  });
+  return r.chats;
 }
 
 export interface DiscoveredChat {

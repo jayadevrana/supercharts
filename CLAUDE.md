@@ -90,14 +90,17 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 1 #1 — Strategy Builder GUI v1 shipped.
-- New `StrategyBuilderDialog` replaces `SignalBuilderDialog` in top bar.
-- 3-tab layout: Active (toggle/edit/duplicate/delete) · New (block builder) · Templates (4 presets).
-- Templates: MA cross, RSI oversold, bullish engulfing, London session breakout.
-- Symbol/interval/account picker per recipe (was previously locked to active pane).
-- All recipes route via `/api/signals` with `indicatorSpecs` so MA params take effect.
-- Browser-verified: template → New populates draft; Active lists curl-created recipe with all 4 action icons.
-- 48 dual-EMA 1d alerts + bot config untouched.
+- ✅ Multi-Telegram-bot support shipped (parallel to roadmap).
+- `telegram_bots` table — one row per (user, bot) with label, token, chat ID.
+- Legacy singleton `telegram_configs` row auto-migrates to `Default` label on boot.
+- Engine routes per-alert via `delivery.telegramBotId`; falls back to first enabled bot.
+- Routes: GET/POST/PUT/DELETE `/api/alerts/telegram/bots`, plus `/test` per id and `/discover-chat`.
+- UI Telegram tab: lists bots, per-row Send-test / Toggle / Delete, "+ Add bot" inline form with Auto-detect chat.
+- Saved both bots:
+  - `Default` (@dipaloMA_bot, ••Nfcs) — handles 48 swing alerts (1d EMA 5×10).
+  - `Scalp bot` (@dipaloScalp_bot, ••KfoM) — handles 48 scalp alerts.
+- Bulk-created 48 new alerts on **30m EMA(9) × EMA(21) close**, routed to Scalp bot.
+- Browser-verified: bot list renders, per-row test fires Telegram message.
 
 ## Next pick
 

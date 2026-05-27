@@ -51,6 +51,12 @@ export interface MaCrossAlertConfig {
   delivery: {
     web: boolean;
     telegram: boolean;
+    /**
+     * Optional id of the saved Telegram bot to use for delivery. When omitted, the
+     * engine picks the user's first enabled bot. Lets users route different alert
+     * groups to different bots (e.g. swing → Default bot, scalp → Scalp bot).
+     */
+    telegramBotId?: string;
   };
   /**
    * IANA timezone for the formatted timestamp in the Telegram message,
@@ -117,6 +123,23 @@ export interface TelegramConfig {
   /** Master switch — disables ALL telegram delivery while still keeping config. */
   enabled: boolean;
   updatedAt?: number;
+}
+
+/**
+ * Multi-bot record returned by the API. Tokens themselves never leave the server; the
+ * client only ever sees a 4-char suffix for visual confirmation.
+ */
+export interface TelegramBot {
+  id: string;
+  label: string;
+  /** Last 4 chars of the bot token, for "saved · ••••fi4Q" displays. */
+  botTokenSuffix: string;
+  chatId: string;
+  enabled: boolean;
+  /** Convenience: bot username from `getMe`, populated when the route enriches the row. */
+  botUsername?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /* WS message shape (AlertFiredMessage) is exported from ./ws to keep all
