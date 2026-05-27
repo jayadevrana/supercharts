@@ -41,7 +41,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ### Phase 1 — Strategy & Backtesting
 
-- [ ] **1. Strategy Builder GUI v1** — visual block builder (condition rows: indicator + op + value/indicator; multi-action editor; symbol+interval picker; save to `/api/signals`; "test on chart" preview)
+- [x] **1. Strategy Builder GUI v1** — `StrategyBuilderDialog` with Active / New / Templates tabs. 4 one-click presets (MA cross, RSI oversold, bullish engulfing, London session breakout). Block-based condition rows + open-position action with sizing/SL/TP/cooldown. Reuses `/api/signals` with `indicatorSpecs` thread so MA params actually take effect.
 - [ ] 2. Backtester — run a recipe over loaded candles, plot entry/exit markers + equity curve + drawdown + win-rate + Sharpe
 - [ ] 3. Param optimizer — grid sweep over MA lengths / SL / TP, rank by Sharpe + max-DD
 - [ ] 4. Walk-forward analysis — train window / test window with rolling reoptimization
@@ -90,15 +90,21 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 54 tasks shipped → `dual-MA EMA(5)×EMA(10) on 1d, all 48 catalog symbols` live.
-- Bot `@dipaloMA_bot` + chat `6386490802` saved, Telegram master switch ON.
-- Logs tab live: 8s auto-refresh, per-row delete, clear-all.
+- ✅ Phase 1 #1 — Strategy Builder GUI v1 shipped.
+- New `StrategyBuilderDialog` replaces `SignalBuilderDialog` in top bar.
+- 3-tab layout: Active (toggle/edit/duplicate/delete) · New (block builder) · Templates (4 presets).
+- Templates: MA cross, RSI oversold, bullish engulfing, London session breakout.
+- Symbol/interval/account picker per recipe (was previously locked to active pane).
+- All recipes route via `/api/signals` with `indicatorSpecs` so MA params take effect.
+- Browser-verified: template → New populates draft; Active lists curl-created recipe with all 4 action icons.
+- 48 dual-EMA 1d alerts + bot config untouched.
 
 ## Next pick
 
-**Phase 1 · #1 — Strategy Builder GUI v1.** Existing `SignalBuilderDialog` is a JSON-flavored
-form; needs to become a block-based visual builder that doesn't require knowing the recipe
-schema. Reuse `/api/signals` + `signal-runner` (already wired with `indicatorSpecs` thread).
+**Phase 1 · #2 — Backtester.** Run a saved recipe over the candle store, emit
+entry/exit markers + equity curve + win-rate + max-DD + Sharpe. Goal: one-click "test"
+button on each recipe row that opens a result modal. Reuse existing condition evaluator
+from `signal-runner` so backtest = same code as live.
 
 ## Questions for owner
 

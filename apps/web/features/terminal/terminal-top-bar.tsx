@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { LayoutPicker } from './layout-picker';
 import { MT5Chip } from './mt5-chip';
-import { SignalBuilderDialog } from './signal-builder-dialog';
+import { StrategyBuilderDialog } from './strategy-builder-dialog';
 import { AlertsDialog } from './alerts-dialog';
 import { BrandMark } from '@/components/brand-mark';
 import { ThemeToggle } from '@/components/theme-toggle';
@@ -95,7 +95,7 @@ export function TerminalTopBar() {
   } = useTerminalStore();
   const active = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
   const [saving, setSaving] = useState(false);
-  const [signalOpen, setSignalOpen] = useState(false);
+  // Strategy + Alerts dialogs are self-contained (own their open state).
 
   const saveLayout = useCallback(async () => {
     if (saving) return;
@@ -184,14 +184,10 @@ export function TerminalTopBar() {
       <LayoutPicker />
       <div className="ml-auto flex items-center gap-2">
         <MT5Chip />
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setSignalOpen(true)}
-          className="gap-1 text-muted-foreground hover:text-foreground"
-        >
-          <Workflow className="h-3.5 w-3.5" /> Signal
-        </Button>
+        <StrategyBuilderDialog
+          defaultSymbol={active.symbol}
+          defaultInterval={active.interval}
+        />
         <Button
           variant="ghost"
           size="sm"
@@ -230,13 +226,6 @@ export function TerminalTopBar() {
           live
         </Badge>
       </div>
-      <SignalBuilderDialog
-        open={signalOpen}
-        onOpenChange={setSignalOpen}
-        availableIndicators={active.classicIndicators}
-        defaultSymbol={active.symbol}
-        defaultInterval={active.interval}
-      />
     </header>
   );
 }
