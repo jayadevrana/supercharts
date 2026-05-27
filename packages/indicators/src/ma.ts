@@ -1,0 +1,116 @@
+import type { Candle } from '@supercharts/types';
+
+export type PriceSource = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4';
+
+export function priceFromCandle(c: Candle, source: PriceSource): number {
+  switch (source) {
+    case 'open':  return c.open;
+    case 'high':  return c.high;
+    case 'low':   return c.low;
+    case 'close': return c.close;
+    case 'hl2':   return (c.high + c.low) / 2;
+    case 'hlc3':  return (c.high + c.low + c.close) / 3;
+    case 'ohlc4': return (c.open + c.high + c.low + c.close) / 4;
+  }
+}
+
+export function pricesFromCandles(candles: readonly Candle[], source: PriceSource = 'close'): number[] {
+  const out = new Array<number>(candles.length);
+  for (let i = 0; i < candles.length; i++) out[i] = priceFromCandle(candles[i]!, source);
+  return out;
+}
+
+export function sma(values: readonly number[], length: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN);
+  if (length <= 0 || values.length === 0) return out;
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i]!;
+    if (i >= length) sum -= values[i - length]!;
+    if (i >= length - 1) out[i] = sum / length;
+  }
+  return out;
+}
+
+export function ema(values: readonly number[], length: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN);
+  if (length <= 0 || values.length === 0) return out;
+  const k = 2 / (length + 1);
+  // Seed with the first SMA so the warm-up phase converges cleanly.
+  let seed = 0;
+  for (let i = 0; i < Math.min(length, values.length); i++) seed += values[i]!;
+  if (values.length < length) return out;
+  let prev = seed / length;
+  out[length - 1] = prev;
+  for (let i = length; i < values.length; i++) {
+    prev = values[i]! * k + prev * (1 - k);
+    out[i] = prev;
+  }
+  return out;
+}
+
+export function wma(values: readonly number[], length: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN);
+  if (length <= 0) return out;
+  const denom = (length * (length + 1)) / 2;
+  for (let i = length - 1; i < values.length; i++) {
+    let s = 0;
+    for (let j = 0; j < length; j++) s += values[i - j]! * (length - j);
+    out[i] = s / denom;
+  }
+  return out;
+}
+
+export function hma(values: readonly number[], length: number): number[] {
+  const half = Math.floor(length / 2);
+  const sqrtN = Math.max(1, Math.floor(Math.sqrt(length)));
+  const wmaHalf = wma(values, half);
+  const wmaFull = wma(values, length);
+  const diff = new Array<number>(values.length).fill(NaN);
+  for (let i = 0; i < values.length; i++) {
+    const a = wmaHalf[i];
+    const b = wmaFull[i];
+    if (a == null || b == null || Number.isNaN(a) || Number.isNaN(b)) continue;
+    diff[i] = 2 * a - b;
+  }
+  return wma(diff, sqrtN);
+}
+
+export function dema(values: readonly number[], length: number): number[] {
+  const e1 = ema(values, length);
+  const e2 = ema(e1, length);
+  const out = new Array<number>(values.length).fill(NaN);
+  for (let i = 0; i < values.length; i++) {
+    if (Number.isNaN(e1[i]!) || Number.isNaN(e2[i]!)) continue;
+    out[i] = 2 * e1[i]! - e2[i]!;
+  }
+  return out;
+}
+
+export function tema(values: readonly number[], length: number): number[] {
+  const e1 = ema(values, length);
+  const e2 = ema(e1, length);
+  const e3 = ema(e2, length);
+  const out = new Array<number>(values.length).fill(NaN);
+  for (let i = 0; i < values.length; i++) {
+    if (Number.isNaN(e1[i]!) || Number.isNaN(e2[i]!) || Number.isNaN(e3[i]!)) continue;
+    out[i] = 3 * e1[i]! - 3 * e2[i]! + e3[i]!;
+  }
+  return out;
+}
+
+export function rma(values: readonly number[], length: number): number[] {
+  // Wilder's smoothing (also called RMA / smoothed moving average).
+  const out = new Array<number>(values.length).fill(NaN);
+  if (length <= 0 || values.length === 0) return out;
+  if (values.length < length) return out;
+  let seed = 0;
+  for (let i = 0; i < length; i++) seed += values[i]!;
+  let prev = seed / length;
+  out[length - 1] = prev;
+  for (let i = length; i < values.length; i++) {
+    prev = (prev * (length - 1) + values[i]!) / length;
+    out[i] = prev;
+  }
+  return out;
+}

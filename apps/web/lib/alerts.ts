@@ -1,0 +1,202 @@
+import { api } from './api';
+import type {
+  AlertDefinition,
+  AlertEvent,
+  Interval,
+  MaCrossAlertConfig,
+  TelegramConfig,
+} from '@supercharts/types';
+
+/* ────── Watchlists ────── */
+
+export interface Watchlist {
+  id: string;
+  name: string;
+  symbols: string[];
+}
+
+export async function fetchWatchlists(): Promise<Watchlist[]> {
+  const r = await api<{ items: Watchlist[] }>('/watchlists');
+  return r.items;
+}
+
+export async function createWatchlist(name: string): Promise<{ id: string }> {
+  return api<{ id: string }>('/watchlists', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  });
+}
+
+export async function updateWatchlist(id: string, patch: Partial<Pick<Watchlist, 'name' | 'symbols'>>): Promise<void> {
+  await api(`/watchlists/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteWatchlist(id: string): Promise<void> {
+  await api(`/watchlists/${id}`, { method: 'DELETE' });
+}
+
+export interface AlertCreatePayload {
+  symbol: string;
+  interval: Interval;
+  type: 'ma_cross';
+  enabled: boolean;
+  config: MaCrossAlertConfig;
+}
+
+export interface AlertUpdatePayload {
+  symbol?: string;
+  interval?: Interval;
+  enabled?: boolean;
+  config?: MaCrossAlertConfig;
+}
+
+export async function fetchAlerts(): Promise<AlertDefinition[]> {
+  const r = await api<{ items: AlertDefinition[] }>('/alerts');
+  return r.items;
+}
+
+export async function fetchAlertEvents(limit = 50): Promise<AlertEvent[]> {
+  const r = await api<{ items: AlertEvent[] }>('/alerts/events', {
+    searchParams: { limit: String(limit) },
+  });
+  return r.items;
+}
+
+export async function deleteAlertEvent(id: string): Promise<void> {
+  await api(`/alerts/events/${id}`, { method: 'DELETE' });
+}
+
+export async function clearAlertEvents(alertId?: string): Promise<void> {
+  await api('/alerts/events', {
+    method: 'DELETE',
+    searchParams: alertId ? { alertId } : undefined,
+  });
+}
+
+export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
+  return api<AlertDefinition>('/alerts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAlert(id: string, payload: AlertUpdatePayload): Promise<AlertDefinition> {
+  return api<AlertDefinition>(`/alerts/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function toggleAlert(id: string): Promise<AlertDefinition> {
+  // Send an explicit empty body — Fastify rejects `content-type: application/json`
+  // POSTs with no body (FST_ERR_CTP_EMPTY_JSON_BODY).
+  return api<AlertDefinition>(`/alerts/${id}/toggle`, { method: 'POST', body: '{}' });
+}
+
+export async function deleteAlert(id: string): Promise<void> {
+  await api(`/alerts/${id}`, { method: 'DELETE' });
+}
+
+export interface BulkSubscribeResult {
+  created: number;
+  skipped: number;
+  items: AlertDefinition[];
+}
+
+/**
+ * Create the same MA-cross alert across every catalog symbol (or the optional subset)
+ * at the given interval. Idempotent: existing alerts on (symbol, interval, ma_cross)
+ * are skipped, never overwritten.
+ */
+export async function bulkSubscribeAlerts(payload: {
+  interval: Interval;
+  config: MaCrossAlertConfig;
+  symbols?: string[];
+}): Promise<BulkSubscribeResult> {
+  return api<BulkSubscribeResult>('/alerts/bulk-subscribe', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchTelegramConfig(): Promise<TelegramConfig> {
+  return api<TelegramConfig>('/alerts/telegram');
+}
+
+export async function saveTelegramConfig(payload: {
+  botToken: string;
+  chatId: string;
+  enabled: boolean;
+}): Promise<TelegramConfig> {
+  return api<TelegramConfig>('/alerts/telegram', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteTelegramConfig(): Promise<void> {
+  await api('/alerts/telegram', { method: 'DELETE' });
+}
+
+export async function sendTelegramTest(): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/alerts/telegram/test', { method: 'POST', body: '{}' });
+}
+
+export interface DiscoveredChat {
+  chatId: string;
+  type: string;
+  title?: string;
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+}
+
+/**
+ * Ask the server to call Telegram's `getUpdates` and return the chats that have
+ * messaged the bot. Pass a `botToken` when configuring for the first time; omit it
+ * to re-detect using already-saved credentials.
+ */
+export async function discoverTelegramChats(botToken?: string): Promise<DiscoveredChat[]> {
+  const r = await api<{ chats: DiscoveredChat[] }>('/alerts/telegram/discover-chat', {
+    method: 'POST',
+    body: JSON.stringify(botToken ? { botToken } : {}),
+  });
+  return r.chats;
+}
+
+export const TIMEZONE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'UTC', label: 'UTC' },
+  { value: 'IST', label: 'IST (Asia/Kolkata)' },
+  { value: 'America/New_York', label: 'EST/EDT (New York)' },
+  { value: 'America/Chicago', label: 'CST/CDT (Chicago)' },
+  { value: 'America/Los_Angeles', label: 'PST/PDT (Los Angeles)' },
+  { value: 'Europe/London', label: 'GMT/BST (London)' },
+  { value: 'Europe/Berlin', label: 'CET/CEST (Berlin)' },
+  { value: 'Asia/Tokyo', label: 'JST (Tokyo)' },
+  { value: 'Asia/Singapore', label: 'SGT (Singapore)' },
+  { value: 'Australia/Sydney', label: 'AEST/AEDT (Sydney)' },
+  { value: 'Asia/Dubai', label: 'GST (Dubai)' },
+];
+
+export const MA_TYPE_OPTIONS: Array<{ value: 'sma' | 'ema' | 'rma' | 'wma'; label: string }> = [
+  { value: 'ema', label: 'EMA · Exponential' },
+  { value: 'sma', label: 'SMA · Simple' },
+  { value: 'wma', label: 'WMA · Weighted' },
+  { value: 'rma', label: "RMA · Wilder's" },
+];
+
+export const MA_SOURCE_OPTIONS: Array<{
+  value: 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
+  label: string;
+}> = [
+  { value: 'close', label: 'Close' },
+  { value: 'open', label: 'Open' },
+  { value: 'high', label: 'High' },
+  { value: 'low', label: 'Low' },
+  { value: 'hl2', label: '(H + L) / 2' },
+  { value: 'hlc3', label: '(H + L + C) / 3' },
+  { value: 'ohlc4', label: '(O + H + L + C) / 4' },
+];

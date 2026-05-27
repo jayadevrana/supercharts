@@ -1,0 +1,1243 @@
+'use client';
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChartCore,
+  DARK_THEME,
+  LIGHT_THEME,
+  PriceSeriesLayer,
+  LiquidityHeatmapLayer,
+  VolumeProfileLayer,
+  DeepTradesLayer,
+  FootprintLayer,
+  SignalsTrendScoreLayer,
+  SmcLayer,
+  IndicatorsLayer,
+  MaCrossLayer,
+  computeMaCross,
+  buildVisibleRangeProfile,
+  computeSignalsTrendScore,
+  computeMtfState,
+  computeFvg,
+  computeOrderBlocks,
+  computeLiquidity,
+  computeMarketStructure,
+  computePremiumDiscount,
+  computeAnchoredVwap,
+  computeCvd,
+  computeSessions,
+  computeHvnLvn,
+  computeRegime,
+  toHeikinAshi,
+  toRenko,
+  toRangeBars,
+  toLineBreak,
+  toKagi,
+  toPointAndFigure,
+} from '@supercharts/chart-core';
+import type {
+  IndicatorOverlayBand,
+  IndicatorOverlayDots,
+  IndicatorOverlayLine,
+} from '@supercharts/chart-core';
+import { computeAll, INDICATOR_LOOKUP } from '@supercharts/indicators';
+import { SubPaneIndicators } from './sub-pane-indicators';
+import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
+import { StsDashboard, type MtfRow } from './sts-dashboard';
+import type {
+  Candle,
+  ChartType,
+  DeepTradeBubble,
+  Interval,
+  LiquidityHeatmapCell,
+  ServerToClientMessage,
+} from '@supercharts/types';
+import { INTERVAL_MS as INTERVAL_MS_MAP } from '@supercharts/types';
+import { api } from '@/lib/api';
+import { fetchAlerts } from '@/lib/alerts';
+import { getWSClient } from '@/lib/ws-client';
+import type { AlertDefinition, AlertEvent } from '@supercharts/types';
+import { useTheme } from '@/components/theme-provider';
+import { formatPrice, formatPercent, formatSymbolLabel } from '@/lib/format';
+import { Badge } from '@/components/ui/badge';
+import type { PaneState } from './terminal-store';
+import { useTerminalStore } from './terminal-store';
+import { DrawingController } from './drawing-controller';
+import type { DrawingObject } from '@supercharts/types';
+
+interface ChartPaneProps {
+  pane: PaneState;
+  active: boolean;
+  onClick?: () => void;
+}
+
+const HEATMAP_LIMIT = 1500;
+const BUBBLE_LIMIT = 800;
+
+export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const chartRef = useRef<ChartCore | null>(null);
+  const candleBufRef = useRef<Candle[]>([]);
+  const heatmapBufRef = useRef<LiquidityHeatmapCell[]>([]);
+  const bubbleBufRef = useRef<DeepTradeBubble[]>([]);
+  const drawingsRef = useRef<DrawingObject[]>([]);
+  const drawingControllerRef = useRef<DrawingController | null>(null);
+  const loadedRangeRef = useRef<{ from: number; to: number }>({ from: 0, to: 0 });
+  const loadingMoreRef = useRef(false);
+  const [last, setLast] = useState<{ price: number; change: number } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [stsFrame, setStsFrame] = useState<SignalsTrendScoreFrame | null>(null);
+  const [mtfRows, setMtfRows] = useState<MtfRow[]>([]);
+  // Alerts targeting this pane's (symbol, interval). The MA cross layer renders
+  // the FIRST matching alert; the rest still fire server-side but don't draw.
+  const [paneAlerts, setPaneAlerts] = useState<AlertDefinition[]>([]);
+  const alertsRefreshTick = useRef(0);
+  const { theme } = useTheme();
+  const resolvedTheme = useMemo(() => (theme === 'dark' ? DARK_THEME : LIGHT_THEME), [theme]);
+  const drawTool = useTerminalStore((s) => s.drawTool);
+  const setDrawTool = useTerminalStore((s) => s.setDrawTool);
+  const syncCrosshair = useTerminalStore((s) => s.syncCrosshair);
+  const setCrosshairTime = useTerminalStore((s) => s.setCrosshairTime);
+  const externalCrosshairTime = useTerminalStore((s) => s.crosshairTime);
+  const replayMode = useTerminalStore((s) => s.replayMode);
+  const replayCursor = useTerminalStore((s) => s.replayCursor);
+  const setReplayBounds = useTerminalStore((s) => s.setReplayBounds);
+  // Refs so the drawing controller (created once per symbol/interval) sees the latest
+  // tool selection and active-pane state without remounting.
+  const drawToolRef = useRef<string | null>(drawTool);
+  const activeRef = useRef<boolean>(active);
+  drawToolRef.current = drawTool;
+  activeRef.current = active;
+
+  // Initial mount: create chart, load historical, subscribe.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const core = new ChartCore({
+      canvas,
+      theme: resolvedTheme,
+      onPointerEvent: (e) => {
+        if (e.type === 'contextmenu') {
+          setMenu({ x: e.x, y: e.y });
+        } else if (e.type === 'pointerdown') {
+          setMenu(null);
+        }
+      },
+      shouldSuppressPan: () => {
+        const t = drawToolRef.current;
+        return Boolean(t && t !== 'cursor' && t !== 'crosshair' && activeRef.current);
+      },
+      onVisibleRangeChange: ({ fromTime, toTime }) => {
+        // Trigger progressive history load if the user has panned near or past the oldest
+        // candle we've fetched so far. This pulls another window of equal duration from
+        // the API and prepends it to the buffer.
+        const loaded = loadedRangeRef.current;
+        if (
+          loaded.from > 0 &&
+          !loadingMoreRef.current &&
+          fromTime < loaded.from + (loaded.to - loaded.from) * 0.05
+        ) {
+          loadingMoreRef.current = true;
+          const span = Math.max(loaded.to - loaded.from, 60_000);
+          const newFrom = Math.max(0, loaded.from - span);
+          const newTo = loaded.from;
+          void api<{ candles: Candle[] }>('/candles', {
+            searchParams: {
+              symbol: pane.symbol,
+              interval: pane.interval,
+              from: newFrom,
+              to: newTo,
+              limit: 5000,
+            },
+          })
+            .then((r) => {
+              if (!r.candles || r.candles.length === 0) {
+                loadedRangeRef.current.from = newFrom;
+                return;
+              }
+              // Prepend, dedupe by openTime.
+              const seen = new Set(candleBufRef.current.map((k) => k.openTime));
+              const fresh = r.candles.filter((k) => !seen.has(k.openTime));
+              if (fresh.length > 0) {
+                candleBufRef.current = [...fresh, ...candleBufRef.current];
+                if (candleBufRef.current.length > 10_000) {
+                  candleBufRef.current = candleBufRef.current.slice(-10_000);
+                }
+                core.setCandles(
+                  transformCandles(candleBufRef.current, pane.chartType, pane.symbol),
+                );
+              }
+              loadedRangeRef.current.from = newFrom;
+            })
+            .catch(() => {
+              loadedRangeRef.current.from = newFrom;
+            })
+            .finally(() => {
+              loadingMoreRef.current = false;
+            });
+        }
+
+        if (!pane.overlays.profile) return;
+        const arr = candleBufRef.current;
+        if (arr.length === 0) return;
+        const visible = arr.filter((k) => k.openTime >= fromTime && k.openTime <= toTime);
+        if (visible.length === 0) return;
+        const profile = buildVisibleRangeProfile(visible, estimateRowSize(pane.symbol), 0.7);
+        core.setVolumeProfile({
+          mode: 'visible_range',
+          symbol: pane.symbol,
+          fromTime,
+          toTime,
+          rowSize: profile.rowSize,
+          valueAreaPercent: 0.7,
+          poc: profile.poc,
+          vah: profile.vah,
+          val: profile.val,
+          totalVolume: profile.totalVolume,
+          levels: profile.levels,
+        });
+      },
+    });
+    chartRef.current = core;
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __sc_chart?: unknown }).__sc_chart = core;
+    }
+
+    // Drawing controller — only active in the active pane.
+    const controller = new DrawingController({
+      core,
+      symbol: pane.symbol,
+      userId: 'demo',
+      getTool: () => (activeRef.current ? drawToolRef.current : null),
+      clearTool: () => setDrawTool(null),
+      initial: [],
+      handlers: {
+        onCreate: async (d) => {
+          drawingsRef.current = [...drawingsRef.current, d];
+          await api('/drawings', {
+            method: 'POST',
+            body: JSON.stringify({
+              symbol: d.symbol,
+              type: d.type,
+              points: d.points,
+              style: d.style as unknown as Record<string, string | number | boolean>,
+              text: d.text,
+              emoji: d.emoji,
+              table: d.table,
+              riskReward: d.riskReward,
+              fib: d.fib,
+              zIndex: d.zIndex,
+              visible: d.visible,
+              locked: d.locked,
+            }),
+          }).catch(() => {
+            /* offline — ok */
+          });
+        },
+        onUpdate: async (d) => {
+          await api(`/drawings/${d.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ points: d.points, style: d.style as unknown as Record<string, string | number | boolean> }),
+          }).catch(() => {});
+        },
+        onDelete: async (id) => {
+          drawingsRef.current = drawingsRef.current.filter((d) => d.id !== id);
+          await api(`/drawings/${id}`, { method: 'DELETE' }).catch(() => {});
+        },
+      },
+    });
+    drawingControllerRef.current = controller;
+
+    // Load existing drawings.
+    void api<{ items: DrawingObject[] }>('/drawings', { searchParams: { symbol: pane.symbol } })
+      .then((r) => {
+        drawingsRef.current = r.items;
+        controller.setDrawings(r.items);
+      })
+      .catch(() => {});
+
+    // Keyboard delete
+    const onKey = (e: KeyboardEvent) => {
+      if (!activeRef.current) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        controller.deleteSelected();
+      } else if (e.key === 'Escape') {
+        setDrawTool(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+
+    const cleanupKey = () => window.removeEventListener('keydown', onKey);
+
+    let cancelled = false;
+    setLoadError(null);
+    setLoading(true);
+
+    (async () => {
+      try {
+        const now = Date.now();
+        // Initial fetch scales by interval so the user gets a useful window without thrashing:
+        // 1m → ~3 days, 1h → ~7 months, 1d → ~13 years. Capped at ~5000 bars.
+        const intervalMs = INTERVAL_MS_MAP[pane.interval] ?? 60_000;
+        const initialBars = 5000;
+        const from = now - intervalMs * initialBars;
+        loadedRangeRef.current = { from, to: now };
+        const { candles } = await api<{ candles: Candle[] }>(
+          '/candles',
+          {
+            searchParams: { symbol: pane.symbol, interval: pane.interval, from, to: now, limit: initialBars },
+          },
+        );
+        if (cancelled) return;
+        if (!candles?.length) {
+          setLoadError(`No data available for ${pane.symbol} at ${pane.interval}.`);
+          setLoading(false);
+          return;
+        }
+        candleBufRef.current = candles;
+        core.setCandles(transformCandles(candles, pane.chartType, pane.symbol));
+        if (active && candles.length > 0) {
+          setReplayBounds({
+            from: candles[0]!.openTime,
+            to: candles[candles.length - 1]!.closeTime,
+          });
+        }
+        setLoading(false);
+        applyOverlays(core, pane);
+        if (pane.overlays.profile) {
+          const profile = buildVisibleRangeProfile(candles, estimateRowSize(pane.symbol), 0.7);
+          core.setVolumeProfile({
+            mode: 'visible_range',
+            symbol: pane.symbol,
+            fromTime: candles[0]!.openTime,
+            toTime: candles[candles.length - 1]!.closeTime,
+            rowSize: profile.rowSize,
+            valueAreaPercent: 0.7,
+            poc: profile.poc,
+            vah: profile.vah,
+            val: profile.val,
+            totalVolume: profile.totalVolume,
+            levels: profile.levels,
+          });
+        }
+        const lastK = candles[candles.length - 1]!;
+        const firstK = candles[0]!;
+        setLast({
+          price: lastK.close,
+          change: firstK.close > 0 ? ((lastK.close - firstK.close) / firstK.close) * 100 : 0,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[pane] historical load failed', err);
+        if (!cancelled) {
+          setLoading(false);
+          setLoadError(`Could not load ${pane.symbol} (${pane.interval}).`);
+        }
+      }
+    })();
+
+    const ws = getWSClient();
+    ws.subscribe(pane.symbol, pane.interval, ['candles', 'volume', 'heatmap', 'deepTrades']);
+
+    const off = ws.on((msg: ServerToClientMessage) => {
+      switch (msg.type) {
+        case 'market_snapshot':
+          if (msg.symbol !== pane.symbol || msg.interval !== pane.interval) return;
+          if (msg.candles?.length) {
+            candleBufRef.current = msg.candles;
+            core.setCandles(transformCandles(msg.candles, pane.chartType, pane.symbol));
+            const lastK = msg.candles[msg.candles.length - 1]!;
+            const firstK = msg.candles[0]!;
+            setLast({
+              price: lastK.close,
+              change: firstK.close > 0 ? ((lastK.close - firstK.close) / firstK.close) * 100 : 0,
+            });
+          }
+          if (msg.heatmap?.length && pane.overlays.heatmap) {
+            heatmapBufRef.current = msg.heatmap.slice(-HEATMAP_LIMIT);
+            core.setHeatmapCells(heatmapBufRef.current);
+          }
+          if (msg.deepTrades?.length && pane.overlays.deepTrades) {
+            bubbleBufRef.current = msg.deepTrades.slice(-BUBBLE_LIMIT);
+            core.setDeepTrades(bubbleBufRef.current);
+          }
+          return;
+
+        case 'candle_update':
+          if (msg.symbol !== pane.symbol || msg.interval !== pane.interval) return;
+          {
+            // keep buffer aligned with the chart’s internal copy
+            const arr = candleBufRef.current;
+            const lastIdx = arr.length - 1;
+            if (lastIdx >= 0 && arr[lastIdx]!.openTime === msg.candle.openTime) {
+              arr[lastIdx] = msg.candle;
+            } else if (lastIdx < 0 || arr[lastIdx]!.openTime < msg.candle.openTime) {
+              arr.push(msg.candle);
+              if (arr.length > 5000) arr.splice(0, arr.length - 5000);
+            }
+          }
+          if (isPassThroughChartType(pane.chartType)) {
+            core.upsertCandle(msg.candle);
+          } else {
+            // For derived series (Renko, Kagi, P&F, etc.) a single candle update can spawn
+            // multiple new bricks/lines/columns, so rebuild from the buffer.
+            core.setCandles(transformCandles(candleBufRef.current, pane.chartType, pane.symbol));
+          }
+          if (pane.overlays.profile) {
+            const profile = buildVisibleRangeProfile(
+              candleBufRef.current.slice(-500),
+              estimateRowSize(pane.symbol),
+              0.7,
+            );
+            core.setVolumeProfile({
+              mode: 'visible_range',
+              symbol: pane.symbol,
+              fromTime: msg.candle.openTime,
+              toTime: msg.candle.closeTime,
+              rowSize: profile.rowSize,
+              valueAreaPercent: 0.7,
+              poc: profile.poc,
+              vah: profile.vah,
+              val: profile.val,
+              totalVolume: profile.totalVolume,
+              levels: profile.levels,
+            });
+          }
+          setLast((s) => {
+            const arr = candleBufRef.current;
+            const first = arr[0];
+            return {
+              price: msg.candle.close,
+              change: first && first.close > 0 ? ((msg.candle.close - first.close) / first.close) * 100 : s?.change ?? 0,
+            };
+          });
+          return;
+
+        case 'heatmap_update':
+          if (msg.symbol !== pane.symbol || !pane.overlays.heatmap) return;
+          heatmapBufRef.current = mergeHeatmap(heatmapBufRef.current, msg.cells);
+          core.setHeatmapCells(heatmapBufRef.current);
+          return;
+
+        case 'deep_trade':
+          if (msg.symbol !== pane.symbol || !pane.overlays.deepTrades) return;
+          bubbleBufRef.current = [...bubbleBufRef.current, msg.bubble].slice(-BUBBLE_LIMIT);
+          core.setDeepTrades(bubbleBufRef.current);
+          return;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      off();
+      cleanupKey();
+      controller.destroy();
+      drawingControllerRef.current = null;
+      try {
+        ws.unsubscribe(pane.symbol);
+      } catch {
+        /* ignore */
+      }
+      core.destroy();
+      chartRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.symbol, pane.interval]);
+
+  // Theme change.
+  useEffect(() => {
+    chartRef.current?.setTheme(resolvedTheme);
+  }, [resolvedTheme]);
+
+  // Cross-pane crosshair sync: publish the active pane's hover time + mirror others.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    if (!syncCrosshair) {
+      core.setExternalCrosshairTime(null);
+      return;
+    }
+    if (active) {
+      const off = core.onCrosshair((s) => setCrosshairTime(s.time));
+      return off;
+    }
+    return undefined;
+  }, [syncCrosshair, active, setCrosshairTime]);
+
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    if (!syncCrosshair || active) {
+      core.setExternalCrosshairTime(null);
+      return;
+    }
+    core.setExternalCrosshairTime(externalCrosshairTime);
+  }, [externalCrosshairTime, syncCrosshair, active]);
+
+  // Recompute series when chartType changes (Heikin Ashi → Renko → etc).
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    if (candleBufRef.current.length === 0) return;
+    core.setCandles(transformCandles(candleBufRef.current, pane.chartType, pane.symbol));
+    applyOverlays(core, pane);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.chartType]);
+
+  // SMC indicator suite — recompute when any toggle flips or candles update.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const layer = core.getLayer<SmcLayer>('smc');
+    if (!layer) return;
+    const anyOn = Object.values(pane.smc).some(Boolean);
+    layer.visible = anyOn;
+    layer.options = {
+      showFvg: pane.smc.fvg,
+      showOrderBlocks: pane.smc.orderBlocks,
+      showLiquidity: pane.smc.liquidity,
+      showLiquiditySweeps: pane.smc.liquiditySweeps,
+      showMarketStructure: pane.smc.marketStructure,
+      showPremiumDiscount: pane.smc.premiumDiscount,
+      showAnchoredVwap: pane.smc.anchoredVwap,
+      showCvdDivergence: pane.smc.cvdDivergence,
+      showSessions: pane.smc.sessions,
+      showHvnLvn: pane.smc.hvnLvn,
+      showRegimeBadge: pane.smc.regimeBadge,
+    };
+    if (!anyOn || candleBufRef.current.length < 30) {
+      layer.frame = {};
+      return;
+    }
+    const bars = candleBufRef.current;
+    const fvgs = pane.smc.fvg ? computeFvg(bars) : undefined;
+    const orderBlocks = pane.smc.orderBlocks ? computeOrderBlocks(bars) : undefined;
+    const liq =
+      pane.smc.liquidity || pane.smc.liquiditySweeps ? computeLiquidity(bars) : undefined;
+    const ms =
+      pane.smc.marketStructure ? computeMarketStructure(bars) : undefined;
+    const structureChips = ms?.chips.map((ch) => ({
+      pivotIndex: ch.pivot.index,
+      pivotTime: bars[ch.pivot.index]!.openTime,
+      pivotPrice: ch.pivot.price,
+      label: ch.label,
+    }));
+    const pd = pane.smc.premiumDiscount ? computePremiumDiscount(bars) : null;
+    const aw = pane.smc.anchoredVwap
+      ? computeAnchoredVwap(bars, {
+          anchorIndex: Math.max(0, bars.length - 500),
+          multipliers: [1, 2, 3],
+          source: 'hlc3',
+        })
+      : null;
+    const cvd = pane.smc.cvdDivergence ? computeCvd(bars) : undefined;
+    const sessions = pane.smc.sessions ? computeSessions(bars) : undefined;
+    const hv = pane.smc.hvnLvn ? computeHvnLvn(bars) : null;
+    const rg = pane.smc.regimeBadge ? computeRegime(bars) : null;
+    layer.frame = {
+      fvgs,
+      orderBlocks,
+      liquidityLevels: liq?.levels,
+      liquiditySweeps: liq?.sweeps,
+      structureEvents: ms?.events,
+      structureChips,
+      premiumDiscount: pd,
+      anchoredVwap: aw,
+      cvdDivergences: cvd?.divergences,
+      sessions,
+      hvnLvn: hv,
+      regimeLabel: rg?.currentLabel ?? null,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pane.smc,
+    candleBufRef.current.length,
+    candleBufRef.current[candleBufRef.current.length - 1]?.close,
+  ]);
+
+  // Signals & Trend Score: recompute the indicator whenever candles refresh or
+  // the indicator settings change, then push the result into the canvas layer.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    if (!pane.overlays.signalsTrendScore || candleBufRef.current.length === 0) {
+      setStsFrame(null);
+      const layer = core.getLayer<SignalsTrendScoreLayer>('signals-trend-score');
+      if (layer) {
+        layer.options.enabled = false;
+        layer.visible = false;
+        layer.frame = null;
+      }
+      return;
+    }
+    const frame = computeSignalsTrendScore(candleBufRef.current, {
+      maLength: pane.stsSettings.maLength,
+      atrPeriod: pane.stsSettings.atrPeriod,
+      atrMultiplier: pane.stsSettings.atrMultiplier,
+      emaLength: pane.stsSettings.emaLength,
+      stFactor: pane.stsSettings.stFactor,
+      stAtrPeriod: pane.stsSettings.stAtrPeriod,
+      adxLength: pane.stsSettings.adxLength,
+      adxThreshold: pane.stsSettings.adxThreshold,
+      rsiLength: pane.stsSettings.rsiLength,
+      rsiBull: pane.stsSettings.rsiBull,
+      rsiBear: pane.stsSettings.rsiBear,
+      swingLen: pane.stsSettings.swingLen,
+      volLookback: pane.stsSettings.volLookback,
+    });
+    setStsFrame(frame);
+    const layer = core.getLayer<SignalsTrendScoreLayer>('signals-trend-score');
+    if (layer) {
+      layer.options.enabled = true;
+      layer.options.showMaCloud = pane.stsSettings.showMaCloud;
+      layer.options.showAtrTrail = pane.stsSettings.showAtrTrail;
+      layer.options.showSignals = pane.stsSettings.showSignals;
+      layer.options.showSlTp = pane.stsSettings.showSlTp;
+      layer.options.showUpHighlight = pane.stsSettings.showUpHighlight;
+      layer.options.showDownHighlight = pane.stsSettings.showDownHighlight;
+      layer.visible = true;
+      layer.frame = frame;
+      // Compute the most recent SL/TP from the latest buy/sell flip in the frame.
+      if (frame) {
+        let signalIdx = -1;
+        let signalSide: 'long' | 'short' = 'long';
+        for (let i = frame.buySignal.length - 1; i >= 0; i -= 1) {
+          if (frame.buySignal[i]) {
+            signalIdx = i;
+            signalSide = 'long';
+            break;
+          }
+          if (frame.sellSignal[i]) {
+            signalIdx = i;
+            signalSide = 'short';
+            break;
+          }
+        }
+        if (signalIdx >= 0) {
+          const entry = candleBufRef.current[signalIdx]!.close;
+          const sl = signalSide === 'long' ? frame.swingLow[signalIdx] || entry : frame.swingHigh[signalIdx] || entry;
+          const risk = Math.abs(entry - sl);
+          const tp1 = signalSide === 'long' ? entry + risk : entry - risk;
+          const tp2 = signalSide === 'long' ? entry + risk * 2 : entry - risk * 2;
+          const tp3 = signalSide === 'long' ? entry + risk * 3 : entry - risk * 3;
+          layer.lastTrade = {
+            side: signalSide,
+            entry,
+            sl,
+            tp1,
+            tp2,
+            tp3,
+            entryTime: candleBufRef.current[signalIdx]!.openTime,
+          };
+        } else {
+          layer.lastTrade = null;
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    pane.overlays.signalsTrendScore,
+    pane.stsSettings,
+    candleBufRef.current.length,
+    // Tick on the close of the last candle so the indicator updates live.
+    candleBufRef.current[candleBufRef.current.length - 1]?.close,
+  ]);
+
+  /* ─── MA cross alert visualization ─── */
+  // Pull the user's alerts targeting this pane (symbol + interval). The MaCrossLayer
+  // is fed the FIRST matching alert's parameters and the locally-computed cross
+  // result; the engine still evaluates everything server-side. We refresh on
+  // (symbol, interval, manual tick) and on every WS `alert_fired` matching this pane.
+  useEffect(() => {
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      try {
+        const all = await fetchAlerts();
+        if (cancelled) return;
+        const filtered = all.filter(
+          (a) => a.symbol === pane.symbol && a.interval === pane.interval && a.enabled,
+        );
+        setPaneAlerts(filtered);
+      } catch {
+        // Anonymous demo user without server reachable — keep UI quiet.
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [pane.symbol, pane.interval, alertsRefreshTick.current]);
+
+  // Recompute the MA line + crosses whenever candles or the active alert change.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const layer = core.getLayer<MaCrossLayer>('ma-cross');
+    if (!layer) return;
+    const target = paneAlerts[0];
+    if (!target || candleBufRef.current.length === 0) {
+      layer.setOptions({ enabled: false });
+      layer.setFrame(null);
+      return;
+    }
+    // Thread `crossWith` (dual-MA mode) into the detector so the chart matches what
+    // the server-side engine fires on. If absent, falls back to single-MA mode.
+    const result = computeMaCross(candleBufRef.current, {
+      ...target.config.ma,
+      crossWith: target.config.crossWith,
+    });
+    layer.setOptions({
+      enabled: true,
+      buyLabel: target.config.labels.buy,
+      sellLabel: target.config.labels.sell,
+      lineColor: target.config.style?.lineColor ?? '#f5d524',
+      slowLineColor: target.config.style?.slowLineColor ?? '#7c9cff',
+      lineWidth: target.config.style?.lineWidth ?? 1.6,
+      buyColor: target.config.style?.buyColor ?? '#22c55e',
+      sellColor: target.config.style?.sellColor ?? '#ef4444',
+    });
+    layer.setFrame(result);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    paneAlerts,
+    candleBufRef.current.length,
+    candleBufRef.current[candleBufRef.current.length - 1]?.close,
+  ]);
+
+  // Subscribe to alert_fired so we toast and refresh.
+  useEffect(() => {
+    const ws = getWSClient();
+    const off = ws.on((msg: ServerToClientMessage) => {
+      if (msg.type !== 'alert_fired') return;
+      const e: AlertEvent = msg.event;
+      // Show a toast for every fire — even on other panes/symbols — so the trader
+      // never misses a signal.
+      // (Imported lazily to avoid pulling toast into the WS handler when SSR'd.)
+      import('@/components/use-toast').then(({ toast }) => {
+        toast({
+          title: `${e.side === 'buy' ? '🟢' : '🔴'} ${e.side.toUpperCase()} · ${e.label}`,
+          description: `${e.symbol.replace(':', ' · ')} @ ${e.price.toFixed(4)} · ${e.interval}`,
+          tone: e.side === 'buy' ? 'success' : 'warn',
+          durationMs: 6000,
+        });
+      });
+      // If the fire is for THIS pane, nudge the recomputation pipeline.
+      if (e.symbol === pane.symbol && e.interval === pane.interval) {
+        alertsRefreshTick.current += 1;
+        setPaneAlerts((prev) => prev.slice());
+      }
+    });
+    return off;
+  }, [pane.symbol, pane.interval]);
+
+  // Multi-timeframe rows for the dashboard. Fetches a small batch of candles on each
+  // configured TF and computes a lightweight trend-dir + bull/bear score per TF.
+  useEffect(() => {
+    if (!pane.overlays.signalsTrendScore) {
+      setMtfRows([]);
+      return;
+    }
+    let cancelled = false;
+    const tfs: Array<{ label: string; interval: string }> = [
+      { label: '5', interval: '5m' },
+      { label: '15', interval: '15m' },
+      { label: '30', interval: '30m' },
+      { label: '60', interval: '1h' },
+      { label: 'D', interval: '1d' },
+    ];
+    (async () => {
+      const now = Date.now();
+      const rows = await Promise.all(
+        tfs.map(async (t) => {
+          try {
+            const { candles } = await api<{ candles: Candle[] }>('/candles', {
+              searchParams: {
+                symbol: pane.symbol,
+                interval: t.interval,
+                from: now - 60 * 24 * 60 * 60_000,
+                to: now,
+                limit: 300,
+              },
+            });
+            const s = computeMtfState(candles);
+            return {
+              label: t.label,
+              trendDir: s?.trendDir ?? null,
+              bullScore: s?.bullScore ?? 0,
+              bearScore: s?.bearScore ?? 0,
+              rsi: s?.rsi ?? NaN,
+            };
+          } catch {
+            return { label: t.label, trendDir: null, bullScore: 0, bearScore: 0, rsi: NaN };
+          }
+        }),
+      );
+      if (!cancelled) setMtfRows(rows);
+    })();
+    const id = setInterval(() => {
+      if (cancelled) return;
+      // Refresh once a minute when the indicator is on.
+      void (async () => {
+        const now = Date.now();
+        const rows = await Promise.all(
+          tfs.map(async (t) => {
+            try {
+              const { candles } = await api<{ candles: Candle[] }>('/candles', {
+                searchParams: {
+                  symbol: pane.symbol,
+                  interval: t.interval,
+                  from: now - 60 * 24 * 60 * 60_000,
+                  to: now,
+                  limit: 300,
+                },
+              });
+              const s = computeMtfState(candles);
+              return {
+                label: t.label,
+                trendDir: s?.trendDir ?? null,
+                bullScore: s?.bullScore ?? 0,
+                bearScore: s?.bearScore ?? 0,
+                rsi: s?.rsi ?? NaN,
+              };
+            } catch {
+              return { label: t.label, trendDir: null, bullScore: 0, bearScore: 0, rsi: NaN };
+            }
+          }),
+        );
+        if (!cancelled) setMtfRows(rows);
+      })();
+    }, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [pane.overlays.signalsTrendScore, pane.symbol]);
+
+  // Overlay toggles + heatmap settings.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    applyOverlays(core, pane);
+  }, [
+    pane.overlays.heatmap,
+    pane.overlays.profile,
+    pane.overlays.deepTrades,
+    pane.overlays.volume,
+    pane.overlays.footprint,
+    pane.heatmapSettings.opacity,
+    pane.heatmapSettings.depth,
+    pane.heatmapSettings.timeBucketMs,
+    pane.chartType,
+    pane,
+  ]);
+
+  // Bar replay — clip candles to the replay cursor while replayMode is on.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const all = candleBufRef.current;
+    if (all.length === 0) return;
+    if (!replayMode) {
+      core.setCandles(transformCandles(all, pane.chartType, pane.symbol));
+      return;
+    }
+    const clipped = all.filter((c) => c.openTime <= replayCursor);
+    if (clipped.length > 0) {
+      core.setCandles(transformCandles(clipped, pane.chartType, pane.symbol));
+    }
+  }, [replayMode, replayCursor, pane.chartType, pane.symbol]);
+
+  // Classic TA indicators — compute + push to IndicatorsLayer (overlays only).
+  // Sub-pane oscillators render in `SubPaneIndicators` below the canvas.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const layer = core.getLayer<IndicatorsLayer>('indicators');
+    if (!layer) return;
+    const bars = candleBufRef.current;
+    const lines: IndicatorOverlayLine[] = [];
+    const bands: IndicatorOverlayBand[] = [];
+    const dots: IndicatorOverlayDots[] = [];
+    if (bars.length === 0) {
+      layer.options = { lines, bands, dots };
+      return;
+    }
+    for (const inst of pane.classicIndicators) {
+      if (!inst.visible) continue;
+      const spec = INDICATOR_LOOKUP[inst.type];
+      if (!spec || spec.pane !== 'overlay') continue;
+      const inputs = Object.fromEntries(
+        spec.inputs.map((i) => [i.key, inst.inputs[i.key] ?? i.default]),
+      );
+      const channels = computeAll(inst.type, bars, inputs);
+      const color = (k: string): string =>
+        String(inst.style[k] ?? spec.style[k] ?? spec.style.color ?? '#42a5f5');
+      switch (inst.type) {
+        case 'sma':
+        case 'ema':
+        case 'wma':
+        case 'hma':
+        case 'dema':
+        case 'tema':
+        case 'vwap': {
+          const v = channels.get('value');
+          if (v) lines.push({ id: inst.id, channel: 'value', values: v, color: color('color') });
+          break;
+        }
+        case 'bollinger':
+        case 'keltner': {
+          const mid = channels.get('middle');
+          const upper = channels.get('upper');
+          const lower = channels.get('lower');
+          if (upper && lower) {
+            bands.push({
+              id: inst.id,
+              upper,
+              lower,
+              fillColor: 'rgba(144,164,174,0.06)',
+              borderColor: color('bandColor'),
+              borderWidth: 0.8,
+            });
+          }
+          if (mid) lines.push({ id: inst.id, channel: 'middle', values: mid, color: color('middleColor') });
+          break;
+        }
+        case 'donchian': {
+          const upper = channels.get('upper');
+          const lower = channels.get('lower');
+          if (upper && lower) {
+            bands.push({
+              id: inst.id,
+              upper,
+              lower,
+              fillColor: 'rgba(128,203,196,0.05)',
+              borderColor: color('bandColor'),
+              borderWidth: 0.8,
+            });
+          }
+          break;
+        }
+        case 'supertrend': {
+          const line = channels.get('line');
+          const dir = channels.get('direction');
+          if (line && dir) {
+            // Single line — color stitched by direction. Render two lines so
+            // segments where the trend flips get the right color.
+            const upVals = line.map((v, i) => (dir[i]! > 0 ? v : NaN));
+            const dnVals = line.map((v, i) => (dir[i]! < 0 ? v : NaN));
+            lines.push({ id: inst.id + '_up', channel: 'line', values: upVals, color: color('upColor'), lineWidth: 1.5 });
+            lines.push({ id: inst.id + '_dn', channel: 'line', values: dnVals, color: color('downColor'), lineWidth: 1.5 });
+          }
+          break;
+        }
+        case 'psar': {
+          const v = channels.get('value');
+          if (v) dots.push({ id: inst.id, values: v, color: color('color'), radius: Number(inst.style.dotSize ?? 2.5) });
+          break;
+        }
+        case 'ichimoku': {
+          const conv = channels.get('conversion');
+          const base = channels.get('base');
+          const spanA = channels.get('spanA');
+          const spanB = channels.get('spanB');
+          if (conv) lines.push({ id: inst.id + '_c', channel: 'conversion', values: conv, color: color('conversionColor') });
+          if (base) lines.push({ id: inst.id + '_b', channel: 'base', values: base, color: color('baseColor') });
+          if (spanA && spanB) {
+            bands.push({
+              id: inst.id + '_cloud',
+              upper: spanA.map((a, i) => Math.max(a, spanB[i] ?? a)),
+              lower: spanA.map((a, i) => Math.min(a, spanB[i] ?? a)),
+              fillColor: 'rgba(38,166,154,0.10)',
+            });
+          }
+          break;
+        }
+      }
+    }
+    layer.visible = lines.length > 0 || bands.length > 0 || dots.length > 0;
+    layer.options = { lines, bands, dots };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.classicIndicators, candleBufRef.current.length, candleBufRef.current[candleBufRef.current.length - 1]?.close]);
+
+  return (
+    <div
+      onClick={onClick}
+      className={`relative flex h-full flex-col overflow-hidden rounded-lg border ${
+        active ? 'border-accent/60 shadow-[0_0_0_1px_hsl(var(--accent)/0.4)]' : 'border-border'
+      } bg-surface/70`}
+    >
+      <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="dot-pulse bg-bull" />
+          <span className="font-semibold tracking-tight text-foreground">{formatSymbolLabel(pane.symbol)}</span>
+          <Badge tone="muted" className="text-[9px]">
+            {pane.interval}
+          </Badge>
+          <Badge tone="muted" className="text-[9px]">
+            {pane.chartType.replace('_', ' ')}
+          </Badge>
+        </div>
+        <div className="flex items-center gap-3 text-xs tabular-nums">
+          <span className="text-foreground">{last ? formatPrice(last.price) : '—'}</span>
+          <span className={(last?.change ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
+            {last ? formatPercent(last.change) : '—'}
+          </span>
+        </div>
+      </div>
+      <div data-testid="chart-container" className="relative min-h-0 min-w-0 flex-1">
+        <canvas
+          data-testid="chart-canvas"
+          ref={canvasRef}
+          className="absolute inset-0 h-full w-full"
+        />
+        {loading && !loadError ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-[2px]">
+            <div className="flex items-center gap-2 rounded-md border border-border bg-surface-raised/90 px-3 py-1.5 text-[11px] text-muted-foreground shadow-floating">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-r-transparent" />
+              Loading {formatSymbolLabel(pane.symbol)} · {pane.interval}
+            </div>
+          </div>
+        ) : null}
+        {loadError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/85 p-4 text-center">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              No data
+            </div>
+            <p className="max-w-xs text-sm text-muted-foreground">{loadError}</p>
+            <p className="text-[11px] text-muted-foreground/70">
+              Symbol may be delisted or unavailable on this provider.
+            </p>
+          </div>
+        ) : null}
+        {menu ? (
+          <ChartContextMenu
+            x={menu.x}
+            y={menu.y}
+            pane={pane}
+            onClose={() => setMenu(null)}
+            onResetZoom={() => {
+              const ev = new MouseEvent('dblclick');
+              canvasRef.current?.dispatchEvent(ev);
+              setMenu(null);
+            }}
+            onDeleteDrawing={() => {
+              drawingControllerRef.current?.deleteSelected();
+              setMenu(null);
+            }}
+          />
+        ) : null}
+        {pane.overlays.signalsTrendScore && stsFrame ? (
+          <StsDashboard
+            frame={stsFrame}
+            mtfRows={mtfRows}
+            showBottomStrip={pane.stsSettings.showBottomDash}
+          />
+        ) : null}
+      </div>
+      <SubPaneIndicators
+        candles={candleBufRef.current}
+        indicators={pane.classicIndicators}
+        width={360}
+      />
+    </div>
+  );
+}
+
+function ChartContextMenu({
+  x,
+  y,
+  pane,
+  onClose,
+  onResetZoom,
+  onDeleteDrawing,
+}: {
+  x: number;
+  y: number;
+  pane: PaneState;
+  onClose: () => void;
+  onResetZoom: () => void;
+  onDeleteDrawing: () => void;
+}) {
+  const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
+  return (
+    <div className="absolute inset-0" onClick={onClose}>
+      <div
+        role="menu"
+        className="absolute z-30 w-56 rounded-lg border border-border bg-surface-raised/95 p-1 text-xs shadow-floating backdrop-blur"
+        style={{ left: x, top: y }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <MenuItem label="Reset zoom" hint="dbl-click" onClick={onResetZoom} />
+        <MenuItem label="Delete selected drawing" hint="Del" onClick={onDeleteDrawing} />
+        <MenuSeparator />
+        <MenuItem
+          label={pane.overlays.heatmap ? 'Hide heatmap' : 'Show heatmap'}
+          onClick={() => {
+            togglePaneOverlay(pane.id, 'heatmap');
+            onClose();
+          }}
+        />
+        <MenuItem
+          label={pane.overlays.profile ? 'Hide volume profile' : 'Show volume profile'}
+          onClick={() => {
+            togglePaneOverlay(pane.id, 'profile');
+            onClose();
+          }}
+        />
+        <MenuItem
+          label={pane.overlays.deepTrades ? 'Hide deep trades' : 'Show deep trades'}
+          onClick={() => {
+            togglePaneOverlay(pane.id, 'deepTrades');
+            onClose();
+          }}
+        />
+        <MenuItem
+          label={pane.overlays.footprint ? 'Hide footprint' : 'Show footprint'}
+          onClick={() => {
+            togglePaneOverlay(pane.id, 'footprint');
+            onClose();
+          }}
+        />
+        <MenuItem
+          label={pane.overlays.volume ? 'Hide volume pane' : 'Show volume pane'}
+          onClick={() => {
+            togglePaneOverlay(pane.id, 'volume');
+            onClose();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function MenuItem({
+  label,
+  hint,
+  onClick,
+}: {
+  label: string;
+  hint?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-muted"
+    >
+      <span>{label}</span>
+      {hint ? <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{hint}</span> : null}
+    </button>
+  );
+}
+
+function MenuSeparator() {
+  return <div className="my-1 h-px bg-border" />;
+}
+
+/**
+ * Run the chart-type's series transformation when needed. Passthrough types use the raw
+ * candles; algorithmic types (Renko, Kagi, P&F, Line break, Range bar) build a new series
+ * that the existing candlestick renderer can draw via the same primitives.
+ */
+function transformCandles(candles: Candle[], chartType: ChartType, symbol: string): Candle[] {
+  if (candles.length === 0) return candles;
+  switch (chartType) {
+    case 'heikin_ashi':
+      return toHeikinAshi(candles);
+    case 'renko': {
+      // Auto-size brick = ~0.25% of mid for crypto, scaled by tick. Caller can refine later.
+      const last = candles[candles.length - 1]!;
+      const brickSize = Math.max(estimateRowSize(symbol), Math.abs(last.close) * 0.0015);
+      return toRenko(candles, { brickSize, useATR: true, atrPeriod: 14, useWicks: true });
+    }
+    case 'range_bar': {
+      const last = candles[candles.length - 1]!;
+      const range = Math.max(estimateRowSize(symbol) * 4, Math.abs(last.close) * 0.0015);
+      return toRangeBars(candles, { range });
+    }
+    case 'line_break':
+      return toLineBreak(candles, { count: 3 });
+    case 'kagi': {
+      const last = candles[candles.length - 1]!;
+      const reversal = Math.max(estimateRowSize(symbol) * 5, Math.abs(last.close) * 0.004);
+      return toKagi(candles, { reversal });
+    }
+    case 'point_and_figure': {
+      const last = candles[candles.length - 1]!;
+      const boxSize = Math.max(estimateRowSize(symbol), Math.abs(last.close) * 0.002);
+      return toPointAndFigure(candles, { boxSize, reversalBoxes: 3 });
+    }
+    case 'tick_bar':
+    case 'volume_bar':
+    case 'dollar_bar':
+      // True implementations need raw trade ticks; for now fall back to source candles.
+      return candles;
+    default:
+      return candles;
+  }
+}
+
+function isPassThroughChartType(chartType: ChartType): boolean {
+  switch (chartType) {
+    case 'heikin_ashi':
+    case 'renko':
+    case 'range_bar':
+    case 'line_break':
+    case 'kagi':
+    case 'point_and_figure':
+      return false;
+    default:
+      return true;
+  }
+}
+
+function applyOverlays(core: ChartCore, pane: PaneState): void {
+  // Some "chart types" are actually overlays riding on top of regular candlesticks
+  // (footprint, TPO, session volume profile). When the user picks one of those, the
+  // candlestick series stays as-is and we just flip the appropriate overlay on.
+  const ct = pane.chartType;
+  const isFootprintChart = ct === 'footprint';
+  const isProfileChart = ct === 'tpo' || ct === 'session_volume_profile';
+
+  const heatmap = core.getLayer<LiquidityHeatmapLayer>('heatmap');
+  if (heatmap) {
+    heatmap.options.enabled = pane.overlays.heatmap;
+    heatmap.options.opacity = pane.heatmapSettings.opacity;
+    heatmap.visible = pane.overlays.heatmap;
+  }
+  const profile = core.getLayer<VolumeProfileLayer>('volume-profile');
+  if (profile) profile.visible = pane.overlays.profile || isProfileChart;
+  const deep = core.getLayer<DeepTradesLayer>('deep-trades');
+  if (deep) deep.visible = pane.overlays.deepTrades;
+  const series = core.getLayer<PriceSeriesLayer>('price-series');
+  if (series) {
+    // When the chart-type is an overlay, render the candles underneath as a normal candlestick.
+    series.options.chartType = isFootprintChart || isProfileChart ? 'candlestick' : pane.chartType;
+  }
+  const footprint = core.getLayer<FootprintLayer>('footprint');
+  if (footprint) {
+    const on = pane.overlays.footprint || isFootprintChart;
+    footprint.options.enabled = on;
+    footprint.visible = on;
+  }
+}
+
+function estimateRowSize(symbol: string): number {
+  if (symbol.includes('BTC')) return 5;
+  if (symbol.includes('ETH')) return 0.5;
+  if (symbol.includes('SOL')) return 0.05;
+  if (symbol.includes('BNB')) return 0.1;
+  if (symbol.includes('USD')) return 0.0001;
+  return 1;
+}
+
+function mergeHeatmap(prev: LiquidityHeatmapCell[], incoming: LiquidityHeatmapCell[]): LiquidityHeatmapCell[] {
+  if (incoming.length === 0) return prev;
+  const merged = [...prev, ...incoming];
+  if (merged.length > HEATMAP_LIMIT * 2) {
+    merged.splice(0, merged.length - HEATMAP_LIMIT * 2);
+  }
+  return merged.slice(-HEATMAP_LIMIT);
+}

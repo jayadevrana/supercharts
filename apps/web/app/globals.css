@@ -1,0 +1,194 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   SuperCharts design tokens.
+   Values are HSL triples so Tailwind's <alpha-value> works.
+   ========================================================= */
+:root[data-theme='dark'] {
+  --bg: 220 18% 5%;
+  --fg: 220 22% 92%;
+  --muted: 220 12% 14%;
+  --muted-fg: 218 12% 64%;
+  --surface: 220 16% 8%;
+  --surface-raised: 220 14% 11%;
+  --surface-sunken: 222 24% 4%;
+  --border: 220 14% 18%;
+  --ring: 224 92% 70%;
+  --accent: 226 92% 72%;
+  --accent-fg: 220 20% 8%;
+  --bull: 162 64% 44%;
+  --bear: 354 78% 60%;
+  --warn: 36 92% 60%;
+}
+
+:root[data-theme='light'] {
+  --bg: 210 30% 99%;
+  --fg: 222 35% 10%;
+  --muted: 218 26% 95%;
+  --muted-fg: 222 16% 38%;
+  --surface: 0 0% 100%;
+  --surface-raised: 220 30% 98%;
+  --surface-sunken: 220 30% 96%;
+  --border: 220 16% 88%;
+  --ring: 224 86% 56%;
+  --accent: 226 84% 58%;
+  --accent-fg: 0 0% 100%;
+  --bull: 158 72% 36%;
+  --bear: 354 70% 50%;
+  --warn: 36 86% 50%;
+}
+
+/* Default theme until JS sets the data attribute. */
+:root {
+  color-scheme: dark light;
+}
+:root:not([data-theme]) {
+  --bg: 220 18% 5%;
+  --fg: 220 22% 92%;
+  --muted: 220 12% 14%;
+  --muted-fg: 218 12% 64%;
+  --surface: 220 16% 8%;
+  --surface-raised: 220 14% 11%;
+  --surface-sunken: 222 24% 4%;
+  --border: 220 14% 18%;
+  --ring: 224 92% 70%;
+  --accent: 226 92% 72%;
+  --accent-fg: 220 20% 8%;
+  --bull: 162 64% 44%;
+  --bear: 354 78% 60%;
+  --warn: 36 92% 60%;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: hsl(var(--bg));
+  color: hsl(var(--fg));
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01', 'cv11';
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============ Utility primitives ============ */
+.glass-panel {
+  background:
+    linear-gradient(180deg, hsl(var(--surface) / 0.92), hsl(var(--surface) / 0.78)),
+    radial-gradient(120% 60% at 50% 0%, hsl(var(--accent) / 0.06), transparent 60%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 hsl(var(--border) / 0.6),
+    0 8px 24px -16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.hairline {
+  border-color: hsl(var(--border) / 0.7);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 999px;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1, 'ss01' 1;
+}
+
+.text-balance {
+  text-wrap: balance;
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--accent)) 0%, hsl(var(--fg)) 80%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.shine {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 0%,
+    hsl(var(--surface-raised)) 50%,
+    hsl(var(--muted)) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.dot-pulse {
+  position: relative;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+}
+.dot-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: inherit;
+  opacity: 0.5;
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+@keyframes pulseDot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Hide native arrows on numeric inputs */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type='number'] {
+  -moz-appearance: textfield;
+}
+
+/* Hide focus ring on canvases (focus goes to wrapper) */
+canvas:focus {
+  outline: none;
+}

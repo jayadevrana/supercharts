@@ -1,0 +1,89 @@
+# SuperCharts local infrastructure
+# Usage: docker compose -f infra/docker-compose.yml up -d
+#
+# Optional. The app falls back to SQLite + in-memory if these services are not running.
+#
+# Hardening notes (see review):
+# - All published ports bind to 127.0.0.1 by default so the containers are not
+#   reachable from other machines on the LAN. Override DEV_BIND_HOST=0.0.0.0 in
+#   your shell only if you intentionally want LAN access.
+# - ClickHouse ships with a non-empty default password. Override with
+#   CLICKHOUSE_PASSWORD in your .env if you want a different value.
+# - Postgres and Redis are still configured with throwaway local-dev credentials;
+#   never re-use this compose file in production unchanged.
+
+x-bind-host: &bind_host ${DEV_BIND_HOST:-127.0.0.1}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: supercharts-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: supercharts
+      POSTGRES_USER: supercharts
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-supercharts}
+    ports:
+      - "${DEV_BIND_HOST:-127.0.0.1}:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supercharts -d supercharts"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: supercharts-redis
+    restart: unless-stopped
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+      - "--requirepass"
+      - "${REDIS_PASSWORD:-supercharts}"
+    ports:
+      - "${DEV_BIND_HOST:-127.0.0.1}:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-supercharts}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    container_name: supercharts-clickhouse
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    environment:
+      CLICKHOUSE_DB: supercharts
+      CLICKHOUSE_USER: default
+      # IMPORTANT: never ship an empty CLICKHOUSE_PASSWORD with the HTTP/native
+      # ports published. Override in .env for staging/prod.
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-supercharts}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "${DEV_BIND_HOST:-127.0.0.1}:8123:8123"
+      - "${DEV_BIND_HOST:-127.0.0.1}:9000:9000"
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres_data:
+  redis_data:
+  clickhouse_data:
