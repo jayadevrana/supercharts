@@ -44,7 +44,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 - [x] **1. Strategy Builder GUI v1** — `StrategyBuilderDialog` with Active / New / Templates tabs. 4 one-click presets (MA cross, RSI oversold, bullish engulfing, London session breakout). Block-based condition rows + open-position action with sizing/SL/TP/cooldown. Reuses `/api/signals` with `indicatorSpecs` thread so MA params actually take effect.
 - [x] **2. Backtester v1** — `runMaCrossBacktest` engine + `POST /api/alerts/:id/backtest` route + result modal in Active tab. Pulls up to 1000 bars from candleStore (fetches from provider when sparse). Per-trade: enter on cross (RSI-gated when set), exit on reverse cross. Stats: trades, win rate, total return %, max DD %, Sharpe, profit factor, avg win/loss, avg bars. v1 model — no SL/TP/fees/slippage (Phase 1 #3 picks those up).
 - [x] **3. Param optimizer v1** — `runOptimizer` engine + `POST /api/alerts/:id/optimize`. Grid sweeps fast/slow MA lengths (and RSI thresholds when filter set), reuses backtester per combo, ranks by composite score (Sharpe − 0.02 × Max-DD). UI: Sliders icon per alert row → results table with Apply button to overwrite alert config.
-- [ ] 4. Walk-forward analysis — train window / test window with rolling reoptimization
+- [x] **4. Walk-forward analysis v1** — `runWalkForward` engine + `POST /api/alerts/:id/walk-forward`. Rolling 250-bar train / 60-bar test windows. Optimizer picks per train slice, OOS backtest on test slice. Aggregates OOS equity + computes robustness (OOS Sharpe / mean train Sharpe). UI: Shuffle icon → modal with 8 stat cards (Generalises ≥0.7 / Marginal 0.3-0.7 / Curve-fit <0.3) + per-window picks table.
 - [ ] 5. Paper-trading mode — replay engine + virtual P&L on the active strategy
 
 ### Phase 2 — Risk & Portfolio
@@ -90,26 +90,26 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 1 #3 — Param Optimizer v1 shipped.
-- `apps/api/src/optimizer.ts` — `runOptimizer(candles, base, interval, req)`. Grid
-  sweep over fast lengths [5,7,9,12,15,20] × slow lengths [20,30,50,100,200] × RSI
-  thresholds when filter set. Skips fast≥slow combos.
-- Composite score = Sharpe − 0.02 × Max-DD%. Trades<minTrades disqualified.
-- `POST /api/alerts/:id/optimize` — reuses candle fetch path from backtest. Returns
-  top-N combos with full backtest summary.
-- UI: Sliders icon per alert row → modal with sortable results table + Apply button
-  that overwrites alert config (with confirm dialog).
-- Browser-verified on **BTC 1d** (existing EMA 5×10 config): top combo EMA(7)×EMA(30)
-  → +232% return · 35% win · Sharpe 0.95 · PF 2.61 · 40 trades · score 0.46.
+- ✅ Phase 1 #4 — Walk-Forward Analysis v1 shipped.
+- `apps/api/src/walk-forward.ts` — `runWalkForward(candles, base, interval, opts)`.
+  Default 250-bar train / 60-bar test, non-overlapping. Per window: optimize on train,
+  pick winning combo, backtest OOS on test, accumulate trades.
+- Aggregate: OOS return / Sharpe / max-DD / win rate + **robustness = OOS Sharpe / mean
+  train Sharpe**. ≥0.7 generalises, 0.3-0.7 marginal, <0.3 curve-fit.
+- `POST /api/alerts/:id/walk-forward` (pulls 1500 bars from candleStore + provider).
+- UI: Shuffle icon per alert row → modal with 8 stat cards (Generalises badge tone)
+  + per-window picks table (config, train Sharpe, test return / trades / DD).
+- Browser-verified on **BTC 1d EMA(5)×(10)**: 20 windows · +112.2% OOS · 29.6% win ·
+  -33.7% DD · OOS Sharpe 0.83 · train Sharpe 0.96 · **robustness 0.87 (Generalises)**.
 - 144 alerts + 3 bots untouched.
 
 ## Next pick
 
-**Phase 1 · #4 — Walk-forward analysis.** Train window / test window with rolling
-re-optimization. Goal: for each rolling N-bar test window, optimize on the preceding
-M-bar train window, apply best combo to test, accumulate out-of-sample equity. Shows
-whether the optimizer's top picks generalize or are just curve-fit. Reuses
-`runOptimizer` + `runMaCrossBacktest`.
+**Phase 1 · #5 — Paper-trading mode.** Replay engine + virtual P&L on the active
+strategy. Goal: a "Paper" toggle that, for an enabled alert, simulates trades in
+real-time (no MT5) and tracks running P&L. Reuses existing alert engine's cross
+detector + backtester's pnl math. UI: paper-mode toggle on alert row + live virtual
+position card on the chart.
 
 ## Questions for owner
 

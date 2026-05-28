@@ -162,6 +162,50 @@ export async function runOptimize(
   });
 }
 
+/* ────── Walk-forward ────── */
+
+export interface WalkForwardWindow {
+  trainStart: number;
+  trainEnd: number;
+  testStart: number;
+  testEnd: number;
+  trainCombos: number;
+  trainScore: number;
+  trainSummary: BacktestSummary;
+  pickedConfig: MaCrossAlertConfig;
+  testSummary: BacktestSummary;
+}
+
+export interface WalkForwardAggregate {
+  windows: number;
+  oosReturnPct: number;
+  oosTrades: number;
+  oosWinRate: number;
+  oosMaxDrawdownPct: number;
+  oosSharpe: number;
+  meanTrainSharpe: number;
+  robustness: number;
+}
+
+export interface WalkForwardResponse {
+  alertId: string;
+  symbol: string;
+  interval: Interval;
+  barsTested: number;
+  windows: WalkForwardWindow[];
+  aggregate: WalkForwardAggregate;
+}
+
+export async function runWalkForward(
+  id: string,
+  body: { trainBars?: number; testBars?: number; step?: number } = {},
+): Promise<WalkForwardResponse> {
+  return api<WalkForwardResponse>(`/alerts/${id}/walk-forward`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
   return api<AlertDefinition>('/alerts', {
     method: 'POST',

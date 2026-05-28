@@ -10,6 +10,7 @@ import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
 import { runMaCrossBacktest } from '../backtester';
 import { runOptimizer, type OptimizeRequest } from '../optimizer';
+import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -466,6 +467,66 @@ export function alertRoutes(
     }
     const sweep = (req.body ?? {}) as OptimizeRequest;
     const result = runOptimizer(candles, base, interval, sweep);
+    return {
+      alertId: id,
+      symbol: row.symbol,
+      interval,
+      barsTested: candles.length,
+      ...result,
+    };
+  });
+
+  /* ─── Walk-forward analysis ─── */
+  // Rolling train/test windows. On each train slice, run the optimizer; lock the
+  // winning config; apply it to the immediately-following test slice; accumulate
+  // out-of-sample equity. Robustness = oosSharpe / meanTrainSharpe (≈1 generalises).
+  fastify.post('/api/alerts/:id/walk-forward', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const row = db.raw
+      .prepare(
+        `SELECT id, symbol_id as symbol, interval, type, config FROM alerts WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, user.id) as
+      | { id: string; symbol: string; interval: string; type: string; config: string }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    if (row.type !== 'ma_cross') {
+      reply.code(400);
+      return { error: 'unsupported_alert_type' };
+    }
+    const base = JSON.parse(row.config) as MaCrossAlertConfig;
+    const interval = row.interval as Interval;
+
+    // Walk-forward needs more history than a single backtest. Pull ~1500 bars so we
+    // get several train/test windows even at the default 250/60 split.
+    const desired = 1500;
+    let candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(row.symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(row.symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(row.symbol, interval, c);
+          candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[walk-forward] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+    const wf = (req.body ?? {}) as WalkForwardRequest;
+    const result = runWalkForward(candles, base, interval, wf);
     return {
       alertId: id,
       symbol: row.symbol,

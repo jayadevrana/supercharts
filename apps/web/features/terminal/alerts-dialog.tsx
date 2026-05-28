@@ -22,6 +22,7 @@ import {
   Zap,
   Activity,
   Sliders,
+  Shuffle,
 } from 'lucide-react';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
@@ -62,9 +63,11 @@ import {
   fetchWatchlists,
   runBacktest,
   runOptimize,
+  runWalkForward,
   type BacktestResponse,
   type OptimizeResponse,
   type OptimizerCombo,
+  type WalkForwardResponse,
   MA_SOURCE_OPTIONS,
   MA_TYPE_OPTIONS,
   testTelegramBot,
@@ -282,6 +285,9 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   const [optResult, setOptResult] = useState<OptimizeResponse | null>(null);
   const [optOpen, setOptOpen] = useState(false);
   const [optRunning, setOptRunning] = useState(false);
+  const [wfResult, setWfResult] = useState<WalkForwardResponse | null>(null);
+  const [wfOpen, setWfOpen] = useState(false);
+  const [wfRunning, setWfRunning] = useState(false);
 
   const handleBacktest = async () => {
     setBtRunning(true);
@@ -308,6 +314,22 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       setOptOpen(false);
     } finally {
       setOptRunning(false);
+    }
+  };
+
+  const handleWalkForward = async () => {
+    setWfRunning(true);
+    setWfOpen(true);
+    try {
+      // 250 train / 60 test is a sensible default for 1d (~1y train, ~2mo test) and
+      // scales fine for lower TFs since we ask the route for 1500 bars regardless.
+      const r = await runWalkForward(alert.id, { trainBars: 250, testBars: 60 });
+      setWfResult(r);
+    } catch (err) {
+      toast({ title: 'Walk-forward failed', description: String(err), tone: 'error' });
+      setWfOpen(false);
+    } finally {
+      setWfRunning(false);
     }
   };
 
@@ -408,6 +430,20 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           <Sliders className="h-3.5 w-3.5 text-accent" />
         )}
       </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy || wfRunning}
+        onClick={handleWalkForward}
+        title="Walk-forward analysis"
+        className="px-2"
+      >
+        {wfRunning ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Shuffle className="h-3.5 w-3.5 text-accent" />
+        )}
+      </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleToggle} title={alert.enabled ? 'Pause' : 'Start'}>
         <Power className={`h-3.5 w-3.5 ${alert.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
       </Button>
@@ -429,7 +465,145 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
         alert={alert}
         onApply={handleApplyCombo}
       />
+      <WalkForwardModal
+        open={wfOpen}
+        onOpenChange={setWfOpen}
+        running={wfRunning}
+        result={wfResult}
+        alert={alert}
+      />
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────── Walk-forward modal */
+
+function WalkForwardModal({
+  open,
+  onOpenChange,
+  running,
+  result,
+  alert,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  running: boolean;
+  result: WalkForwardResponse | null;
+  alert: AlertDefinition;
+}) {
+  const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  const a = result?.aggregate;
+  // Robustness tone: ≥0.7 = strong (bull), 0.3-0.7 = ok (muted), <0.3 = curve-fit (bear).
+  const robustnessTone =
+    a == null
+      ? 'muted'
+      : a.robustness >= 0.7
+        ? 'bull'
+        : a.robustness >= 0.3
+          ? 'warn'
+          : 'bear';
+  const robustnessLabel =
+    a == null
+      ? ''
+      : a.robustness >= 0.7
+        ? 'Generalises'
+        : a.robustness >= 0.3
+          ? 'Marginal'
+          : 'Curve-fit';
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shuffle className="h-4 w-4 text-accent" />
+            Walk-forward · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Train on a 250-bar lookback, lock the optimizer's pick, apply to the next
+            60 bars. Repeat across the history. Robustness = OOS Sharpe ÷ mean train Sharpe.
+          </p>
+        </DialogHeader>
+        <div className="px-5 pb-4 text-xs">
+          {running || !result || !a ? (
+            <div className="flex h-40 items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-2">
+                <Stat label="Windows" value={String(a.windows)} />
+                <Stat
+                  label="OOS return"
+                  value={fmtPct(a.oosReturnPct)}
+                  tone={a.oosReturnPct >= 0 ? 'bull' : 'bear'}
+                />
+                <Stat label="OOS trades" value={String(a.oosTrades)} />
+                <Stat label="OOS win" value={`${(a.oosWinRate * 100).toFixed(1)}%`} />
+                <Stat
+                  label="OOS max DD"
+                  value={`-${a.oosMaxDrawdownPct.toFixed(1)}%`}
+                  tone="bear"
+                />
+                <Stat label="OOS Sharpe" value={a.oosSharpe.toFixed(2)} />
+                <Stat label="Mean train Sharpe" value={a.meanTrainSharpe.toFixed(2)} />
+                <Stat
+                  label={`Robustness · ${robustnessLabel}`}
+                  value={a.robustness.toFixed(2)}
+                  tone={robustnessTone === 'warn' ? undefined : (robustnessTone as 'bull' | 'bear')}
+                />
+              </div>
+              <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                {result.barsTested} bars tested
+              </div>
+              <div className="mt-2 max-h-[300px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                <table className="w-full text-[11px] tabular-nums">
+                  <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1 text-left">#</th>
+                      <th className="px-2 py-1 text-left">Picked</th>
+                      <th className="px-2 py-1 text-right">Train Sharpe</th>
+                      <th className="px-2 py-1 text-right">Test ret</th>
+                      <th className="px-2 py-1 text-right">Test trades</th>
+                      <th className="px-2 py-1 text-right">Test DD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.windows.map((w, i) => (
+                      <tr key={i} className="border-t border-border/40">
+                        <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
+                        <td className="px-2 py-1">
+                          {w.pickedConfig.ma.type.toUpperCase()}({w.pickedConfig.ma.length}) ×{' '}
+                          {w.pickedConfig.crossWith?.type.toUpperCase()}(
+                          {w.pickedConfig.crossWith?.length})
+                        </td>
+                        <td className="px-2 py-1 text-right">
+                          {w.trainSummary.sharpe.toFixed(2)}
+                        </td>
+                        <td
+                          className={`px-2 py-1 text-right ${
+                            w.testSummary.totalReturnPct >= 0 ? 'text-bull' : 'text-bear'
+                          }`}
+                        >
+                          {fmtPct(w.testSummary.totalReturnPct)}
+                        </td>
+                        <td className="px-2 py-1 text-right">{w.testSummary.trades}</td>
+                        <td className="px-2 py-1 text-right text-bear">
+                          -{w.testSummary.maxDrawdownPct.toFixed(1)}%
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                Robustness ≥ 0.7 = generalises; 0.3-0.7 = marginal; &lt; 0.3 = curve-fit.
+                v1 fixes 250/60 split.
+              </p>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
