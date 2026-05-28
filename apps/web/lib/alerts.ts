@@ -130,6 +130,38 @@ export async function runBacktest(id: string): Promise<BacktestResponse> {
   });
 }
 
+/* ────── Optimizer ────── */
+
+export interface OptimizerCombo {
+  config: MaCrossAlertConfig;
+  summary: BacktestSummary;
+  score: number;
+}
+
+export interface OptimizeResponse {
+  alertId: string;
+  symbol: string;
+  interval: Interval;
+  barsTested: number;
+  evaluated: number;
+  qualifying: number;
+  combos: OptimizerCombo[];
+}
+
+export async function runOptimize(
+  id: string,
+  body: {
+    topN?: number;
+    minTrades?: number;
+    ddPenalty?: number;
+  } = {},
+): Promise<OptimizeResponse> {
+  return api<OptimizeResponse>(`/alerts/${id}/optimize`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
   return api<AlertDefinition>('/alerts', {
     method: 'POST',

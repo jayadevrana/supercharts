@@ -21,6 +21,7 @@ import {
   Pencil,
   Zap,
   Activity,
+  Sliders,
 } from 'lucide-react';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
@@ -60,7 +61,10 @@ import {
   fetchTelegramBots,
   fetchWatchlists,
   runBacktest,
+  runOptimize,
   type BacktestResponse,
+  type OptimizeResponse,
+  type OptimizerCombo,
   MA_SOURCE_OPTIONS,
   MA_TYPE_OPTIONS,
   testTelegramBot,
@@ -275,6 +279,9 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
   const [btOpen, setBtOpen] = useState(false);
   const [btRunning, setBtRunning] = useState(false);
+  const [optResult, setOptResult] = useState<OptimizeResponse | null>(null);
+  const [optOpen, setOptOpen] = useState(false);
+  const [optRunning, setOptRunning] = useState(false);
 
   const handleBacktest = async () => {
     setBtRunning(true);
@@ -287,6 +294,36 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       setBtOpen(false);
     } finally {
       setBtRunning(false);
+    }
+  };
+
+  const handleOptimize = async () => {
+    setOptRunning(true);
+    setOptOpen(true);
+    try {
+      const r = await runOptimize(alert.id, { topN: 12, minTrades: 8 });
+      setOptResult(r);
+    } catch (err) {
+      toast({ title: 'Optimize failed', description: String(err), tone: 'error' });
+      setOptOpen(false);
+    } finally {
+      setOptRunning(false);
+    }
+  };
+
+  const handleApplyCombo = async (combo: OptimizerCombo) => {
+    if (!window.confirm(
+      `Replace this alert's config with the optimized combo?\n\n` +
+        `${combo.config.ma.type.toUpperCase()}(${combo.config.ma.length}) × ${combo.config.crossWith?.type.toUpperCase()}(${combo.config.crossWith?.length})\n` +
+        `Backtest: +${combo.summary.totalReturnPct.toFixed(1)}% return · ${(combo.summary.winRate * 100).toFixed(0)}% win · DD -${combo.summary.maxDrawdownPct.toFixed(1)}% · ${combo.summary.trades} trades`,
+    )) return;
+    try {
+      await updateAlert(alert.id, { config: combo.config });
+      toast({ title: 'Alert config updated', tone: 'success' });
+      setOptOpen(false);
+      onChange();
+    } catch (err) {
+      toast({ title: 'Apply failed', description: String(err), tone: 'error' });
     }
   };
 
@@ -357,6 +394,20 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           <Activity className="h-3.5 w-3.5 text-accent" />
         )}
       </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy || optRunning}
+        onClick={handleOptimize}
+        title="Optimize parameters"
+        className="px-2"
+      >
+        {optRunning ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Sliders className="h-3.5 w-3.5 text-accent" />
+        )}
+      </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleToggle} title={alert.enabled ? 'Pause' : 'Start'}>
         <Power className={`h-3.5 w-3.5 ${alert.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
       </Button>
@@ -370,7 +421,145 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
         result={backtest}
         alert={alert}
       />
+      <OptimizerModal
+        open={optOpen}
+        onOpenChange={setOptOpen}
+        running={optRunning}
+        result={optResult}
+        alert={alert}
+        onApply={handleApplyCombo}
+      />
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────── Optimizer modal */
+
+function OptimizerModal({
+  open,
+  onOpenChange,
+  running,
+  result,
+  alert,
+  onApply,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  running: boolean;
+  result: OptimizeResponse | null;
+  alert: AlertDefinition;
+  onApply: (combo: OptimizerCombo) => void | Promise<void>;
+}) {
+  const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sliders className="h-4 w-4 text-accent" />
+            Optimize · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Grid sweep over fast/slow MA lengths. Ranked by Sharpe − 0.02 × Max-DD.
+            Click <strong>Apply</strong> to overwrite this alert with the chosen combo.
+          </p>
+        </DialogHeader>
+        <div className="px-5 pb-4 text-xs">
+          {running || !result ? (
+            <div className="flex h-40 items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : (
+            <>
+              <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                {result.evaluated} combos evaluated · {result.qualifying} qualified · {result.barsTested} bars
+              </div>
+              <div className="max-h-[420px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                <table className="w-full text-[11px] tabular-nums">
+                  <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Config</th>
+                      <th className="px-2 py-1 text-right">Trades</th>
+                      <th className="px-2 py-1 text-right">Win %</th>
+                      <th className="px-2 py-1 text-right">Return</th>
+                      <th className="px-2 py-1 text-right">Max DD</th>
+                      <th className="px-2 py-1 text-right">Sharpe</th>
+                      <th className="px-2 py-1 text-right">PF</th>
+                      <th className="px-2 py-1 text-right">Score</th>
+                      <th className="px-2 py-1"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.combos.map((c, i) => {
+                      const cur = alert.config;
+                      const isCurrent =
+                        c.config.ma.length === cur.ma.length &&
+                        c.config.crossWith?.length === cur.crossWith?.length;
+                      return (
+                        <tr
+                          key={i}
+                          className={`border-t border-border/40 ${
+                            isCurrent ? 'bg-accent/10' : ''
+                          }`}
+                        >
+                          <td className="px-2 py-1.5">
+                            <span className="font-semibold">
+                              {c.config.ma.type.toUpperCase()}({c.config.ma.length}) ×{' '}
+                              {c.config.crossWith?.type.toUpperCase()}({c.config.crossWith?.length})
+                            </span>
+                            {isCurrent ? (
+                              <Badge tone="accent" className="ml-2">current</Badge>
+                            ) : null}
+                          </td>
+                          <td className="px-2 py-1 text-right">{c.summary.trades}</td>
+                          <td className="px-2 py-1 text-right">
+                            {(c.summary.winRate * 100).toFixed(0)}%
+                          </td>
+                          <td
+                            className={`px-2 py-1 text-right ${
+                              c.summary.totalReturnPct >= 0 ? 'text-bull' : 'text-bear'
+                            }`}
+                          >
+                            {fmtPct(c.summary.totalReturnPct)}
+                          </td>
+                          <td className="px-2 py-1 text-right text-bear">
+                            -{c.summary.maxDrawdownPct.toFixed(1)}%
+                          </td>
+                          <td className="px-2 py-1 text-right">{c.summary.sharpe.toFixed(2)}</td>
+                          <td className="px-2 py-1 text-right">
+                            {Number.isFinite(c.summary.profitFactor)
+                              ? c.summary.profitFactor.toFixed(2)
+                              : '∞'}
+                          </td>
+                          <td className="px-2 py-1 text-right font-semibold">
+                            {c.score.toFixed(2)}
+                          </td>
+                          <td className="px-2 py-1 text-right">
+                            <Button
+                              size="sm"
+                              variant={isCurrent ? 'ghost' : 'subtle'}
+                              onClick={() => void onApply(c)}
+                              disabled={isCurrent}
+                              className="h-6 px-2 text-[10px]"
+                            >
+                              {isCurrent ? 'Active' : 'Apply'}
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                Score = Sharpe − 0.02 × Max-DD%. Grid is fixed in v1; walk-forward + custom
+                ranges land in Phase 1 #4.
+              </p>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

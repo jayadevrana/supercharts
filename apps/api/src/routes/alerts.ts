@@ -9,6 +9,7 @@ import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
 import { runMaCrossBacktest } from '../backtester';
+import { runOptimizer, type OptimizeRequest } from '../optimizer';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -412,6 +413,64 @@ export function alertRoutes(
       barsTested: candles.length,
       first: candles[0]!.openTime,
       last: candles[candles.length - 1]!.openTime,
+      ...result,
+    };
+  });
+
+  /* ─── Optimizer ─── */
+  // Grid sweep over MA fast/slow lengths (and RSI thresholds when the base config has
+  // an rsiFilter). Reuses the same candle window as backtest. Returns top-N combos
+  // ranked by composite Sharpe-minus-drawdown score.
+  fastify.post('/api/alerts/:id/optimize', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const row = db.raw
+      .prepare(
+        `SELECT id, user_id as userId, symbol_id as symbol, interval, type, config
+         FROM alerts WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, user.id) as
+      | { id: string; userId: string; symbol: string; interval: string; type: string; config: string }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    if (row.type !== 'ma_cross') {
+      reply.code(400);
+      return { error: 'unsupported_alert_type' };
+    }
+    const base = JSON.parse(row.config) as MaCrossAlertConfig;
+    const interval = row.interval as Interval;
+    const desired = 1000;
+    let candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(row.symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(row.symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(row.symbol, interval, c);
+          candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[optimize] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+    const sweep = (req.body ?? {}) as OptimizeRequest;
+    const result = runOptimizer(candles, base, interval, sweep);
+    return {
+      alertId: id,
+      symbol: row.symbol,
+      interval,
+      barsTested: candles.length,
       ...result,
     };
   });

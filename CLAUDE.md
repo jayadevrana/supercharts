@@ -43,7 +43,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 - [x] **1. Strategy Builder GUI v1** — `StrategyBuilderDialog` with Active / New / Templates tabs. 4 one-click presets (MA cross, RSI oversold, bullish engulfing, London session breakout). Block-based condition rows + open-position action with sizing/SL/TP/cooldown. Reuses `/api/signals` with `indicatorSpecs` thread so MA params actually take effect.
 - [x] **2. Backtester v1** — `runMaCrossBacktest` engine + `POST /api/alerts/:id/backtest` route + result modal in Active tab. Pulls up to 1000 bars from candleStore (fetches from provider when sparse). Per-trade: enter on cross (RSI-gated when set), exit on reverse cross. Stats: trades, win rate, total return %, max DD %, Sharpe, profit factor, avg win/loss, avg bars. v1 model — no SL/TP/fees/slippage (Phase 1 #3 picks those up).
-- [ ] 3. Param optimizer — grid sweep over MA lengths / SL / TP, rank by Sharpe + max-DD
+- [x] **3. Param optimizer v1** — `runOptimizer` engine + `POST /api/alerts/:id/optimize`. Grid sweeps fast/slow MA lengths (and RSI thresholds when filter set), reuses backtester per combo, ranks by composite score (Sharpe − 0.02 × Max-DD). UI: Sliders icon per alert row → results table with Apply button to overwrite alert config.
 - [ ] 4. Walk-forward analysis — train window / test window with rolling reoptimization
 - [ ] 5. Paper-trading mode — replay engine + virtual P&L on the active strategy
 
@@ -90,25 +90,26 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 1 #2 — Backtester v1 shipped.
-- New `apps/api/src/backtester.ts` — pure function `runMaCrossBacktest(candles, config, interval)`.
-- Trade model: enter on cross (RSI-gated when set), exit on reverse cross, close any
-  open at last bar. Compounds equity from 100, computes win-rate / max-DD / Sharpe /
-  profit-factor / avg win-loss / avg bars.
-- New route `POST /api/alerts/:id/backtest` — pulls up to 1000 bars from candleStore;
-  if cache is sparse, fetches from provider then re-queries.
-- UI: Activity icon on each Active alert row → opens result modal with 8 stat cards +
-  recent-trades table. v1 disclaimer in footer.
-- Browser-verified on **BTC 30m EMA(9)×EMA(21)**: 41 trades, 31.7% win, +0.44% net,
-  PF 1.04, max-DD -6.94%. Trade table rows render correctly with color-coded PnL.
+- ✅ Phase 1 #3 — Param Optimizer v1 shipped.
+- `apps/api/src/optimizer.ts` — `runOptimizer(candles, base, interval, req)`. Grid
+  sweep over fast lengths [5,7,9,12,15,20] × slow lengths [20,30,50,100,200] × RSI
+  thresholds when filter set. Skips fast≥slow combos.
+- Composite score = Sharpe − 0.02 × Max-DD%. Trades<minTrades disqualified.
+- `POST /api/alerts/:id/optimize` — reuses candle fetch path from backtest. Returns
+  top-N combos with full backtest summary.
+- UI: Sliders icon per alert row → modal with sortable results table + Apply button
+  that overwrites alert config (with confirm dialog).
+- Browser-verified on **BTC 1d** (existing EMA 5×10 config): top combo EMA(7)×EMA(30)
+  → +232% return · 35% win · Sharpe 0.95 · PF 2.61 · 40 trades · score 0.46.
 - 144 alerts + 3 bots untouched.
 
 ## Next pick
 
-**Phase 1 · #3 — Param optimizer.** Grid sweep over MA lengths / SL / TP / RSI
-thresholds. Ranks results by Sharpe + max-DD trade-off, returns top-N. UI: "Optimize"
-button on alert row that shows a heat-map (e.g. fast-MA length × slow-MA length, color
-= Sharpe). Reuses `runMaCrossBacktest` — just iterate configs.
+**Phase 1 · #4 — Walk-forward analysis.** Train window / test window with rolling
+re-optimization. Goal: for each rolling N-bar test window, optimize on the preceding
+M-bar train window, apply best combo to test, accumulate out-of-sample equity. Shows
+whether the optimizer's top picks generalize or are just curve-fit. Reuses
+`runOptimizer` + `runMaCrossBacktest`.
 
 ## Questions for owner
 
