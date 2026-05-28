@@ -4,6 +4,7 @@ import type {
   AlertEvent,
   Interval,
   MaCrossAlertConfig,
+  PaperPortfolio,
   PaperSummary,
   PaperTrade,
   TelegramBot,
@@ -228,6 +229,11 @@ export async function resetPaperTrades(alertId: string, wipe = false): Promise<v
     body: '{}',
     searchParams: wipe ? { wipe: '1' } : undefined,
   });
+}
+
+/** Portfolio-level paper aggregate — realised + unrealized across all alerts. */
+export async function fetchPaperPortfolio(): Promise<PaperPortfolio> {
+  return api<PaperPortfolio>('/alerts/paper/portfolio');
 }
 
 /* ────── Position sizer ────── */

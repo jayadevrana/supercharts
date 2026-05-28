@@ -172,6 +172,16 @@ export interface PaperTrade {
   pnlPercent?: number;
   /** Bars held — null while open. */
   bars?: number;
+  /**
+   * Server-marked live price for open positions (from the candle store's most recent
+   * close). Stale by at most one bar — the alert engine fires on closed bars, so this
+   * gives traders a TradingView-style mark-to-market on every poll.
+   */
+  currentPrice?: number;
+  /** Unrealized P&L % for open positions (close-mark vs entry). */
+  unrealizedPct?: number;
+  /** Server clock when the mark was computed — lets the UI surface staleness. */
+  markedAt?: number;
 }
 
 export interface PaperSummary {
@@ -180,8 +190,32 @@ export interface PaperSummary {
   wins: number;
   losses: number;
   winRate: number;
+  /** Sum of closed-trade pnl% (realised). */
   totalReturnPct: number;
+  /** Open position's mark-to-market pnl% (0 when no open). */
+  unrealizedPct?: number;
+  /** realised + unrealized — combined alert equity in %. */
+  totalPct?: number;
   openPosition?: PaperTrade;
+}
+
+/** Portfolio-level aggregate across every paper-flagged alert. */
+export interface PaperPortfolio {
+  /** Sum of all closed-trade pnl% across alerts. */
+  realisedPct: number;
+  /** Sum of open positions' unrealized pnl%. */
+  unrealizedPct: number;
+  /** realised + unrealized. */
+  totalPct: number;
+  /** Total closed trades across alerts. */
+  closedTrades: number;
+  /** Total open positions across alerts. */
+  openPositions: number;
+  /** Combined win-rate across all closed trades. */
+  winRate: number;
+  /** Per-alert summaries, sorted by totalPct desc. */
+  bySymbol: PaperSummary[];
+  markedAt: number;
 }
 
 /**

@@ -26,7 +26,7 @@ import {
   ClipboardList,
   Calculator,
 } from 'lucide-react';
-import type { PaperTrade } from '@supercharts/types';
+import type { PaperPortfolio, PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
 import {
@@ -64,6 +64,7 @@ import {
   fetchAlerts,
   fetchTelegramBots,
   fetchWatchlists,
+  fetchPaperPortfolio,
   fetchPaperTrades,
   resetPaperTrades,
   runBacktest,
@@ -183,6 +184,7 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
 function ActiveAlertsList() {
   const [alerts, setAlerts] = useState<AlertDefinition[] | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [portfolio, setPortfolio] = useState<PaperPortfolio | null>(null);
   const reload = useCallback(async () => {
     try {
       setAlerts(await fetchAlerts());
@@ -190,9 +192,20 @@ function ActiveAlertsList() {
       toast({ title: 'Could not load alerts', description: String(err), tone: 'error' });
     }
   }, []);
+  const reloadPortfolio = useCallback(async () => {
+    try {
+      setPortfolio(await fetchPaperPortfolio());
+    } catch {
+      /* paper not yet configured — leave banner hidden */
+    }
+  }, []);
   useEffect(() => {
     void reload();
-  }, [reload]);
+    void reloadPortfolio();
+    // Live-poll portfolio every 3s for TradingView-style equity ticking.
+    const id = setInterval(() => void reloadPortfolio(), 3_000);
+    return () => clearInterval(id);
+  }, [reload, reloadPortfolio]);
 
   const handleBulkSubscribe = async () => {
     if (
@@ -231,6 +244,52 @@ function ActiveAlertsList() {
     }
   };
 
+  const showPortfolio = portfolio && (portfolio.closedTrades > 0 || portfolio.openPositions > 0);
+  const PortfolioBanner = showPortfolio ? (
+    <div className="border-b border-border/60 bg-surface-raised/40 px-4 py-2.5">
+      <div className="flex items-center justify-between gap-3 text-xs">
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+            Paper portfolio · {portfolio.openPositions} open · {portfolio.closedTrades} closed ·{' '}
+            {(portfolio.winRate * 100).toFixed(0)}% win
+          </div>
+          <div className="mt-0.5 flex items-center gap-3 tabular-nums">
+            <span className="text-[10px] text-muted-foreground">realised</span>
+            <span
+              className={`text-sm font-semibold ${
+                portfolio.realisedPct >= 0 ? 'text-bull' : 'text-bear'
+              }`}
+            >
+              {portfolio.realisedPct >= 0 ? '+' : ''}
+              {portfolio.realisedPct.toFixed(2)}%
+            </span>
+            <span className="text-[10px] text-muted-foreground">unrealized</span>
+            <span
+              className={`text-sm font-semibold ${
+                portfolio.unrealizedPct >= 0 ? 'text-bull' : 'text-bear'
+              }`}
+            >
+              {portfolio.unrealizedPct >= 0 ? '+' : ''}
+              {portfolio.unrealizedPct.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+            Total equity
+          </div>
+          <div
+            className={`text-2xl font-bold tabular-nums ${
+              portfolio.totalPct >= 0 ? 'text-bull' : 'text-bear'
+            }`}
+          >
+            {portfolio.totalPct >= 0 ? '+' : ''}
+            {portfolio.totalPct.toFixed(2)}%
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
   const BulkBar = (
     <div className="flex items-center justify-between gap-2 border-b border-border/60 px-4 py-2 text-xs">
       <div className="text-muted-foreground">
@@ -252,6 +311,7 @@ function ActiveAlertsList() {
   if (!alerts) {
     return (
       <>
+        {PortfolioBanner}
         {BulkBar}
         <div className="flex h-32 items-center justify-center text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -262,6 +322,7 @@ function ActiveAlertsList() {
   if (alerts.length === 0) {
     return (
       <>
+        {PortfolioBanner}
         {BulkBar}
         <div className="flex flex-col items-center gap-2 py-12 text-center">
           <div className="rounded-full bg-accent/10 p-3"><BellRing className="h-5 w-5 text-accent" /></div>
@@ -275,6 +336,7 @@ function ActiveAlertsList() {
   }
   return (
     <>
+      {PortfolioBanner}
       {BulkBar}
       <div className="divide-y divide-border/60">
         {alerts.map((a) => (
@@ -748,8 +810,9 @@ function PaperTradesModal({
   useEffect(() => {
     if (!open) return;
     void reload();
-    // Auto-refresh every 8s while the modal is open so live positions update.
-    const id = setInterval(() => void reload(), 8_000);
+    // 3s gives a TradingView-ish live feel without hammering the API. Mark-to-market
+    // is cheap (one cache read per open position) so this scales fine.
+    const id = setInterval(() => void reload(), 3_000);
     return () => clearInterval(id);
   }, [open, reload]);
 
@@ -830,19 +893,7 @@ function PaperTradesModal({
                 />
               </div>
               {openTrade ? (
-                <div className="mt-3 rounded-md border border-accent/60 bg-accent/10 px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <Badge tone={openTrade.side === 'buy' ? 'bull' : 'bear'}>
-                      {openTrade.side.toUpperCase()} · OPEN
-                    </Badge>
-                    <span className="text-[11px] text-muted-foreground">
-                      since {new Date(openTrade.entryTime).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-[11px]">
-                    entry <code>{openTrade.entryPrice.toFixed(4)}</code>
-                  </div>
-                </div>
+                <LiveOpenPositionCard trade={openTrade} />
               ) : (
                 <div className="mt-3 rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
                   No open position. Fires until the next cross.
@@ -920,6 +971,75 @@ function PaperTradesModal({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Live-PnL open-position card. The parent polls every 3s and re-renders this with
+ * fresh `trade` props; we flash the row briefly on each tick so the user gets the
+ * TradingView "blink on update" cue.
+ */
+function LiveOpenPositionCard({ trade }: { trade: PaperTrade }) {
+  // Pulse hint: changes every render so the CSS keyframe re-fires on each tick.
+  const pulseKey = `${trade.currentPrice ?? trade.entryPrice}-${trade.markedAt ?? 0}`;
+  const upnl = trade.unrealizedPct ?? 0;
+  const tone = upnl >= 0 ? 'bull' : 'bear';
+  const cur = trade.currentPrice ?? trade.entryPrice;
+  const sinceMs = Date.now() - trade.entryTime;
+  const ageMin = Math.floor(sinceMs / 60_000);
+  const ageHr = Math.floor(ageMin / 60);
+  const ageStr = ageHr > 0 ? `${ageHr}h ${ageMin % 60}m` : `${ageMin}m`;
+  return (
+    <div
+      key={pulseKey}
+      className={`mt-3 rounded-md border px-3 py-2.5 transition-colors duration-300 ${
+        tone === 'bull'
+          ? 'border-bull/50 bg-bull/10'
+          : 'border-bear/50 bg-bear/10'
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge tone={trade.side === 'buy' ? 'bull' : 'bear'}>
+            {trade.side.toUpperCase()} · OPEN
+          </Badge>
+          <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            held {ageStr}
+          </span>
+        </div>
+        <div className="text-right">
+          <div className={`text-2xl font-semibold tabular-nums ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
+            {upnl >= 0 ? '+' : ''}
+            {upnl.toFixed(2)}%
+          </div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            unrealized
+          </div>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Entry</div>
+          <div className="tabular-nums">{trade.entryPrice.toFixed(4)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Mark</div>
+          <div className="tabular-nums">{cur.toFixed(4)}</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+            Move
+          </div>
+          <div className={`tabular-nums ${tone === 'bull' ? 'text-bull' : 'text-bear'}`}>
+            {(cur - trade.entryPrice >= 0 ? '+' : '') + (cur - trade.entryPrice).toFixed(4)}
+          </div>
+        </div>
+      </div>
+      <div className="mt-1 text-[9px] text-muted-foreground">
+        entered {new Date(trade.entryTime).toLocaleString()}
+        {trade.markedAt ? ` · marked ${new Date(trade.markedAt).toLocaleTimeString()}` : ''}
+      </div>
+    </div>
   );
 }
 

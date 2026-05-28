@@ -575,6 +575,8 @@ export function alertRoutes(
 
   /* ─── Paper trading queries ─── */
   // List virtual trades for a single alert (open one first, then most-recent closed).
+  // Open positions get marked-to-market against the candleStore's last close so the
+  // UI sees TradingView-style live PnL without WebSocket plumbing.
   fastify.get('/api/alerts/:id/paper-trades', async (req, reply) => {
     const user = getUser(req, db);
     const id = (req.params as { id: string }).id;
@@ -598,53 +600,45 @@ export function alertRoutes(
          LIMIT ?`,
       )
       .all(id, user.id, limit);
-    return { items: rows };
+    return { items: rows.map((r) => markRow(r as PaperRow, ctx)) };
   });
 
-  /** Aggregate paper-trading summary across every alert the user has paper-flagged. */
+  /** Per-alert paper summary — closed stats + mark-to-market on the open position. */
   fastify.get('/api/alerts/paper/summary', async (req) => {
     const user = getUser(req, db);
-    const rows = db.raw
-      .prepare(
-        `SELECT alert_id as alertId,
-                SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closedTrades,
-                SUM(CASE WHEN status = 'closed' AND pnl_percent > 0 THEN 1 ELSE 0 END) as wins,
-                SUM(CASE WHEN status = 'closed' AND pnl_percent <= 0 THEN 1 ELSE 0 END) as losses,
-                COALESCE(SUM(CASE WHEN status = 'closed' THEN pnl_percent ELSE 0 END), 0) as totalReturnPct
-         FROM paper_trades
-         WHERE user_id = ?
-         GROUP BY alert_id`,
-      )
-      .all(user.id) as Array<{
-      alertId: string;
-      closedTrades: number;
-      wins: number;
-      losses: number;
-      totalReturnPct: number;
-    }>;
-    const openRows = db.raw
-      .prepare(
-        `SELECT id, alert_id as alertId, user_id as userId, symbol, interval, side,
-                entry_time as entryTime, entry_price as entryPrice
-         FROM paper_trades WHERE user_id = ? AND status = 'open'`,
-      )
-      .all(user.id) as Array<{
-      id: string; alertId: string; userId: string; symbol: string; interval: string;
-      side: 'buy' | 'sell'; entryTime: number; entryPrice: number;
-    }>;
-    const openByAlert = new Map(openRows.map((r) => [r.alertId, r]));
+    return { items: paperSummaryByAlert(user.id, db, ctx) };
+  });
+
+  /**
+   * Portfolio view across every paper-flagged alert. Aggregates realised + mark-to-
+   * market unrealized, plus per-symbol breakdown sorted by total equity. Built for
+   * a future Paper Portfolio dashboard but also useful for ad-hoc curl checks.
+   */
+  fastify.get('/api/alerts/paper/portfolio', async (req) => {
+    const user = getUser(req, db);
+    const bySymbol = paperSummaryByAlert(user.id, db, ctx);
+    let realised = 0;
+    let unrealized = 0;
+    let closed = 0;
+    let opens = 0;
+    let wins = 0;
+    for (const s of bySymbol) {
+      realised += s.totalReturnPct;
+      unrealized += s.unrealizedPct ?? 0;
+      closed += s.closedTrades;
+      wins += s.wins;
+      if (s.openPosition) opens += 1;
+    }
+    bySymbol.sort((a, b) => (b.totalPct ?? 0) - (a.totalPct ?? 0));
     return {
-      items: rows.map((r) => ({
-        alertId: r.alertId,
-        closedTrades: r.closedTrades,
-        wins: r.wins,
-        losses: r.losses,
-        winRate: r.closedTrades > 0 ? r.wins / r.closedTrades : 0,
-        totalReturnPct: r.totalReturnPct,
-        openPosition: openByAlert.get(r.alertId)
-          ? { ...openByAlert.get(r.alertId)!, status: 'open' as const }
-          : undefined,
-      })),
+      realisedPct: realised,
+      unrealizedPct: unrealized,
+      totalPct: realised + unrealized,
+      closedTrades: closed,
+      openPositions: opens,
+      winRate: closed > 0 ? wins / closed : 0,
+      bySymbol,
+      markedAt: Date.now(),
     };
   });
 
@@ -1069,6 +1063,105 @@ export function alertRoutes(
         message: err instanceof Error ? err.message : 'unknown',
       };
     }
+  });
+}
+
+/* ─── Paper trade enrichment helpers ─── */
+
+interface PaperRow {
+  id: string;
+  alertId: string;
+  userId: string;
+  symbol: string;
+  interval: string;
+  side: 'buy' | 'sell';
+  status: 'open' | 'closed';
+  entryTime: number;
+  entryPrice: number;
+  exitTime?: number;
+  exitPrice?: number;
+  pnlPercent?: number;
+  bars?: number;
+  // Optional fields populated by markRow() for open positions only.
+  currentPrice?: number;
+  unrealizedPct?: number;
+  markedAt?: number;
+}
+
+/**
+ * Look up the most recent close for this symbol+interval and (if the trade is open)
+ * stamp the row with currentPrice + unrealizedPct so the client sees live PnL.
+ *
+ * Mark uses candleStore's latest cached candle; no provider round-trip. That keeps
+ * the route under 5 ms even for 144-alert portfolios.
+ */
+function markRow(row: PaperRow, ctx: IngestionContext): PaperRow {
+  if (row.status !== 'open') return row;
+  const candles = ctx.candleStore.query(
+    row.symbol,
+    row.interval as Interval,
+    undefined,
+    undefined,
+    1,
+  );
+  const last = candles[candles.length - 1];
+  if (!last) return row;
+  const px = last.close;
+  const upnl =
+    row.side === 'buy'
+      ? ((px - row.entryPrice) / row.entryPrice) * 100
+      : ((row.entryPrice - px) / row.entryPrice) * 100;
+  return { ...row, currentPrice: px, unrealizedPct: upnl, markedAt: Date.now() } as PaperRow & {
+    currentPrice: number;
+    unrealizedPct: number;
+    markedAt: number;
+  };
+}
+
+interface SummaryRow {
+  alertId: string;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  totalReturnPct: number;
+}
+
+/** Build the per-alert paper summary list, marking every open position to market. */
+function paperSummaryByAlert(userId: string, db: AppDB, ctx: IngestionContext) {
+  const rows = db.raw
+    .prepare(
+      `SELECT alert_id as alertId,
+              SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closedTrades,
+              SUM(CASE WHEN status = 'closed' AND pnl_percent > 0 THEN 1 ELSE 0 END) as wins,
+              SUM(CASE WHEN status = 'closed' AND pnl_percent <= 0 THEN 1 ELSE 0 END) as losses,
+              COALESCE(SUM(CASE WHEN status = 'closed' THEN pnl_percent ELSE 0 END), 0) as totalReturnPct
+       FROM paper_trades
+       WHERE user_id = ?
+       GROUP BY alert_id`,
+    )
+    .all(userId) as SummaryRow[];
+  const openRows = db.raw
+    .prepare(
+      `SELECT id, alert_id as alertId, user_id as userId, symbol, interval, side, status,
+              entry_time as entryTime, entry_price as entryPrice
+       FROM paper_trades WHERE user_id = ? AND status = 'open'`,
+    )
+    .all(userId) as PaperRow[];
+  const openByAlert = new Map(openRows.map((r) => [r.alertId, markRow(r, ctx)]));
+  return rows.map((r) => {
+    const open = openByAlert.get(r.alertId);
+    const unrealizedPct = open?.unrealizedPct ?? 0;
+    return {
+      alertId: r.alertId,
+      closedTrades: r.closedTrades,
+      wins: r.wins,
+      losses: r.losses,
+      winRate: r.closedTrades > 0 ? r.wins / r.closedTrades : 0,
+      totalReturnPct: r.totalReturnPct,
+      unrealizedPct,
+      totalPct: r.totalReturnPct + unrealizedPct,
+      openPosition: open,
+    };
   });
 }
 

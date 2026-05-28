@@ -90,16 +90,19 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 2 #6 — Position Sizer v1 shipped.
-- `apps/api/src/position-sizer.ts` — pure helpers covering 5 modes:
-  fixed_lots, risk_percent, cash_risk, kelly (fractional 0.25), atr_scaled.
-- Route `POST /api/alerts/:id/sizer-preview` backtests the alert (caps at 500 bars)
-  to derive Kelly inputs + reads latest ATR(14), then returns lot suggestions for
-  each mode given the caller's balance / risk% / SL pips / pip value.
-- UI: Calculator icon per alert row → modal with 6 inputs + 4 backtest stat cards +
-  side-by-side results table with formula breakdown.
-- Live-verified on BTC 1d EMA(5)×(10): 40 trades · 30% win · +8.87% avg win · -2.56%
-  avg loss → Kelly **0.81 lots** vs fixed **0.10 lots** at $10k/30pips/$10pip.
+- ✅ Live PnL on paper trades (TradingView-style).
+- Server marks every open paper position against `candleStore`'s latest close on each
+  query — no WebSocket plumbing, sub-5ms per portfolio call. Open rows now carry
+  `currentPrice`, `unrealizedPct`, `markedAt`.
+- `PaperSummary` gained `unrealizedPct` + `totalPct`. New aggregate route
+  `GET /api/alerts/paper/portfolio` returns `realisedPct + unrealizedPct + totalPct`
+  + per-symbol breakdown sorted by total equity.
+- UI: PaperTradesModal now polls every 3s + renders a `LiveOpenPositionCard` with
+  big colour-coded PnL number (BUY/SELL · OPEN, held age, ENTRY/MARK/MOVE grid).
+- Active tab header shows a live Paper Portfolio banner (realised / unrealized /
+  total equity) when any paper position exists. Auto-refreshes every 3s.
+- Live-verified on BTC 30m paper buy (entry 72500 → mark 73484): +1.36% live in
+  modal, +1.32% in portfolio banner. Tick refresh works.
 - 144 alerts + 3 Telegram bots untouched.
 
 ## Next pick
