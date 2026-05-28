@@ -24,6 +24,7 @@ import {
   Sliders,
   Shuffle,
   ClipboardList,
+  Calculator,
 } from 'lucide-react';
 import type { PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
@@ -67,10 +68,13 @@ import {
   resetPaperTrades,
   runBacktest,
   runOptimize,
+  runSizerPreview,
   runWalkForward,
   type BacktestResponse,
   type OptimizeResponse,
   type OptimizerCombo,
+  type SizerPreviewBody,
+  type SizerPreviewResponse,
   type WalkForwardResponse,
   MA_SOURCE_OPTIONS,
   MA_TYPE_OPTIONS,
@@ -293,6 +297,7 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   const [wfOpen, setWfOpen] = useState(false);
   const [wfRunning, setWfRunning] = useState(false);
   const [paperOpen, setPaperOpen] = useState(false);
+  const [sizerOpen, setSizerOpen] = useState(false);
 
   const handleBacktest = async () => {
     setBtRunning(true);
@@ -485,6 +490,16 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           }`}
         />
       </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => setSizerOpen(true)}
+        title="Position sizer"
+        className="px-2"
+      >
+        <Calculator className="h-3.5 w-3.5 text-accent" />
+      </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleToggle} title={alert.enabled ? 'Pause' : 'Start'}>
         <Power className={`h-3.5 w-3.5 ${alert.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
       </Button>
@@ -519,7 +534,192 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
         alert={alert}
         onToggle={handleTogglePaper}
       />
+      <SizerModal open={sizerOpen} onOpenChange={setSizerOpen} alert={alert} />
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────── Position sizer modal */
+
+function SizerModal({
+  open,
+  onOpenChange,
+  alert,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  alert: AlertDefinition;
+}) {
+  // Sensible defaults: $10k balance, 1% risk, 30 SL pips, $10/pip (standard-lot EURUSD).
+  const [balance, setBalance] = useState(10000);
+  const [riskPercent, setRiskPercent] = useState(1);
+  const [riskAmount, setRiskAmount] = useState(100);
+  const [slPips, setSlPips] = useState(30);
+  const [pipValue, setPipValue] = useState(10);
+  const [fixedLots, setFixedLots] = useState(0.1);
+  const [result, setResult] = useState<SizerPreviewResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const runPreview = useCallback(async () => {
+    setBusy(true);
+    try {
+      const body: SizerPreviewBody = {
+        balance,
+        riskPercent,
+        riskAmount,
+        slPips,
+        pipValue,
+        fixedLots,
+      };
+      const r = await runSizerPreview(alert.id, body);
+      setResult(r);
+    } catch (err) {
+      toast({ title: 'Sizer failed', description: String(err), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, [alert.id, balance, riskPercent, riskAmount, slPips, pipValue, fixedLots]);
+
+  // Auto-run on first open and whenever the user adjusts inputs.
+  useEffect(() => {
+    if (!open) return;
+    void runPreview();
+  }, [open, runPreview]);
+
+  const fmt = (n: number, d = 2) => n.toFixed(d);
+  const TONES: Record<string, 'bull' | 'bear' | 'accent' | 'muted'> = {
+    fixed_lots: 'muted',
+    risk_percent: 'accent',
+    cash_risk: 'accent',
+    kelly: 'bull',
+    atr_scaled: 'muted',
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Calculator className="h-4 w-4 text-accent" />
+            Position sizer · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Lot size recommendations across sizing modes. Kelly uses the backtest's
+            win-rate × payoff. Adjust the inputs and the preview updates live.
+          </p>
+        </DialogHeader>
+        <div className="px-5 pb-4 text-xs">
+          <div className="grid grid-cols-3 gap-2">
+            <Field label="Balance ($)">
+              <Input
+                type="number"
+                value={balance}
+                onChange={(e) => setBalance(Number(e.target.value) || 0)}
+              />
+            </Field>
+            <Field label="Risk %">
+              <Input
+                type="number"
+                step={0.1}
+                value={riskPercent}
+                onChange={(e) => setRiskPercent(Number(e.target.value) || 0)}
+              />
+            </Field>
+            <Field label="Risk $">
+              <Input
+                type="number"
+                value={riskAmount}
+                onChange={(e) => setRiskAmount(Number(e.target.value) || 0)}
+              />
+            </Field>
+            <Field label="SL pips">
+              <Input
+                type="number"
+                value={slPips}
+                onChange={(e) => setSlPips(Number(e.target.value) || 0)}
+              />
+            </Field>
+            <Field label="$ / pip / lot">
+              <Input
+                type="number"
+                value={pipValue}
+                onChange={(e) => setPipValue(Number(e.target.value) || 0)}
+              />
+            </Field>
+            <Field label="Fixed lots">
+              <Input
+                type="number"
+                step={0.01}
+                value={fixedLots}
+                onChange={(e) => setFixedLots(Number(e.target.value) || 0)}
+              />
+            </Field>
+          </div>
+          {result ? (
+            <>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                <Stat label="Trades" value={String(result.backtest.trades)} />
+                <Stat label="Win rate" value={`${(result.backtest.winRate * 100).toFixed(1)}%`} />
+                <Stat
+                  label="Avg win"
+                  value={`+${fmt(result.backtest.avgWinPct)}%`}
+                  tone="bull"
+                />
+                <Stat
+                  label="Avg loss"
+                  value={`${fmt(result.backtest.avgLossPct)}%`}
+                  tone="bear"
+                />
+              </div>
+              <div className="mt-3 overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                <table className="w-full text-[11px] tabular-nums">
+                  <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                    <tr>
+                      <th className="px-2 py-1 text-left">Mode</th>
+                      <th className="px-2 py-1 text-right">Lots</th>
+                      <th className="px-2 py-1 text-right">Risk $</th>
+                      <th className="px-2 py-1 text-left">Formula / note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.rows.map((row) => (
+                      <tr key={row.mode} className="border-t border-border/40 align-top">
+                        <td className="px-2 py-1.5">
+                          <Badge tone={TONES[row.mode] ?? 'muted'}>
+                            {row.mode.replace('_', ' ')}
+                          </Badge>
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-semibold">
+                          {row.unavailable ? '—' : row.lots.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right">
+                          {row.unavailable ? '—' : `$${row.riskAmount.toFixed(2)}`}
+                        </td>
+                        <td className="px-2 py-1.5 text-[10px] text-muted-foreground">
+                          {row.unavailable ? (
+                            <span className="text-warn">{row.unavailable}</span>
+                          ) : (
+                            row.formula
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                Kelly uses fractional 0.25 — drop full Kelly into a live account at your
+                own risk. ATR-scaled assumes 4-decimal forex pip step (will undershoot
+                on crypto/JPY; pick a different mode for those).
+              </p>
+            </>
+          ) : busy ? (
+            <div className="mt-4 flex h-32 items-center justify-center text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+            </div>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

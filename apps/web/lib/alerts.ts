@@ -230,6 +230,49 @@ export async function resetPaperTrades(alertId: string, wipe = false): Promise<v
   });
 }
 
+/* ────── Position sizer ────── */
+
+export type SizingMode = 'fixed_lots' | 'risk_percent' | 'cash_risk' | 'kelly' | 'atr_scaled';
+
+export interface SizerRow {
+  mode: SizingMode;
+  lots: number;
+  riskAmount: number;
+  formula: string;
+  unavailable?: string;
+}
+
+export interface SizerPreviewResponse {
+  alertId: string;
+  symbol: string;
+  interval: Interval;
+  backtest: { trades: number; winRate: number; avgWinPct: number; avgLossPct: number };
+  atrValue: number;
+  rows: SizerRow[];
+}
+
+export interface SizerPreviewBody {
+  balance?: number;
+  riskPercent?: number;
+  riskAmount?: number;
+  slPips?: number;
+  pipValue?: number;
+  fixedLots?: number;
+  atrPeriod?: number;
+  atrMultiplier?: number;
+  kellyFraction?: number;
+}
+
+export async function runSizerPreview(
+  alertId: string,
+  body: SizerPreviewBody,
+): Promise<SizerPreviewResponse> {
+  return api<SizerPreviewResponse>(`/alerts/${alertId}/sizer-preview`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
   return api<AlertDefinition>('/alerts', {
     method: 'POST',

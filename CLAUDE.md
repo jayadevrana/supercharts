@@ -49,7 +49,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ### Phase 2 — Risk & Portfolio
 
-- [ ] 6. Position sizer (Kelly, fixed fractional, ATR-scaled) integrated into Strategy Builder
+- [x] **6. Position sizer v1** — `apps/api/src/position-sizer.ts` with pure helpers for fixed_lots / risk_percent / cash_risk / kelly (fractional 0.25) / atr_scaled. Route `POST /api/alerts/:id/sizer-preview` backtests the alert to derive Kelly inputs (winRate, avg win/loss) + reads latest ATR, returns lot suggestions across all 5 modes. UI: Calculator icon per alert row → modal with 6 inputs (balance/risk%/risk$/SL pips/$pip/fixed lots), 4 backtest stat cards, side-by-side results table with formula breakdown.
 - [ ] 7. Portfolio heat — open-position correlation matrix + sector exposure pie
 - [ ] 8. Per-strategy P&L attribution dashboard
 - [ ] 9. Daily / weekly stat report (web + Telegram summary)
@@ -90,25 +90,23 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 1 #5 — Paper-trading mode v1 shipped. **Phase 1 fully complete (5/5).**
-- New `paper_trades` table (alert_id / side / status / entry / exit / pnl_percent).
-- `MaCrossAlertConfig.delivery.paper` flag — when true, engine opens a virtual
-  position on every closed-bar fire and closes + flips on the next opposite fire.
-  Same-side fires ignored.
-- Routes: GET `/api/alerts/:id/paper-trades`, GET `/api/alerts/paper/summary`,
-  POST `/api/alerts/:id/paper/reset?wipe=1`.
-- UI: ClipboardList icon per alert row → Paper Trades modal with paper-toggle Switch,
-  4 stat cards (Closed / Win rate / Total return / W-L), open-position highlight card,
-  closed-trades table, Close-open + Wipe-history footer buttons.
-- Browser-verified on **BTC 30m EMA(9)×(21)** — modal renders empty state correctly
-  (no fires since flag flipped); toggle calls updateAlert, refreshes the list.
-- All 144 alerts + 3 Telegram bots untouched.
+- ✅ Phase 2 #6 — Position Sizer v1 shipped.
+- `apps/api/src/position-sizer.ts` — pure helpers covering 5 modes:
+  fixed_lots, risk_percent, cash_risk, kelly (fractional 0.25), atr_scaled.
+- Route `POST /api/alerts/:id/sizer-preview` backtests the alert (caps at 500 bars)
+  to derive Kelly inputs + reads latest ATR(14), then returns lot suggestions for
+  each mode given the caller's balance / risk% / SL pips / pip value.
+- UI: Calculator icon per alert row → modal with 6 inputs + 4 backtest stat cards +
+  side-by-side results table with formula breakdown.
+- Live-verified on BTC 1d EMA(5)×(10): 40 trades · 30% win · +8.87% avg win · -2.56%
+  avg loss → Kelly **0.81 lots** vs fixed **0.10 lots** at $10k/30pips/$10pip.
+- 144 alerts + 3 Telegram bots untouched.
 
 ## Next pick
 
-**Phase 2 · #6 — Position sizer (Kelly / fixed-fractional / ATR-scaled).** Wire into
-strategy builder + alert config so per-trade size scales with risk instead of fixed
-0.01 lots. Foundation for proper portfolio sizing in Phase 2 #7 (correlation matrix).
+**Phase 2 · #7 — Portfolio heat.** Open-position correlation matrix + sector exposure
+pie. Goal: surface "I have 5 EUR-pair longs that all move together" so the trader
+can throttle correlated risk before MT5 fires them.
 
 ## Questions for owner
 

@@ -11,6 +11,7 @@ import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '
 import { runMaCrossBacktest } from '../backtester';
 import { runOptimizer, type OptimizeRequest } from '../optimizer';
 import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
+import { previewSizing, latestAtr } from '../position-sizer';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -473,6 +474,102 @@ export function alertRoutes(
       interval,
       barsTested: candles.length,
       ...result,
+    };
+  });
+
+  /* ─── Position sizer preview ─── */
+  // Backtests the alert to derive Kelly inputs (win rate, avg win/loss), reads the
+  // latest ATR from the candle store, then returns lot sizes for each supported
+  // sizing mode given the caller's (balance, risk%, SL pips, pip value). Pure
+  // preview — does not write anything; UI uses it to compare modes side-by-side.
+  fastify.post('/api/alerts/:id/sizer-preview', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const row = db.raw
+      .prepare(
+        `SELECT id, symbol_id as symbol, interval, type, config FROM alerts WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, user.id) as
+      | { id: string; symbol: string; interval: string; type: string; config: string }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    if (row.type !== 'ma_cross') {
+      reply.code(400);
+      return { error: 'unsupported_alert_type' };
+    }
+    const config = JSON.parse(row.config) as MaCrossAlertConfig;
+
+    const body = (req.body ?? {}) as {
+      balance?: number;
+      riskPercent?: number;
+      riskAmount?: number;
+      slPips?: number;
+      pipValue?: number;
+      fixedLots?: number;
+      atrPeriod?: number;
+      atrMultiplier?: number;
+      kellyFraction?: number;
+    };
+
+    // Backtest to derive Kelly stats. Cap at 500 bars so the preview is fast.
+    const desired = 500;
+    let candles = ctx.candleStore.query(row.symbol, row.interval as Interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(row.symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[row.interval as Interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(
+            row.symbol,
+            row.interval as Interval,
+            from,
+            now,
+            desired,
+          );
+          for (const c of fetched) ctx.candleStore.upsert(row.symbol, row.interval as Interval, c);
+          candles = ctx.candleStore.query(row.symbol, row.interval as Interval, undefined, undefined, desired);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[sizer] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+
+    const backtest = runMaCrossBacktest(candles, config, row.interval);
+    const atrValue = latestAtr(candles, body.atrPeriod ?? 14);
+
+    const preview = previewSizing({
+      balance: body.balance ?? 10000,
+      slPips: body.slPips,
+      pipValue: body.pipValue,
+      riskPercent: body.riskPercent,
+      riskAmount: body.riskAmount,
+      fixedLots: body.fixedLots,
+      atrValue,
+      atrMultiplier: body.atrMultiplier,
+      winRate: backtest.summary.winRate,
+      avgWinPct: backtest.summary.avgWinPct,
+      avgLossPct: backtest.summary.avgLossPct,
+      kellyFraction: body.kellyFraction ?? 0.25,
+    });
+
+    return {
+      alertId: id,
+      symbol: row.symbol,
+      interval: row.interval,
+      backtest: {
+        trades: backtest.summary.trades,
+        winRate: backtest.summary.winRate,
+        avgWinPct: backtest.summary.avgWinPct,
+        avgLossPct: backtest.summary.avgLossPct,
+      },
+      atrValue,
+      ...preview,
     };
   });
 
