@@ -22,6 +22,13 @@ const maCrossConfigSchema = z.object({
       length: z.coerce.number().int().min(2).max(500),
     })
     .optional(),
+  rsiFilter: z
+    .object({
+      length: z.coerce.number().int().min(2).max(100),
+      buyBelow: z.coerce.number().min(0).max(100),
+      sellAbove: z.coerce.number().min(0).max(100),
+    })
+    .optional(),
   labels: z.object({
     buy: z.string().min(1).max(32).default('BUY'),
     sell: z.string().min(1).max(32).default('SELL'),

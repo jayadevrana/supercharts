@@ -6,7 +6,7 @@ import type {
   MaCrossAlertConfig,
 } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
-import { computeMaCross, pickSource } from '@supercharts/chart-core/pure';
+import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart-core/pure';
 import { nanoid } from 'nanoid';
 import type { AppDB } from './db';
 import { sendTelegramMessage, type TelegramSender } from './telegram';
@@ -160,6 +160,19 @@ export class AlertEngine {
     const maValue = ma[ma.length - 1]!;
     const label = side === 'buy' ? alert.config.labels.buy : alert.config.labels.sell;
 
+    // Optional RSI gate. Computed only when configured so we don't pay the cost
+    // on every cross for the (common) gate-less alerts.
+    let rsiValue: number | undefined;
+    if (alert.config.rsiFilter) {
+      const closes = recent.map((c) => c.close);
+      const series = rsiSeries(closes, alert.config.rsiFilter.length);
+      const v = series[series.length - 1];
+      if (!Number.isFinite(v!)) return; // warmup window — don't fire
+      rsiValue = v!;
+      if (side === 'buy' && rsiValue > alert.config.rsiFilter.buyBelow) return;
+      if (side === 'sell' && rsiValue < alert.config.rsiFilter.sellAbove) return;
+    }
+
     const event: AlertEvent = {
       id: nanoid(),
       alertId: alert.id,
@@ -173,6 +186,7 @@ export class AlertEngine {
       label,
       firedAt: Date.now(),
       telegram: alert.config.delivery.telegram ? null : 'disabled',
+      rsiValue,
     };
 
     // Persist first — the DB unique index is the dedup floor.
@@ -180,8 +194,8 @@ export class AlertEngine {
       this.db.raw
         .prepare(
           `INSERT INTO alert_events
-             (id, alert_id, user_id, side, symbol, interval, bar_time, price, ma_value, label, fired_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (id, alert_id, user_id, side, symbol, interval, bar_time, price, ma_value, label, fired_at, telegram)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           event.id,
@@ -195,6 +209,10 @@ export class AlertEngine {
           event.maValue,
           event.label,
           event.firedAt,
+          // Note: rsiValue isn't persisted to alert_events yet — the value lives in
+          // the in-memory event we broadcast. Add a column if/when the history view
+          // needs it.
+          null,
         );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -286,12 +304,17 @@ function formatTelegramMessage(event: AlertEvent, cfg: MaCrossAlertConfig): stri
     ? `${cfg.ma.type.toUpperCase()}(${cfg.ma.length}) × ${cfg.crossWith.type.toUpperCase()}(${cfg.crossWith.length}) on ${cfg.ma.source}`
     : `${cfg.ma.type.toUpperCase()}(${cfg.ma.length}) on ${cfg.ma.source}`;
   const when = formatTime(event.barTime, cfg.timezone);
-  return [
+  const lines = [
     `<b>${side}</b> · ${escapeHtml(label)}`,
     `<b>${escapeHtml(symbol)}</b>  @  <code>${price}</code>`,
     `Triggered ${escapeHtml(when)}`,
     `<i>${escapeHtml(maStr)} · ${event.interval}</i>`,
-  ].join('\n');
+  ];
+  if (cfg.rsiFilter && event.rsiValue !== undefined) {
+    const threshold = event.side === 'buy' ? `≤ ${cfg.rsiFilter.buyBelow}` : `≥ ${cfg.rsiFilter.sellAbove}`;
+    lines.push(`<i>RSI(${cfg.rsiFilter.length}) = ${event.rsiValue.toFixed(1)} · gate ${threshold}</i>`);
+  }
+  return lines.join('\n');
 }
 
 function formatSymbolPretty(id: string): string {

@@ -42,6 +42,25 @@ export interface MaCrossAlertConfig {
     type: MaType;
     length: number;
   };
+  /**
+   * Optional RSI gate evaluated AT THE CROSSOVER BAR. When set, the engine fires only
+   * if RSI(length) satisfies the side-specific threshold:
+   *
+   *   BUY  fires only when RSI <= buyBelow
+   *   SELL fires only when RSI >= sellAbove
+   *
+   * Common setups:
+   *   - RSI(14) < 35 / > 65 — gentle filter, fires often
+   *   - RSI(6)  < 25 / > 75 — strict reversal confirmation, fires rarely
+   *
+   * The RSI value at the trigger bar is surfaced in the Telegram message so the user
+   * can see what passed the filter.
+   */
+  rsiFilter?: {
+    length: number;
+    buyBelow: number;
+    sellAbove: number;
+  };
   /** Label text shown on the chart at the crossover bar. */
   labels: {
     buy: string;
@@ -112,6 +131,8 @@ export interface AlertEvent {
   telegram?: 'sent' | 'failed' | 'disabled' | null;
   /** Optional error message if telegram delivery failed. */
   telegramError?: string;
+  /** RSI value at the trigger bar — only set when `rsiFilter` is configured. */
+  rsiValue?: number;
 }
 
 export interface TelegramConfig {

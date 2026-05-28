@@ -90,17 +90,16 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Multi-Telegram-bot support shipped (parallel to roadmap).
-- `telegram_bots` table — one row per (user, bot) with label, token, chat ID.
-- Legacy singleton `telegram_configs` row auto-migrates to `Default` label on boot.
-- Engine routes per-alert via `delivery.telegramBotId`; falls back to first enabled bot.
-- Routes: GET/POST/PUT/DELETE `/api/alerts/telegram/bots`, plus `/test` per id and `/discover-chat`.
-- UI Telegram tab: lists bots, per-row Send-test / Toggle / Delete, "+ Add bot" inline form with Auto-detect chat.
-- Saved both bots:
-  - `Default` (@dipaloMA_bot, ••Nfcs) — handles 48 swing alerts (1d EMA 5×10).
-  - `Scalp bot` (@dipaloScalp_bot, ••KfoM) — handles 48 scalp alerts.
-- Bulk-created 48 new alerts on **30m EMA(9) × EMA(21) close**, routed to Scalp bot.
-- Browser-verified: bot list renders, per-row test fires Telegram message.
+- ✅ RSI filter on MA cross + 3rd bot (`@dipaloSwing_bot`) shipped.
+- `MaCrossAlertConfig.rsiFilter?: { length, buyBelow, sellAbove }` — engine evaluates RSI
+  at the crossover bar; fires only when side-specific threshold satisfied. RSI value
+  surfaced in `AlertEvent.rsiValue` and Telegram message.
+- 3 bots saved:
+  - `Default` (•Nfcs) — 48 alerts on 1d EMA(5)×EMA(10)  *(no rsiFilter)*
+  - `Scalp bot` (•KfoM) — 48 alerts on 30m EMA(9)×EMA(21)  *(no rsiFilter)*
+  - `Swing bot` (•Xi_I) — 48 alerts on **1h EMA(20)×EMA(50) + RSI(6) gate (buy ≤ 25 / sell ≥ 75)**
+- **144 active alerts total** across the catalog.
+- Browser-verified: 3 bots render in Telegram tab, all LIVE, per-row test works.
 
 ## Next pick
 
