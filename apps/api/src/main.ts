@@ -146,7 +146,7 @@ async function start(): Promise<void> {
     broadcast: (userId, event) => wsBroadcaster.broadcastAlertFired(userId, event),
   });
   alertEngine.load();
-  alertRoutes(app, db, alertEngine);
+  alertRoutes(app, db, alertEngine, ingestion);
 
   app.addHook('onClose', async () => {
     alertEngine.shutdown();

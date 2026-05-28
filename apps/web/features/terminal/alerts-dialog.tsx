@@ -20,6 +20,7 @@ import {
   Star,
   Pencil,
   Zap,
+  Activity,
 } from 'lucide-react';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
@@ -58,6 +59,8 @@ import {
   fetchAlerts,
   fetchTelegramBots,
   fetchWatchlists,
+  runBacktest,
+  type BacktestResponse,
   MA_SOURCE_OPTIONS,
   MA_TYPE_OPTIONS,
   testTelegramBot,
@@ -269,6 +272,24 @@ function ActiveAlertsList() {
 
 function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
+  const [btOpen, setBtOpen] = useState(false);
+  const [btRunning, setBtRunning] = useState(false);
+
+  const handleBacktest = async () => {
+    setBtRunning(true);
+    setBtOpen(true);
+    try {
+      const r = await runBacktest(alert.id);
+      setBacktest(r);
+    } catch (err) {
+      toast({ title: 'Backtest failed', description: String(err), tone: 'error' });
+      setBtOpen(false);
+    } finally {
+      setBtRunning(false);
+    }
+  };
+
   const handleToggle = async () => {
     setBusy(true);
     try {
@@ -322,12 +343,172 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           )}
         </div>
       </div>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy || btRunning}
+        onClick={handleBacktest}
+        title="Run backtest"
+        className="px-2"
+      >
+        {btRunning ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Activity className="h-3.5 w-3.5 text-accent" />
+        )}
+      </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleToggle} title={alert.enabled ? 'Pause' : 'Start'}>
         <Power className={`h-3.5 w-3.5 ${alert.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
       </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleDelete} title="Delete">
         <Trash2 className="h-3.5 w-3.5 text-bear" />
       </Button>
+      <BacktestModal
+        open={btOpen}
+        onOpenChange={setBtOpen}
+        running={btRunning}
+        result={backtest}
+        alert={alert}
+      />
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────── Backtest modal */
+
+function BacktestModal({
+  open,
+  onOpenChange,
+  running,
+  result,
+  alert,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  running: boolean;
+  result: BacktestResponse | null;
+  alert: AlertDefinition;
+}) {
+  const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+  const fmtNum = (n: number, d = 2) => n.toFixed(d);
+  const s = result?.summary;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-accent" />
+            Backtest · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            {alert.config.crossWith
+              ? `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) × ${alert.config.crossWith.type.toUpperCase()}(${alert.config.crossWith.length})`
+              : `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) on ${alert.config.ma.source}`}
+            {alert.config.rsiFilter
+              ? ` · RSI(${alert.config.rsiFilter.length}) ≤${alert.config.rsiFilter.buyBelow} / ≥${alert.config.rsiFilter.sellAbove}`
+              : ''}
+          </p>
+        </DialogHeader>
+        <div className="px-5 pb-4 text-xs">
+          {running || !result ? (
+            <div className="flex h-40 items-center justify-center text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : s ? (
+            <>
+              <div className="grid grid-cols-4 gap-2">
+                <Stat label="Trades" value={String(s.trades)} />
+                <Stat label="Win rate" value={`${(s.winRate * 100).toFixed(1)}%`} />
+                <Stat
+                  label="Total return"
+                  value={fmtPct(s.totalReturnPct)}
+                  tone={s.totalReturnPct >= 0 ? 'bull' : 'bear'}
+                />
+                <Stat
+                  label="Max DD"
+                  value={`-${fmtNum(s.maxDrawdownPct)}%`}
+                  tone="bear"
+                />
+                <Stat label="Sharpe" value={fmtNum(s.sharpe)} />
+                <Stat
+                  label="Profit factor"
+                  value={Number.isFinite(s.profitFactor) ? fmtNum(s.profitFactor) : '∞'}
+                />
+                <Stat label="Avg win" value={fmtPct(s.avgWinPct)} tone="bull" />
+                <Stat label="Avg loss" value={fmtPct(s.avgLossPct)} tone="bear" />
+              </div>
+              <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                {result.barsTested} bars · avg hold {fmtNum(s.avgBars, 1)} bars · {s.wins}W /{' '}
+                {s.losses}L
+              </div>
+              <div className="mt-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Recent trades
+                </div>
+                <div className="max-h-[260px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                  <table className="w-full text-[11px] tabular-nums">
+                    <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Side</th>
+                        <th className="px-2 py-1 text-right">Entry</th>
+                        <th className="px-2 py-1 text-right">Exit</th>
+                        <th className="px-2 py-1 text-right">Bars</th>
+                        <th className="px-2 py-1 text-right">PnL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.trades
+                        .slice(-25)
+                        .reverse()
+                        .map((t, i) => (
+                          <tr key={i} className="border-t border-border/40">
+                            <td className="px-2 py-1">
+                              <Badge tone={t.side === 'buy' ? 'bull' : 'bear'}>
+                                {t.side.toUpperCase()}
+                              </Badge>
+                            </td>
+                            <td className="px-2 py-1 text-right">{t.entryPrice.toFixed(4)}</td>
+                            <td className="px-2 py-1 text-right">{t.exitPrice.toFixed(4)}</td>
+                            <td className="px-2 py-1 text-right">{t.bars}</td>
+                            <td
+                              className={`px-2 py-1 text-right ${
+                                t.pnlPercent >= 0 ? 'text-bull' : 'text-bear'
+                              }`}
+                            >
+                              {fmtPct(t.pnlPercent)}
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <p className="mt-3 text-[10px] text-muted-foreground">
+                v1 model: enter on cross (gated by RSI when configured), exit on reverse cross.
+                No SL/TP, no fees, no slippage. Use this for shape — not as a backtest of record.
+              </p>
+            </>
+          ) : null}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'bull' | 'bear';
+}) {
+  const toneCls = tone === 'bull' ? 'text-bull' : tone === 'bear' ? 'text-bear' : 'text-foreground';
+  return (
+    <div className="rounded-md border border-border/70 bg-surface-raised/40 p-2">
+      <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 text-sm font-semibold ${toneCls}`}>{value}</div>
     </div>
   );
 }

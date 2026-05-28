@@ -4,9 +4,11 @@ import { nanoid } from 'nanoid';
 import type { AppDB } from '../db';
 import { getUser } from '../auth';
 import type { AlertDefinition, AlertEvent, Interval, MaCrossAlertConfig } from '@supercharts/types';
-import { INTERVALS, SYMBOL_CATALOG } from '@supercharts/types';
+import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG } from '@supercharts/types';
+import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
+import { runMaCrossBacktest } from '../backtester';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -120,7 +122,12 @@ function rowToAlert(r: {
   };
 }
 
-export function alertRoutes(fastify: FastifyInstance, db: AppDB, engine: AlertEngine): void {
+export function alertRoutes(
+  fastify: FastifyInstance,
+  db: AppDB,
+  engine: AlertEngine,
+  ctx: IngestionContext,
+): void {
   /* ─── List alerts ─── */
   fastify.get('/api/alerts', async (req) => {
     const user = getUser(req, db);
@@ -335,6 +342,78 @@ export function alertRoutes(fastify: FastifyInstance, db: AppDB, engine: AlertEn
     db.raw.prepare('DELETE FROM alert_events WHERE alert_id = ? AND user_id = ?').run(id, user.id);
     engine.unsubscribe(id);
     return { ok: true };
+  });
+
+  /* ─── Backtest ─── */
+  // Loads the alert's symbol+interval history from the candle store (fetching from
+  // the provider when the cache is sparse), then runs `runMaCrossBacktest`. Results
+  // are NOT persisted — backtests are cheap to recompute and live in the UI.
+  fastify.post('/api/alerts/:id/backtest', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const row = db.raw
+      .prepare(
+        `SELECT id, user_id as userId, symbol_id as symbol, interval, type, config,
+                enabled, last_fired_at as lastFiredAt, created_at as createdAt, updated_at as updatedAt
+         FROM alerts WHERE id = ? AND user_id = ?`,
+      )
+      .get(id, user.id) as
+      | {
+          id: string; userId: string; symbol: string; interval: string; type: string;
+          config: string; enabled: number; lastFiredAt: number | null;
+          createdAt: number; updatedAt: number;
+        }
+      | undefined;
+    if (!row) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    if (row.type !== 'ma_cross') {
+      reply.code(400);
+      return { error: 'unsupported_alert_type', message: 'Only ma_cross alerts can be backtested in v1.' };
+    }
+    const alertCfg: MaCrossAlertConfig = JSON.parse(row.config) as MaCrossAlertConfig;
+    const interval = row.interval as Interval;
+    const symbol = row.symbol;
+
+    // Pull whatever is already in cache, then top up from the provider if we have
+    // fewer than `desired` bars. Bounded so a single backtest can't blow the cache.
+    const desired = 1000;
+    let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          // Pull a window that's roughly `desired × stepMs` long.
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+          candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          // Don't fail the backtest just because the provider blipped — run with what we have.
+          // eslint-disable-next-line no-console
+          console.warn('[backtest] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data', message: 'No candles available for this symbol/interval yet.' };
+    }
+
+    const result = runMaCrossBacktest(candles, alertCfg, interval);
+    return {
+      alertId: id,
+      symbol,
+      interval,
+      barsTested: candles.length,
+      first: candles[0]!.openTime,
+      last: candles[candles.length - 1]!.openTime,
+      ...result,
+    };
   });
 
   /* ─── Recent events / history ─── */
@@ -677,4 +756,21 @@ export function alertRoutes(fastify: FastifyInstance, db: AppDB, engine: AlertEn
       };
     }
   });
+}
+
+// Mirror of the routes/market.ts helper. Kept inline so this module is self-contained
+// against the ingestion provider map.
+function resolveProvider(symbol: string, ctx: IngestionContext) {
+  const venue = symbol.split(':')[0]?.toLowerCase();
+  if (!venue) return null;
+  switch (venue) {
+    case 'binance':
+      return ctx.providers.binance;
+    case 'oanda':
+      return ctx.providers.oanda;
+    case 'mock':
+      return ctx.providers.mock;
+    default:
+      return null;
+  }
 }

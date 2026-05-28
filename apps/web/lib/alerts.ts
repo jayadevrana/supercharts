@@ -77,6 +77,59 @@ export async function clearAlertEvents(alertId?: string): Promise<void> {
   });
 }
 
+/* ────── Backtest ────── */
+
+export interface BacktestTrade {
+  side: 'buy' | 'sell';
+  entryTime: number;
+  entryPrice: number;
+  exitTime: number;
+  exitPrice: number;
+  bars: number;
+  pnlPercent: number;
+  rsiAtEntry?: number;
+}
+
+export interface BacktestEquityPoint {
+  time: number;
+  equity: number;
+  drawdown: number;
+}
+
+export interface BacktestSummary {
+  trades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  finalEquity: number;
+  totalReturnPct: number;
+  maxDrawdownPct: number;
+  sharpe: number;
+  profitFactor: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  avgBars: number;
+}
+
+export interface BacktestResponse {
+  alertId: string;
+  symbol: string;
+  interval: Interval;
+  barsTested: number;
+  first: number;
+  last: number;
+  trades: BacktestTrade[];
+  equity: BacktestEquityPoint[];
+  summary: BacktestSummary;
+}
+
+export async function runBacktest(id: string): Promise<BacktestResponse> {
+  return api<BacktestResponse>(`/alerts/${id}/backtest`, {
+    method: 'POST',
+    body: '{}',
+  });
+}
+
 export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
   return api<AlertDefinition>('/alerts', {
     method: 'POST',

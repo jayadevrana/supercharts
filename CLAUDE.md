@@ -42,7 +42,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 ### Phase 1 — Strategy & Backtesting
 
 - [x] **1. Strategy Builder GUI v1** — `StrategyBuilderDialog` with Active / New / Templates tabs. 4 one-click presets (MA cross, RSI oversold, bullish engulfing, London session breakout). Block-based condition rows + open-position action with sizing/SL/TP/cooldown. Reuses `/api/signals` with `indicatorSpecs` thread so MA params actually take effect.
-- [ ] 2. Backtester — run a recipe over loaded candles, plot entry/exit markers + equity curve + drawdown + win-rate + Sharpe
+- [x] **2. Backtester v1** — `runMaCrossBacktest` engine + `POST /api/alerts/:id/backtest` route + result modal in Active tab. Pulls up to 1000 bars from candleStore (fetches from provider when sparse). Per-trade: enter on cross (RSI-gated when set), exit on reverse cross. Stats: trades, win rate, total return %, max DD %, Sharpe, profit factor, avg win/loss, avg bars. v1 model — no SL/TP/fees/slippage (Phase 1 #3 picks those up).
 - [ ] 3. Param optimizer — grid sweep over MA lengths / SL / TP, rank by Sharpe + max-DD
 - [ ] 4. Walk-forward analysis — train window / test window with rolling reoptimization
 - [ ] 5. Paper-trading mode — replay engine + virtual P&L on the active strategy
@@ -90,23 +90,25 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ RSI filter on MA cross + 3rd bot (`@dipaloSwing_bot`) shipped.
-- `MaCrossAlertConfig.rsiFilter?: { length, buyBelow, sellAbove }` — engine evaluates RSI
-  at the crossover bar; fires only when side-specific threshold satisfied. RSI value
-  surfaced in `AlertEvent.rsiValue` and Telegram message.
-- 3 bots saved:
-  - `Default` (•Nfcs) — 48 alerts on 1d EMA(5)×EMA(10)  *(no rsiFilter)*
-  - `Scalp bot` (•KfoM) — 48 alerts on 30m EMA(9)×EMA(21)  *(no rsiFilter)*
-  - `Swing bot` (•Xi_I) — 48 alerts on **1h EMA(20)×EMA(50) + RSI(6) gate (buy ≤ 25 / sell ≥ 75)**
-- **144 active alerts total** across the catalog.
-- Browser-verified: 3 bots render in Telegram tab, all LIVE, per-row test works.
+- ✅ Phase 1 #2 — Backtester v1 shipped.
+- New `apps/api/src/backtester.ts` — pure function `runMaCrossBacktest(candles, config, interval)`.
+- Trade model: enter on cross (RSI-gated when set), exit on reverse cross, close any
+  open at last bar. Compounds equity from 100, computes win-rate / max-DD / Sharpe /
+  profit-factor / avg win-loss / avg bars.
+- New route `POST /api/alerts/:id/backtest` — pulls up to 1000 bars from candleStore;
+  if cache is sparse, fetches from provider then re-queries.
+- UI: Activity icon on each Active alert row → opens result modal with 8 stat cards +
+  recent-trades table. v1 disclaimer in footer.
+- Browser-verified on **BTC 30m EMA(9)×EMA(21)**: 41 trades, 31.7% win, +0.44% net,
+  PF 1.04, max-DD -6.94%. Trade table rows render correctly with color-coded PnL.
+- 144 alerts + 3 bots untouched.
 
 ## Next pick
 
-**Phase 1 · #2 — Backtester.** Run a saved recipe over the candle store, emit
-entry/exit markers + equity curve + win-rate + max-DD + Sharpe. Goal: one-click "test"
-button on each recipe row that opens a result modal. Reuse existing condition evaluator
-from `signal-runner` so backtest = same code as live.
+**Phase 1 · #3 — Param optimizer.** Grid sweep over MA lengths / SL / TP / RSI
+thresholds. Ranks results by Sharpe + max-DD trade-off, returns top-N. UI: "Optimize"
+button on alert row that shows a heat-map (e.g. fast-MA length × slow-MA length, color
+= Sharpe). Reuses `runMaCrossBacktest` — just iterate configs.
 
 ## Questions for owner
 
