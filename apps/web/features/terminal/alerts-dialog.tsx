@@ -23,7 +23,9 @@ import {
   Activity,
   Sliders,
   Shuffle,
+  ClipboardList,
 } from 'lucide-react';
+import type { PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
 import {
@@ -61,6 +63,8 @@ import {
   fetchAlerts,
   fetchTelegramBots,
   fetchWatchlists,
+  fetchPaperTrades,
+  resetPaperTrades,
   runBacktest,
   runOptimize,
   runWalkForward,
@@ -288,6 +292,7 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   const [wfResult, setWfResult] = useState<WalkForwardResponse | null>(null);
   const [wfOpen, setWfOpen] = useState(false);
   const [wfRunning, setWfRunning] = useState(false);
+  const [paperOpen, setPaperOpen] = useState(false);
 
   const handleBacktest = async () => {
     setBtRunning(true);
@@ -330,6 +335,28 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       setWfOpen(false);
     } finally {
       setWfRunning(false);
+    }
+  };
+
+  const handleTogglePaper = async () => {
+    const next = !alert.config.delivery.paper;
+    try {
+      await updateAlert(alert.id, {
+        config: {
+          ...alert.config,
+          delivery: { ...alert.config.delivery, paper: next },
+        },
+      });
+      toast({
+        title: next ? 'Paper-trading on' : 'Paper-trading off',
+        description: next
+          ? 'Virtual positions will open on the next cross.'
+          : 'Existing virtual positions stay; new fires skip paper book-keeping.',
+        tone: 'success',
+      });
+      onChange();
+    } catch (err) {
+      toast({ title: 'Toggle failed', description: String(err), tone: 'error' });
     }
   };
 
@@ -444,6 +471,20 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           <Shuffle className="h-3.5 w-3.5 text-accent" />
         )}
       </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => setPaperOpen(true)}
+        title={alert.config.delivery.paper ? 'Paper trades (on)' : 'Paper trades (off)'}
+        className="px-2"
+      >
+        <ClipboardList
+          className={`h-3.5 w-3.5 ${
+            alert.config.delivery.paper ? 'text-bull' : 'text-muted-foreground'
+          }`}
+        />
+      </Button>
       <Button size="sm" variant="ghost" disabled={busy} onClick={handleToggle} title={alert.enabled ? 'Pause' : 'Start'}>
         <Power className={`h-3.5 w-3.5 ${alert.enabled ? 'text-bull' : 'text-muted-foreground'}`} />
       </Button>
@@ -472,7 +513,213 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
         result={wfResult}
         alert={alert}
       />
+      <PaperTradesModal
+        open={paperOpen}
+        onOpenChange={setPaperOpen}
+        alert={alert}
+        onToggle={handleTogglePaper}
+      />
     </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────── Paper trades modal */
+
+function PaperTradesModal({
+  open,
+  onOpenChange,
+  alert,
+  onToggle,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  alert: AlertDefinition;
+  onToggle: () => void | Promise<void>;
+}) {
+  const [trades, setTrades] = useState<PaperTrade[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const reload = useCallback(async () => {
+    try {
+      setTrades(await fetchPaperTrades(alert.id, 100));
+    } catch {
+      setTrades([]);
+    }
+  }, [alert.id]);
+  useEffect(() => {
+    if (!open) return;
+    void reload();
+    // Auto-refresh every 8s while the modal is open so live positions update.
+    const id = setInterval(() => void reload(), 8_000);
+    return () => clearInterval(id);
+  }, [open, reload]);
+
+  const handleReset = async (wipe: boolean) => {
+    const msg = wipe
+      ? 'Wipe ALL paper trade history for this alert?\n\nClosed + open positions deleted. Cannot undo.'
+      : 'Close every open paper position for this alert at break-even (pnl = 0)?\n\nClosed history is preserved.';
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      await resetPaperTrades(alert.id, wipe);
+      await reload();
+      toast({ title: wipe ? 'Paper history wiped' : 'Open positions closed', tone: 'success' });
+    } catch (err) {
+      toast({ title: 'Failed', description: String(err), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openTrade = trades?.find((t) => t.status === 'open');
+  const closed = trades?.filter((t) => t.status === 'closed') ?? [];
+  const wins = closed.filter((t) => (t.pnlPercent ?? 0) > 0).length;
+  const losses = closed.filter((t) => (t.pnlPercent ?? 0) <= 0).length;
+  const totalReturn = closed.reduce((acc, t) => acc + (t.pnlPercent ?? 0), 0);
+  const winRate = closed.length > 0 ? (wins / closed.length) * 100 : 0;
+  const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-accent" />
+            Paper trades · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground">
+            Virtual positions auto-opened by the engine on each cross fire. No real orders,
+            no MT5 — pure book-keeping so you can sanity-check this alert's live edge.
+          </p>
+        </DialogHeader>
+        <div className="px-5 pb-4 text-xs">
+          <div className="mb-3 flex items-center justify-between rounded-md border border-border/70 bg-surface-raised px-3 py-2">
+            <div>
+              <div className="font-semibold">
+                Paper-trading{' '}
+                <Badge tone={alert.config.delivery.paper ? 'bull' : 'muted'}>
+                  {alert.config.delivery.paper ? 'ON' : 'OFF'}
+                </Badge>
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                Toggle to start/stop virtual position book-keeping on this alert's fires.
+              </div>
+            </div>
+            <Switch
+              checked={!!alert.config.delivery.paper}
+              onCheckedChange={() => void onToggle()}
+            />
+          </div>
+
+          {trades == null ? (
+            <div className="flex h-32 items-center justify-center text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-2">
+                <Stat label="Closed" value={String(closed.length)} />
+                <Stat label="Win rate" value={`${winRate.toFixed(1)}%`} />
+                <Stat
+                  label="Total return"
+                  value={fmtPct(totalReturn)}
+                  tone={totalReturn >= 0 ? 'bull' : 'bear'}
+                />
+                <Stat
+                  label="W / L"
+                  value={`${wins} / ${losses}`}
+                />
+              </div>
+              {openTrade ? (
+                <div className="mt-3 rounded-md border border-accent/60 bg-accent/10 px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <Badge tone={openTrade.side === 'buy' ? 'bull' : 'bear'}>
+                      {openTrade.side.toUpperCase()} · OPEN
+                    </Badge>
+                    <span className="text-[11px] text-muted-foreground">
+                      since {new Date(openTrade.entryTime).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px]">
+                    entry <code>{openTrade.entryPrice.toFixed(4)}</code>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-md border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+                  No open position. Fires until the next cross.
+                </div>
+              )}
+              <div className="mt-3">
+                <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Closed trades ({closed.length})
+                </div>
+                <div className="max-h-[260px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                  <table className="w-full text-[11px] tabular-nums">
+                    <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Side</th>
+                        <th className="px-2 py-1 text-right">Entry</th>
+                        <th className="px-2 py-1 text-right">Exit</th>
+                        <th className="px-2 py-1 text-right">PnL</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {closed.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="px-2 py-3 text-center text-muted-foreground">
+                            None yet.
+                          </td>
+                        </tr>
+                      ) : (
+                        closed.slice(0, 50).map((t) => (
+                          <tr key={t.id} className="border-t border-border/40">
+                            <td className="px-2 py-1">
+                              <Badge tone={t.side === 'buy' ? 'bull' : 'bear'}>
+                                {t.side.toUpperCase()}
+                              </Badge>
+                            </td>
+                            <td className="px-2 py-1 text-right">{t.entryPrice.toFixed(4)}</td>
+                            <td className="px-2 py-1 text-right">
+                              {t.exitPrice ? t.exitPrice.toFixed(4) : '—'}
+                            </td>
+                            <td
+                              className={`px-2 py-1 text-right ${
+                                (t.pnlPercent ?? 0) >= 0 ? 'text-bull' : 'text-bear'
+                              }`}
+                            >
+                              {fmtPct(t.pnlPercent ?? 0)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void handleReset(false)}
+                  className="gap-1"
+                >
+                  Close open
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => void handleReset(true)}
+                  className="gap-1 text-bear"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Wipe history
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

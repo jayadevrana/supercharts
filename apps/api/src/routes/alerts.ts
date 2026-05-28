@@ -476,6 +476,103 @@ export function alertRoutes(
     };
   });
 
+  /* ─── Paper trading queries ─── */
+  // List virtual trades for a single alert (open one first, then most-recent closed).
+  fastify.get('/api/alerts/:id/paper-trades', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const own = db.raw
+      .prepare('SELECT 1 FROM alerts WHERE id = ? AND user_id = ?')
+      .get(id, user.id);
+    if (!own) {
+      reply.code(404);
+      return { error: 'not_found' };
+    }
+    const limit = Math.min(Number((req.query as { limit?: string }).limit ?? 50), 500);
+    const rows = db.raw
+      .prepare(
+        `SELECT id, alert_id as alertId, user_id as userId, symbol, interval, side, status,
+                entry_time as entryTime, entry_price as entryPrice,
+                exit_time as exitTime, exit_price as exitPrice,
+                pnl_percent as pnlPercent, bars
+         FROM paper_trades
+         WHERE alert_id = ? AND user_id = ?
+         ORDER BY status = 'open' DESC, entry_time DESC
+         LIMIT ?`,
+      )
+      .all(id, user.id, limit);
+    return { items: rows };
+  });
+
+  /** Aggregate paper-trading summary across every alert the user has paper-flagged. */
+  fastify.get('/api/alerts/paper/summary', async (req) => {
+    const user = getUser(req, db);
+    const rows = db.raw
+      .prepare(
+        `SELECT alert_id as alertId,
+                SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closedTrades,
+                SUM(CASE WHEN status = 'closed' AND pnl_percent > 0 THEN 1 ELSE 0 END) as wins,
+                SUM(CASE WHEN status = 'closed' AND pnl_percent <= 0 THEN 1 ELSE 0 END) as losses,
+                COALESCE(SUM(CASE WHEN status = 'closed' THEN pnl_percent ELSE 0 END), 0) as totalReturnPct
+         FROM paper_trades
+         WHERE user_id = ?
+         GROUP BY alert_id`,
+      )
+      .all(user.id) as Array<{
+      alertId: string;
+      closedTrades: number;
+      wins: number;
+      losses: number;
+      totalReturnPct: number;
+    }>;
+    const openRows = db.raw
+      .prepare(
+        `SELECT id, alert_id as alertId, user_id as userId, symbol, interval, side,
+                entry_time as entryTime, entry_price as entryPrice
+         FROM paper_trades WHERE user_id = ? AND status = 'open'`,
+      )
+      .all(user.id) as Array<{
+      id: string; alertId: string; userId: string; symbol: string; interval: string;
+      side: 'buy' | 'sell'; entryTime: number; entryPrice: number;
+    }>;
+    const openByAlert = new Map(openRows.map((r) => [r.alertId, r]));
+    return {
+      items: rows.map((r) => ({
+        alertId: r.alertId,
+        closedTrades: r.closedTrades,
+        wins: r.wins,
+        losses: r.losses,
+        winRate: r.closedTrades > 0 ? r.wins / r.closedTrades : 0,
+        totalReturnPct: r.totalReturnPct,
+        openPosition: openByAlert.get(r.alertId)
+          ? { ...openByAlert.get(r.alertId)!, status: 'open' as const }
+          : undefined,
+      })),
+    };
+  });
+
+  // Force-close every still-open paper position for an alert (or wipe history with
+  // ?wipe=1). Helpful when the user wants to reset after parameter changes.
+  fastify.post('/api/alerts/:id/paper/reset', async (req) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const wipe = (req.query as { wipe?: string }).wipe === '1';
+    if (wipe) {
+      db.raw
+        .prepare('DELETE FROM paper_trades WHERE alert_id = ? AND user_id = ?')
+        .run(id, user.id);
+    } else {
+      db.raw
+        .prepare(
+          `UPDATE paper_trades SET status = 'closed', exit_time = ?, exit_price = entry_price,
+             pnl_percent = 0
+           WHERE alert_id = ? AND user_id = ? AND status = 'open'`,
+        )
+        .run(Date.now(), id, user.id);
+    }
+    return { ok: true };
+  });
+
   /* ─── Walk-forward analysis ─── */
   // Rolling train/test windows. On each train slice, run the optimizer; lock the
   // winning config; apply it to the immediately-following test slice; accumulate

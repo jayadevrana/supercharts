@@ -4,6 +4,8 @@ import type {
   AlertEvent,
   Interval,
   MaCrossAlertConfig,
+  PaperSummary,
+  PaperTrade,
   TelegramBot,
   TelegramConfig,
 } from '@supercharts/types';
@@ -203,6 +205,28 @@ export async function runWalkForward(
   return api<WalkForwardResponse>(`/alerts/${id}/walk-forward`, {
     method: 'POST',
     body: JSON.stringify(body),
+  });
+}
+
+/* ────── Paper trading ────── */
+
+export async function fetchPaperTrades(alertId: string, limit = 50): Promise<PaperTrade[]> {
+  const r = await api<{ items: PaperTrade[] }>(`/alerts/${alertId}/paper-trades`, {
+    searchParams: { limit: String(limit) },
+  });
+  return r.items;
+}
+
+export async function fetchPaperSummary(): Promise<PaperSummary[]> {
+  const r = await api<{ items: PaperSummary[] }>('/alerts/paper/summary');
+  return r.items;
+}
+
+export async function resetPaperTrades(alertId: string, wipe = false): Promise<void> {
+  await api(`/alerts/${alertId}/paper/reset`, {
+    method: 'POST',
+    body: '{}',
+    searchParams: wipe ? { wipe: '1' } : undefined,
   });
 }
 

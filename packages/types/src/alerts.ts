@@ -76,6 +76,12 @@ export interface MaCrossAlertConfig {
      * groups to different bots (e.g. swing → Default bot, scalp → Scalp bot).
      */
     telegramBotId?: string;
+    /**
+     * When true, the alert opens a virtual paper-trade on every fire. Reverse fires
+     * close + flip. No real orders — pure book-keeping in `paper_trades`. Lets users
+     * see what their alert would have made in real time before wiring it to MT5.
+     */
+    paper?: boolean;
   };
   /**
    * IANA timezone for the formatted timestamp in the Telegram message,
@@ -144,6 +150,38 @@ export interface TelegramConfig {
   /** Master switch — disables ALL telegram delivery while still keeping config. */
   enabled: boolean;
   updatedAt?: number;
+}
+
+/**
+ * Paper trade record — virtual position opened/closed by the alert engine. Live
+ * (still-open) positions have `status='open'` and `exitPrice`/`exitTime` unset.
+ */
+export interface PaperTrade {
+  id: string;
+  alertId: string;
+  userId: string;
+  symbol: string;
+  interval: Interval;
+  side: 'buy' | 'sell';
+  status: 'open' | 'closed';
+  entryTime: number;
+  entryPrice: number;
+  exitTime?: number;
+  exitPrice?: number;
+  /** Realised P&L in percent — null while open. */
+  pnlPercent?: number;
+  /** Bars held — null while open. */
+  bars?: number;
+}
+
+export interface PaperSummary {
+  alertId: string;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  totalReturnPct: number;
+  openPosition?: PaperTrade;
 }
 
 /**

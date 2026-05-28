@@ -45,7 +45,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 - [x] **2. Backtester v1** — `runMaCrossBacktest` engine + `POST /api/alerts/:id/backtest` route + result modal in Active tab. Pulls up to 1000 bars from candleStore (fetches from provider when sparse). Per-trade: enter on cross (RSI-gated when set), exit on reverse cross. Stats: trades, win rate, total return %, max DD %, Sharpe, profit factor, avg win/loss, avg bars. v1 model — no SL/TP/fees/slippage (Phase 1 #3 picks those up).
 - [x] **3. Param optimizer v1** — `runOptimizer` engine + `POST /api/alerts/:id/optimize`. Grid sweeps fast/slow MA lengths (and RSI thresholds when filter set), reuses backtester per combo, ranks by composite score (Sharpe − 0.02 × Max-DD). UI: Sliders icon per alert row → results table with Apply button to overwrite alert config.
 - [x] **4. Walk-forward analysis v1** — `runWalkForward` engine + `POST /api/alerts/:id/walk-forward`. Rolling 250-bar train / 60-bar test windows. Optimizer picks per train slice, OOS backtest on test slice. Aggregates OOS equity + computes robustness (OOS Sharpe / mean train Sharpe). UI: Shuffle icon → modal with 8 stat cards (Generalises ≥0.7 / Marginal 0.3-0.7 / Curve-fit <0.3) + per-window picks table.
-- [ ] 5. Paper-trading mode — replay engine + virtual P&L on the active strategy
+- [x] **5. Paper-trading mode v1** — per-alert `delivery.paper` flag. Engine opens a virtual position on every cross fire, closes + flips on opposite fire. Persisted in `paper_trades`. New routes: GET `/api/alerts/:id/paper-trades`, GET `/api/alerts/paper/summary`, POST `/api/alerts/:id/paper/reset` (close-open or wipe). UI: ClipboardList icon per alert row → modal with toggle, 4 stat cards (Closed / Win rate / Total return / W-L), live open-position card, closed-trades table, Close-open + Wipe-history actions.
 
 ### Phase 2 — Risk & Portfolio
 
@@ -90,26 +90,25 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Phase 1 #4 — Walk-Forward Analysis v1 shipped.
-- `apps/api/src/walk-forward.ts` — `runWalkForward(candles, base, interval, opts)`.
-  Default 250-bar train / 60-bar test, non-overlapping. Per window: optimize on train,
-  pick winning combo, backtest OOS on test, accumulate trades.
-- Aggregate: OOS return / Sharpe / max-DD / win rate + **robustness = OOS Sharpe / mean
-  train Sharpe**. ≥0.7 generalises, 0.3-0.7 marginal, <0.3 curve-fit.
-- `POST /api/alerts/:id/walk-forward` (pulls 1500 bars from candleStore + provider).
-- UI: Shuffle icon per alert row → modal with 8 stat cards (Generalises badge tone)
-  + per-window picks table (config, train Sharpe, test return / trades / DD).
-- Browser-verified on **BTC 1d EMA(5)×(10)**: 20 windows · +112.2% OOS · 29.6% win ·
-  -33.7% DD · OOS Sharpe 0.83 · train Sharpe 0.96 · **robustness 0.87 (Generalises)**.
-- 144 alerts + 3 bots untouched.
+- ✅ Phase 1 #5 — Paper-trading mode v1 shipped. **Phase 1 fully complete (5/5).**
+- New `paper_trades` table (alert_id / side / status / entry / exit / pnl_percent).
+- `MaCrossAlertConfig.delivery.paper` flag — when true, engine opens a virtual
+  position on every closed-bar fire and closes + flips on the next opposite fire.
+  Same-side fires ignored.
+- Routes: GET `/api/alerts/:id/paper-trades`, GET `/api/alerts/paper/summary`,
+  POST `/api/alerts/:id/paper/reset?wipe=1`.
+- UI: ClipboardList icon per alert row → Paper Trades modal with paper-toggle Switch,
+  4 stat cards (Closed / Win rate / Total return / W-L), open-position highlight card,
+  closed-trades table, Close-open + Wipe-history footer buttons.
+- Browser-verified on **BTC 30m EMA(9)×(21)** — modal renders empty state correctly
+  (no fires since flag flipped); toggle calls updateAlert, refreshes the list.
+- All 144 alerts + 3 Telegram bots untouched.
 
 ## Next pick
 
-**Phase 1 · #5 — Paper-trading mode.** Replay engine + virtual P&L on the active
-strategy. Goal: a "Paper" toggle that, for an enabled alert, simulates trades in
-real-time (no MT5) and tracks running P&L. Reuses existing alert engine's cross
-detector + backtester's pnl math. UI: paper-mode toggle on alert row + live virtual
-position card on the chart.
+**Phase 2 · #6 — Position sizer (Kelly / fixed-fractional / ATR-scaled).** Wire into
+strategy builder + alert config so per-trade size scales with risk instead of fixed
+0.01 lots. Foundation for proper portfolio sizing in Phase 2 #7 (correlation matrix).
 
 ## Questions for owner
 

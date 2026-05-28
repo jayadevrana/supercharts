@@ -216,6 +216,28 @@ function migrate(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_telegram_bots_user ON telegram_bots(user_id);
 
+    -- Virtual paper trades opened by the alert engine when the alert's
+    -- delivery.paper flag is on. status='open' = still live; pnl_percent null until
+    -- the position closes (on the next opposite cross OR explicit close).
+    CREATE TABLE IF NOT EXISTS paper_trades (
+      id           TEXT PRIMARY KEY,
+      alert_id     TEXT NOT NULL,
+      user_id      TEXT NOT NULL,
+      symbol       TEXT NOT NULL,
+      interval     TEXT NOT NULL,
+      side         TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'open',
+      entry_time   INTEGER NOT NULL,
+      entry_price  REAL NOT NULL,
+      exit_time    INTEGER,
+      exit_price   REAL,
+      pnl_percent  REAL,
+      bars         INTEGER,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_papertrades_alert ON paper_trades(alert_id, status);
+    CREATE INDEX IF NOT EXISTS idx_papertrades_user ON paper_trades(user_id, status);
+
     CREATE TABLE IF NOT EXISTS user_preferences (
       user_id     TEXT PRIMARY KEY,
       theme       TEXT NOT NULL DEFAULT 'dark',

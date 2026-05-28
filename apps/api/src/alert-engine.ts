@@ -227,6 +227,13 @@ export class AlertEngine {
       .prepare('UPDATE alerts SET last_fired_at = ?, updated_at = ? WHERE id = ?')
       .run(event.barTime, Date.now(), alert.id);
 
+    // Paper-trading book-keeping: open a virtual position on every fire; if a prior
+    // position is still open for this alert, close + flip it first. Pure book-keeping
+    // — no MT5 round-trip — so it stays consistent across restarts.
+    if (alert.config.delivery.paper) {
+      this.bookPaperTrade(alert, event);
+    }
+
     // Broadcast to web (toast + chart marker) regardless of telegram config.
     if (alert.config.delivery.web) {
       this.broadcast(alert.userId, event);
@@ -288,6 +295,44 @@ export class AlertEngine {
     this.db.raw
       .prepare('UPDATE alert_events SET telegram = ?, telegram_error = ? WHERE id = ?')
       .run(status, errorMsg ?? null, eventId);
+  }
+
+  /**
+   * Paper-trade book-keeping.
+   *
+   * Lifecycle per alert:
+   *   - No open position → insert a fresh row in 'open' state at the event's price.
+   *   - Opposite-side open position → close it (compute pnl%) and insert a new
+   *     opposite position. Always at most one position per alert.
+   *   - Same-side fire → no-op (the cross detector already filters re-entries; this
+   *     guards against any scheduler quirk that double-fires the same direction).
+   */
+  private bookPaperTrade(alert: AlertDefinition, event: AlertEvent): void {
+    const open = this.db.raw
+      .prepare(
+        `SELECT id, side, entry_price as entryPrice FROM paper_trades
+         WHERE alert_id = ? AND status = 'open' ORDER BY entry_time DESC LIMIT 1`,
+      )
+      .get(alert.id) as { id: string; side: 'buy' | 'sell'; entryPrice: number } | undefined;
+    if (open) {
+      if (open.side === event.side) return;
+      const pnl =
+        open.side === 'buy'
+          ? ((event.price - open.entryPrice) / open.entryPrice) * 100
+          : ((open.entryPrice - event.price) / open.entryPrice) * 100;
+      this.db.raw
+        .prepare(
+          `UPDATE paper_trades SET status = 'closed', exit_time = ?, exit_price = ?, pnl_percent = ?
+           WHERE id = ?`,
+        )
+        .run(event.barTime, event.price, pnl, open.id);
+    }
+    this.db.raw
+      .prepare(
+        `INSERT INTO paper_trades (id, alert_id, user_id, symbol, interval, side, status, entry_time, entry_price)
+         VALUES (?, ?, ?, ?, ?, ?, 'open', ?, ?)`,
+      )
+      .run(nanoid(), alert.id, alert.userId, alert.symbol, alert.interval, event.side, event.barTime, event.price);
   }
 }
 
