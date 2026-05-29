@@ -5,7 +5,13 @@
  * and runs it in the same Node process. The standalone `main` is here so the same code
  * can scale out to a dedicated worker when traffic grows.
  */
-import { BinanceProvider, MockProvider, OandaProvider } from '@supercharts/market-data';
+import {
+  BinanceProvider,
+  MockProvider,
+  OandaProvider,
+  YahooProvider,
+  type MarketDataProvider,
+} from '@supercharts/market-data';
 import { SubscriptionManager } from './subscription-manager';
 import { bus } from './event-bus';
 import { candleStore } from './candle-store';
@@ -25,7 +31,12 @@ export interface IngestionContext {
   bus: typeof bus;
   providers: {
     binance: BinanceProvider;
-    oanda: OandaProvider;
+    /**
+     * Forex / metals / indices provider. OANDA when a token is configured; otherwise
+     * the free YahooProvider (no key). Routes only touch the shared interface, so the
+     * concrete type doesn't matter to callers.
+     */
+    oanda: MarketDataProvider;
     mock: MockProvider;
   };
 }
@@ -33,14 +44,22 @@ export interface IngestionContext {
 export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): Promise<IngestionContext> {
   const binanceEnabled = env.BINANCE_ENABLED !== 'false';
   const binance = new BinanceProvider();
-  const oanda = new OandaProvider({
-    apiToken: env.OANDA_API_TOKEN,
-    accountId: env.OANDA_ACCOUNT_ID,
-    env: env.OANDA_ENV === 'live' ? 'live' : 'practice',
-  });
+  // Forex/metals/indices: prefer OANDA when a token is set (true broker prices),
+  // otherwise fall back to the free Yahoo Finance feed so these symbols still produce
+  // candles + alerts with zero cost / zero signup.
+  const hasOanda = Boolean(env.OANDA_API_TOKEN && env.OANDA_ACCOUNT_ID);
+  const forex: MarketDataProvider = hasOanda
+    ? new OandaProvider({
+        apiToken: env.OANDA_API_TOKEN,
+        accountId: env.OANDA_ACCOUNT_ID,
+        env: env.OANDA_ENV === 'live' ? 'live' : 'practice',
+      })
+    : new YahooProvider();
   const mock = new MockProvider();
 
-  const subscriptions = new SubscriptionManager({ binance, oanda, mock });
+  // Registered under the `oanda` key so the venue resolver (`OANDA:` → providers.oanda)
+  // and every route keep working unchanged regardless of which feed is active.
+  const subscriptions = new SubscriptionManager({ binance, oanda: forex, mock });
 
   if (binanceEnabled) {
     try {
@@ -52,6 +71,13 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
   }
   // Mock is always running; gives developers a baseline even offline.
   await mock.connect();
+  // Forex feed (OANDA or Yahoo) — connect is cheap/idempotent for both.
+  try {
+    await forex.connect();
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[ingestion] forex provider connect failed:', err);
+  }
 
   // Backfill ~1 year of medium-frequency history for the default watchlist symbols.
   // Runs in the background so the API can serve immediately while history streams in.
@@ -80,7 +106,7 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
     deepTradeDetector,
     heatmapAggregator,
     bus,
-    providers: { binance, oanda, mock },
+    providers: { binance, oanda: forex, mock },
   };
 }
 

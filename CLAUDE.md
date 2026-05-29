@@ -12,7 +12,7 @@ Repo: `/Volumes/PortableSSD/new start/supercharts` (pnpm monorepo).
 - **Web**: Next.js 15 App Router · React 19 RC · Tailwind · Radix · Zustand
 - **API**: Fastify 5 · @fastify/websocket · `node:sqlite` (Node 26) · zod
 - **Indicators / chart engine**: Canvas 2D, layered `Layer` interface in `packages/chart-core`
-- **Market data**: Binance public WS (no key) · OANDA (token via env) · MockProvider for dev
+- **Market data**: Binance public WS (no key) · OANDA (token via env) · **Yahoo Finance (free, no key — FX/metals/indices fallback when no OANDA token)** · MockProvider for dev
 - **MT5**: Custom TCP bridge on :7878 + intent router + signal-runner
 - **Telegram**: HTTP bot API, token stored server-side (last 4 chars to client)
 
@@ -90,7 +90,24 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Live PnL on paper trades (TradingView-style).
+- ✅ Free forex/metals/indices data via new `YahooProvider` (no OANDA token needed).
+- `packages/market-data/src/providers/yahoo.ts` — Yahoo Finance chart API, no key.
+  Maps catalog OANDA ids → Yahoo tickers (EUR_USD→EURUSD=X, XAU_USD→GC=F,
+  SPX500_USD→^GSPC, …). REST `fetchHistoricalCandles` (period1/period2) + poll-based
+  `subscribeCandles` (¼-bar, 15s–5min) emitting closed bars. volumeKind 'tick'.
+- Bootstrap picks OANDA when token present, else Yahoo — registered under the `oanda`
+  provider key so the venue resolver + all routes are unchanged.
+- Verified live: yahoo **114 subs (38 symbols × 3 TF)** — every previously-dark alert
+  now has data. EUR/USD 1d backtest pulled 711 real Yahoo bars (74 trades); gold
+  (4534) + S&P500 (7563) candles flowing.
+- Caveats (documented in provider): unofficial endpoint, IP-rate-limited, poll-only,
+  no real FX volume, indices only during session. Fine for personal MVP, not resale.
+- Also fixed 3 review bugs (ATR pip-size, telegram-status persist, MA warmup window).
+- 144 alerts + 3 Telegram bots untouched; crypto still on Binance.
+
+## Earlier
+
+- Live PnL on paper trades (TradingView-style).
 - Server marks every open paper position against `candleStore`'s latest close on each
   query — no WebSocket plumbing, sub-5ms per portfolio call. Open rows now carry
   `currentPrice`, `unrealizedPct`, `markedAt`.
