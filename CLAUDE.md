@@ -90,6 +90,14 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🔌 **Fixed frozen-chart-after-reconnect.** The terminal WS already had backoff reconnect,
+  but a backgrounded tab throttles the timer, so after a server restart / network blip the
+  chart could stay frozen for a long time. `ws-client.ts` now reconnects **immediately on
+  tab focus + `online`** (resets backoff), exposes a `WSStatus` + `useWSStatus()` hook, and
+  the top-bar badge shows **live / reconnecting / offline** (green/amber/red, pulsing). On
+  reconnect the server's `market_snapshot` re-anchors the chart to now. Verified live:
+  killed the API → badge → RECONNECTING; relaunched → auto-healed to LIVE + chart re-anchored,
+  no manual reload.
 - 📊 **Phase 2 #8 — Per-strategy P&L attribution.** `apps/api/src/pnl-attribution.ts`
   (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up by alert (strategy
   instance), by strategy *signature* (MA/RSI recipe across symbols), and by asset class.

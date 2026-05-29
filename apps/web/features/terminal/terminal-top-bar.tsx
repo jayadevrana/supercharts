@@ -26,6 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
+import { useWSStatus } from '@/lib/ws-client';
 import type { ChartType, Interval } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 
@@ -95,6 +96,7 @@ export function TerminalTopBar() {
   } = useTerminalStore();
   const active = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
   const [saving, setSaving] = useState(false);
+  const wsStatus = useWSStatus();
   // Strategy + Alerts dialogs are self-contained (own their open state).
 
   const saveLayout = useCallback(async () => {
@@ -222,8 +224,23 @@ export function TerminalTopBar() {
         <Button variant="outline" size="icon" aria-label="Settings">
           <Cog className="h-4 w-4" />
         </Button>
-        <Badge tone="bull" className="hidden md:inline-flex">
-          live
+        <Badge
+          tone={wsStatus === 'open' ? 'bull' : wsStatus === 'connecting' ? 'warn' : 'bear'}
+          className="hidden items-center gap-1.5 md:inline-flex"
+          title={
+            wsStatus === 'open'
+              ? 'Live data stream connected'
+              : wsStatus === 'connecting'
+                ? 'Reconnecting to live data…'
+                : 'Disconnected'
+          }
+        >
+          <span
+            className={`inline-block h-1.5 w-1.5 rounded-full ${
+              wsStatus === 'open' ? 'bg-current' : 'animate-pulse bg-current'
+            }`}
+          />
+          {wsStatus === 'open' ? 'live' : wsStatus === 'connecting' ? 'reconnecting' : 'offline'}
         </Badge>
       </div>
     </header>
