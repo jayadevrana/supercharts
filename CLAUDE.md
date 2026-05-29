@@ -90,35 +90,38 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 🔴→🟢 Fixed the **cold-start false-alert flood** ("alerts coming wrong"): on boot 81
-  alerts fired in ONE second (buy+sell on the same symbol) because the Yahoo poll emitted
-  a batch of recent bars and the engine replayed each pre-existing cross as a "live" fire.
-- `apps/api/src/alert-engine.ts`: new `initSubscription()` runs once per alert —
-  (1) backfills `max(longestMa*3+50, 150)` real closed bars into the store so MAs are
-  computed on real history, not a thin poll window; (2) seeds `lastFiredAt` to the newest
-  stored bar so ONLY bars closing AFTER subscription can fire; (3) then wires the candle
-  listener. A `wanted` Set guards the async backfill→listen race; `resolveProvider()`
-  maps the venue prefix to the right feed for backfill.
-- Wiped 156 bogus events + paper trades + reset all watermarks. Restarted → **0 events in
-  25s, no burst** (was 81/sec).
-- Verified crosses are REAL: independently recomputed EMA9×21 on raw BTC 30m candles → 8
-  crosses / 120 bars (latest SELL 05-29 02:30 @ 73225). Chart screenshot shows SCALP
-  BUY/SELL chips sitting exactly on those cross bars (yellow EMA9 over blue EMA21 = BUY,
-  under = SELL). Labels honest — sent to owner.
-- 144 alerts + 3 Telegram bots untouched.
+- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert now ships with a rendered
+  PNG of the crossover so it's self-proving (owner asked: "send a photo that cross is
+  happening on that symbol").
+- `apps/api/src/alert-chart.ts` (NEW): server-side candlestick renderer via
+  `@napi-rs/canvas` (prebuilt N-API binary — no native build, ABI-stable on Node 26).
+  Draws candles + both EMA legs + a BUY/SELL triangle-and-chip **on the exact bar that
+  crossed**, using the SAME `computeMaCross` math as the fire, so the picture can't drift
+  from the signal. Dark theme matches the terminal; price axis, time axis (date for ≥1d,
+  time intraday), legend, watermark. ~10-30ms, ~65KB PNG.
+- `telegram.ts`: new `sendTelegramPhoto()` — multipart `sendPhoto` built from native
+  FormData + Blob (no new HTTP dep), 15s timeout.
+- `alert-engine.ts`: on a telegram fire, render the chart and send it as a photo with the
+  alert text as caption; **degrades to text-only** if render or upload fails (an alert is
+  never dropped). `sourceNote` tags the feed (Binance/Yahoo/…).
+- Verified: rendered real BTC 30m (SELL + BUY) + ETH 1d charts, marker lands exactly on
+  the cross; **sent a live verification photo to the owner's chat** (BTC/USDT 30m). Both
+  BUY (green triangle below) + SELL (red triangle above) confirmed.
+- Confirmed `/api/candles` returns sorted, dedup'd, stable bars (ruled out a data-ordering
+  cause for bad crosses). 144 alerts + 3 Telegram bots untouched.
 
 ## Earlier
 
-- Free FX/metals/indices via `YahooProvider` (no OANDA token). Maps catalog OANDA ids →
-  Yahoo tickers; REST backfill + poll-based closed-bar emit, volumeKind 'tick'. Bootstrap
-  picks OANDA when token set, else Yahoo, registered under the `oanda` provider key so the
-  venue resolver + all routes are unchanged. Verified 114 subs (38 symbols × 3 TF);
-  EUR/USD 1d backtest = 711 real bars. Caveats: unofficial endpoint, poll-only, no real FX
-  volume — fine for personal MVP, not resale.
+- 🔴→🟢 Fixed the **cold-start false-alert flood** ("alerts coming wrong"): on boot 81
+  alerts fired in one second because the Yahoo poll emitted a batch of recent bars and the
+  engine replayed each pre-existing cross. New `initSubscription()` backfills real history
+  + seeds `lastFiredAt` to the newest bar BEFORE wiring the listener, so only bars closing
+  after subscribe can fire. Verified 0 events / no burst post-restart. Crypto could never
+  flood (Binance WS streams one closed bar at a time; backfill/upsert are bus-silent) — the
+  flood was the 114 forex alerts waking up on Yahoo; the 30 crypto alerts were clean.
+- Free FX/metals/indices via `YahooProvider` (no OANDA token). 114 subs verified.
 - Fixed 3 review bugs (ATR pip-size, telegram-status persist, MA warmup window).
-- Live PnL on paper trades (TradingView-style): server marks open positions to latest
-  close per query; `PaperSummary` + `/api/alerts/paper/portfolio` carry unrealized +
-  total %; modal polls 3s with colour-coded `LiveOpenPositionCard`.
+- Live PnL on paper trades (TradingView-style), portfolio aggregate route + 3s modal.
 
 ## Next pick
 

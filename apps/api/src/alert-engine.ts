@@ -10,7 +10,13 @@ import { INTERVAL_MS } from '@supercharts/types';
 import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart-core/pure';
 import { nanoid } from 'nanoid';
 import type { AppDB } from './db';
-import { sendTelegramMessage, type TelegramSender } from './telegram';
+import {
+  sendTelegramMessage,
+  sendTelegramPhoto,
+  type TelegramSender,
+  type TelegramPhotoSender,
+} from './telegram';
+import { renderMaCrossChart } from './alert-chart';
 
 /**
  * Server-side MA cross alert engine.
@@ -41,6 +47,8 @@ export interface AlertEngineOptions {
   broadcast: WebBroadcaster;
   /** Override the telegram sender for tests. */
   telegram?: TelegramSender;
+  /** Override the telegram photo sender for tests. */
+  telegramPhoto?: TelegramPhotoSender;
 }
 
 export class AlertEngine {
@@ -48,6 +56,7 @@ export class AlertEngine {
   private readonly ctx: IngestionContext;
   private readonly broadcast: WebBroadcaster;
   private readonly telegram: TelegramSender;
+  private readonly telegramPhoto: TelegramPhotoSender;
   private subs = new Map<string, ActiveSubscription>();
   /** Alert ids that should be active. Guards the async backfill→listen race. */
   private wanted = new Set<string>();
@@ -57,6 +66,7 @@ export class AlertEngine {
     this.ctx = opts.ctx;
     this.broadcast = opts.broadcast;
     this.telegram = opts.telegram ?? sendTelegramMessage;
+    this.telegramPhoto = opts.telegramPhoto ?? sendTelegramPhoto;
   }
 
   /** Boot from DB: subscribe every enabled alert. */
@@ -345,10 +355,44 @@ export class AlertEngine {
         return;
       }
       const text = formatTelegramMessage(event, alert.config);
+      // Render the crossover chart so each alert is self-proving — the trader sees the
+      // exact bar that crossed (same `computeMaCross` math as the fire). Rendering is
+      // best-effort: any failure degrades to a text-only send so an alert is never lost.
+      let photo: Buffer | null = null;
       try {
-        await this.telegram({ botToken: cfg.botToken, chatId: cfg.chatId, text });
+        const providerId = this.resolveProvider(alert.symbol)?.id;
+        photo = renderMaCrossChart({
+          symbol: alert.symbol,
+          interval: alert.interval,
+          candles: recent,
+          ma: { ...alert.config.ma, crossWith: alert.config.crossWith },
+          cross: { index: last.index, side, price: sourcePrice, time: justClosed.openTime },
+          labels: alert.config.labels,
+          rsiValue,
+          sourceNote: providerId ? providerId[0]!.toUpperCase() + providerId.slice(1) : undefined,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[alert-engine] chart render failed; sending text only', { alertId: alert.id, err });
+      }
+      try {
+        if (photo) {
+          await this.telegramPhoto({ botToken: cfg.botToken, chatId: cfg.chatId, photo, caption: text });
+        } else {
+          await this.telegram({ botToken: cfg.botToken, chatId: cfg.chatId, text });
+        }
         this.markTelegram(event.id, 'sent');
       } catch (err) {
+        // Photo upload failed — try a plain text send before marking the alert failed.
+        if (photo) {
+          try {
+            await this.telegram({ botToken: cfg.botToken, chatId: cfg.chatId, text });
+            this.markTelegram(event.id, 'sent');
+            return;
+          } catch {
+            /* fall through to failed below */
+          }
+        }
         const msg = err instanceof Error ? err.message : String(err);
         this.markTelegram(event.id, 'failed', msg);
       }

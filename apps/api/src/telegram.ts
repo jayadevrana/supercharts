@@ -11,6 +11,8 @@
 
 const TELEGRAM_API = 'https://api.telegram.org';
 const SEND_TIMEOUT_MS = 8_000;
+// Photo uploads carry a ~60KB PNG, so give them more headroom than a text send.
+const PHOTO_TIMEOUT_MS = 15_000;
 
 export interface TelegramSendArgs {
   botToken: string;
@@ -35,6 +37,57 @@ export const sendTelegramMessage: TelegramSender = async ({ botToken, chatId, te
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const errBody = await res.text().catch(() => '');
+    throw new Error(`telegram_${res.status}: ${errBody.slice(0, 200)}`);
+  }
+  const parsed = (await res.json()) as { ok?: boolean; description?: string };
+  if (!parsed.ok) {
+    throw new Error(`telegram_error: ${parsed.description ?? 'unknown'}`);
+  }
+};
+
+export interface TelegramPhotoArgs {
+  botToken: string;
+  chatId: string;
+  /** PNG bytes. */
+  photo: Uint8Array;
+  /** Optional caption (max 1024 chars on Telegram's side). */
+  caption?: string;
+  parseMode?: 'HTML' | 'MarkdownV2' | 'None';
+  filename?: string;
+}
+
+export type TelegramPhotoSender = (args: TelegramPhotoArgs) => Promise<void>;
+
+/**
+ * Send a photo via `sendPhoto` as multipart/form-data. We build the body with the
+ * runtime's native FormData + Blob (Node 18+/26) so there's no multipart-encoding
+ * dependency. Used by the alert engine to attach the crossover chart to each alert.
+ */
+export const sendTelegramPhoto: TelegramPhotoSender = async ({
+  botToken,
+  chatId,
+  photo,
+  caption,
+  parseMode = 'HTML',
+  filename = 'chart.png',
+}) => {
+  const url = `${TELEGRAM_API}/bot${botToken}/sendPhoto`;
+  const form = new FormData();
+  form.set('chat_id', chatId);
+  if (caption) {
+    // Telegram hard-caps captions at 1024 chars; trim defensively.
+    form.set('caption', caption.slice(0, 1024));
+    if (parseMode !== 'None') form.set('parse_mode', parseMode);
+  }
+  // Buffer/Uint8Array is a valid BlobPart.
+  form.set('photo', new Blob([photo], { type: 'image/png' }), filename);
+  const res = await fetch(url, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
   });
   if (!res.ok) {
     const errBody = await res.text().catch(() => '');

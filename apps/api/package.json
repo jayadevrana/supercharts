@@ -12,18 +12,19 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@supercharts/types": "workspace:*",
-    "@supercharts/market-data": "workspace:*",
-    "@supercharts/ingestion": "workspace:*",
+    "@fastify/cookie": "^11.0.1",
+    "@fastify/cors": "^10.0.1",
+    "@fastify/rate-limit": "^10.2.1",
+    "@fastify/websocket": "^11.0.1",
+    "@napi-rs/canvas": "^1.0.0",
     "@supercharts/chart-core": "workspace:*",
     "@supercharts/indicators": "workspace:*",
+    "@supercharts/ingestion": "workspace:*",
+    "@supercharts/market-data": "workspace:*",
+    "@supercharts/types": "workspace:*",
     "fastify": "^5.1.0",
-    "@fastify/cors": "^10.0.1",
-    "@fastify/websocket": "^11.0.1",
-    "@fastify/cookie": "^11.0.1",
-    "@fastify/rate-limit": "^10.2.1",
-    "zod": "^3.23.8",
-    "nanoid": "^5.0.7"
+    "nanoid": "^5.0.7",
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
