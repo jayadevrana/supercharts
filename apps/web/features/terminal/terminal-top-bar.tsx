@@ -224,6 +224,11 @@ export function TerminalTopBar() {
         <Button variant="outline" size="icon" aria-label="Settings">
           <Cog className="h-4 w-4" />
         </Button>
+        {process.env.NEXT_PUBLIC_DEMO_MODE === '1' && (
+          <Badge tone="accent" className="hidden md:inline-flex" title="Public read-only demo — changes are disabled">
+            demo · read-only
+          </Badge>
+        )}
         <Badge
           tone={wsStatus === 'open' ? 'bull' : wsStatus === 'connecting' ? 'warn' : 'bear'}
           className="hidden items-center gap-1.5 md:inline-flex"

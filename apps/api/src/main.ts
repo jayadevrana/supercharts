@@ -17,6 +17,7 @@ import { mt5Routes } from './routes/mt5';
 import { signalRoutes } from './routes/signals';
 import { indicatorRoutes } from './routes/indicators';
 import { registerWebSocketGateway } from './ws-gateway';
+import { registerDemoGuard } from './demo-guard';
 import { MT5Store, startMT5Bridge, createIntentRouter } from './mt5';
 import { createSignalRunner } from './mt5/signal-runner';
 import type { SignalRecipe } from '@supercharts/types';
@@ -66,6 +67,10 @@ async function start(): Promise<void> {
       maxPayload: 1024 * 1024,
     },
   });
+
+  // Read-only demo guard (no-op unless DEMO_MODE is set). Runs before every route, so it
+  // must be registered before the route plugins below.
+  registerDemoGuard(app, process.env);
 
   const db = openDB(process.env);
   const ingestion = await bootstrapIngestion(process.env);

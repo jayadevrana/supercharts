@@ -90,6 +90,13 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🌐 **Read-only DEMO mode** for a safe public demo from the Mac (owner wants to share a
+  link via a tunnel + FreeDomain subdomain). The API has no auth yet, so `DEMO_MODE=1`
+  installs an onRequest guard (`apps/api/src/demo-guard.ts`): blocks every mutation +
+  secret GET (telegram/mt5/billing) with 403, allows charts/alerts/heat/P&L + read-only
+  backtest/optimizer. Web shows a "demo · read-only" badge (`NEXT_PUBLIC_DEMO_MODE`).
+  Verified the allow/deny matrix. Run guide + tunnel/FreeDomain steps in `DEMO.md` (the
+  ngrok/Cloudflare account + the GitHub PR are owner-only actions). Nothing exposed yet.
 - 🔌 **Fixed frozen-chart-after-reconnect.** The terminal WS already had backoff reconnect,
   but a backgrounded tab throttles the timer, so after a server restart / network blip the
   chart could stay frozen for a long time. `ws-client.ts` now reconnects **immediately on
