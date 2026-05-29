@@ -295,6 +295,63 @@ export async function fetchPortfolioHeat(params?: {
   return api<PortfolioHeatResponse>(`/portfolio/heat${suffix}`);
 }
 
+/* ────── P&L attribution ────── */
+
+export interface AttributionRow {
+  alertId: string;
+  symbol: string;
+  label: string;
+  signature: string;
+  interval: string;
+  category: string;
+  closedTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  realisedPct: number;
+  unrealizedPct: number;
+  totalPct: number;
+  avgWinPct: number;
+  avgLossPct: number;
+  profitFactor: number | null;
+  bestPct: number;
+  worstPct: number;
+  openSide?: 'buy' | 'sell';
+}
+
+export interface AttributionRollup {
+  key: string;
+  label: string;
+  closedTrades: number;
+  wins: number;
+  winRate: number;
+  realisedPct: number;
+  unrealizedPct: number;
+  totalPct: number;
+}
+
+export interface PnlAttributionResponse {
+  rows: AttributionRow[];
+  byStrategy: AttributionRollup[];
+  byCategory: AttributionRollup[];
+  totals: {
+    closedTrades: number;
+    wins: number;
+    winRate: number;
+    realisedPct: number;
+    unrealizedPct: number;
+    totalPct: number;
+    openPositions: number;
+    strategies: number;
+    bestRow?: { label: string; totalPct: number };
+    worstRow?: { label: string; totalPct: number };
+  };
+}
+
+export async function fetchPortfolioAttribution(): Promise<PnlAttributionResponse> {
+  return api<PnlAttributionResponse>('/portfolio/attribution');
+}
+
 /* ────── Position sizer ────── */
 
 export type SizingMode = 'fixed_lots' | 'risk_percent' | 'cash_risk' | 'kelly' | 'atr_scaled';

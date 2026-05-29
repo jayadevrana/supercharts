@@ -26,6 +26,7 @@ import {
   ClipboardList,
   Calculator,
   Flame,
+  PieChart,
 } from 'lucide-react';
 import type { PaperPortfolio, PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
@@ -69,6 +70,8 @@ import {
   fetchPaperTrades,
   fetchPortfolioHeat,
   type PortfolioHeatResponse,
+  fetchPortfolioAttribution,
+  type PnlAttributionResponse,
   resetPaperTrades,
   runBacktest,
   runOptimize,
@@ -136,12 +139,17 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
           </p>
         </DialogHeader>
         <Tabs defaultValue="active" className="px-4 pb-2">
-          <TabsList className="grid w-full grid-cols-6">
+          <TabsList className="grid w-full grid-cols-7">
             <TabsTrigger value="active">Active</TabsTrigger>
             <TabsTrigger value="create">New</TabsTrigger>
             <TabsTrigger value="heat">
               <span className="inline-flex items-center gap-1.5">
                 <Flame className="h-3 w-3" /> Heat
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="pnl">
+              <span className="inline-flex items-center gap-1.5">
+                <PieChart className="h-3 w-3" /> P&amp;L
               </span>
             </TabsTrigger>
             <TabsTrigger value="lists">
@@ -171,6 +179,9 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
           </TabsContent>
           <TabsContent value="heat" className="max-h-[60vh] overflow-y-auto scroll-thin">
             <PortfolioHeatPanel />
+          </TabsContent>
+          <TabsContent value="pnl" className="max-h-[60vh] overflow-y-auto scroll-thin">
+            <PnlAttributionPanel />
           </TabsContent>
           <TabsContent value="lists" className="max-h-[60vh] overflow-y-auto scroll-thin">
             <WatchlistsManager />
@@ -472,6 +483,178 @@ function PortfolioHeatPanel() {
           </p>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────── P&L attribution */
+
+function pctClass(n: number): string {
+  return n > 0 ? 'text-emerald-400' : n < 0 ? 'text-red-400' : 'text-muted-foreground';
+}
+function fmtPct(n: number): string {
+  return `${n > 0 ? '+' : ''}${n.toFixed(2)}%`;
+}
+
+function PnlAttributionPanel() {
+  const [data, setData] = useState<PnlAttributionResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setData(await fetchPortfolioAttribution());
+    } catch (e) {
+      toast({ title: 'P&L load failed', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => void load(), 5_000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  const t = data?.totals;
+  const rows = data?.rows ?? [];
+  const maxAbs = Math.max(...rows.map((r) => Math.abs(r.totalPct)), 0.0001);
+
+  return (
+    <div className="space-y-4 px-1 py-2">
+      {loading && !data ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading attribution…
+        </div>
+      ) : !data || rows.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
+          <PieChart className="mx-auto mb-2 h-5 w-5 opacity-50" />
+          No paper trades yet. Enable paper-trading on a few alerts (ClipboardList icon on the
+          <br />
+          Active tab) — once they fire and flip, realised P&amp;L attributes here by strategy.
+        </div>
+      ) : (
+        <>
+          {/* Headline */}
+          <div className="grid grid-cols-4 gap-3">
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Total P&amp;L</div>
+              <div className={`mt-1 text-2xl font-semibold ${pctClass(t!.totalPct)}`}>{fmtPct(t!.totalPct)}</div>
+              <div className="text-[11px] text-muted-foreground">
+                realised {fmtPct(t!.realisedPct)} · open {fmtPct(t!.unrealizedPct)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Win rate</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">{(t!.winRate * 100).toFixed(0)}%</div>
+              <div className="text-[11px] text-muted-foreground">{t!.wins}/{t!.closedTrades} closed</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Strategies</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">{t!.strategies}</div>
+              <div className="text-[11px] text-muted-foreground">{rows.length} instances · {t!.openPositions} open</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Best / worst</div>
+              <div className={`mt-1 text-sm font-semibold ${pctClass(t!.bestRow?.totalPct ?? 0)}`}>
+                {t!.bestRow ? `${fmtPct(t!.bestRow.totalPct)}` : '—'}
+              </div>
+              <div className={`text-sm font-semibold ${pctClass(t!.worstRow?.totalPct ?? 0)}`}>
+                {t!.worstRow ? `${fmtPct(t!.worstRow.totalPct)}` : '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* Per-instance table */}
+          <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+            <div className="mb-2 text-xs font-medium text-foreground">By strategy instance</div>
+            <div className="overflow-x-auto scroll-thin">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <th className="py-1 pr-2 text-left">Strategy</th>
+                    <th className="px-1 text-right">Trades</th>
+                    <th className="px-1 text-right">Win%</th>
+                    <th className="px-1 text-right">Realised</th>
+                    <th className="px-1 text-right">Open</th>
+                    <th className="px-1 text-right">Total</th>
+                    <th className="w-20" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.alertId} className="border-t border-border/30">
+                      <td className="py-1.5 pr-2">
+                        <div className="font-medium text-foreground">{r.label}</div>
+                        <div className="text-[10px] text-muted-foreground">{r.signature}</div>
+                      </td>
+                      <td className="px-1 text-right tabular-nums text-muted-foreground">{r.closedTrades}</td>
+                      <td className="px-1 text-right tabular-nums text-muted-foreground">{(r.winRate * 100).toFixed(0)}</td>
+                      <td className={`px-1 text-right tabular-nums ${pctClass(r.realisedPct)}`}>{fmtPct(r.realisedPct)}</td>
+                      <td className={`px-1 text-right tabular-nums ${pctClass(r.unrealizedPct)}`}>
+                        {r.openSide ? fmtPct(r.unrealizedPct) : '—'}
+                      </td>
+                      <td className={`px-1 text-right font-semibold tabular-nums ${pctClass(r.totalPct)}`}>{fmtPct(r.totalPct)}</td>
+                      <td className="pl-2">
+                        <div className="flex h-2.5 items-center">
+                          <div className="flex h-full w-1/2 justify-end">
+                            {r.totalPct < 0 && (
+                              <div className="h-full rounded-sm bg-red-500/70" style={{ width: `${(Math.abs(r.totalPct) / maxAbs) * 100}%` }} />
+                            )}
+                          </div>
+                          <div className="h-full w-px bg-border" />
+                          <div className="flex h-full w-1/2">
+                            {r.totalPct >= 0 && (
+                              <div className="h-full rounded-sm bg-emerald-500/70" style={{ width: `${(Math.abs(r.totalPct) / maxAbs) * 100}%` }} />
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Rollups */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <RollupCard title="By recipe (signature)" rollups={data.byStrategy} />
+            <RollupCard title="By asset class" rollups={data.byCategory} />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Return attribution — equal-weight per trade, percentage-based (paper trades carry no lot size). Refreshes every 5s.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RollupCard({ title, rollups }: { title: string; rollups: PnlAttributionResponse['byStrategy'] }) {
+  const max = Math.max(...rollups.map((r) => Math.abs(r.totalPct)), 0.0001);
+  return (
+    <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+      <div className="mb-2 text-xs font-medium text-foreground">{title}</div>
+      {rollups.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground">No data.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {rollups.map((r) => (
+            <div key={r.key} className="flex items-center gap-2 text-[11px]">
+              <span className="w-28 shrink-0 truncate text-muted-foreground" title={r.label}>{r.label}</span>
+              <div className="h-3 flex-1 overflow-hidden rounded-sm bg-muted/30">
+                <div
+                  className={`h-full ${r.totalPct >= 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
+                  style={{ width: `${(Math.abs(r.totalPct) / max) * 100}%` }}
+                />
+              </div>
+              <span className={`w-16 shrink-0 text-right tabular-nums ${pctClass(r.totalPct)}`}>{fmtPct(r.totalPct)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

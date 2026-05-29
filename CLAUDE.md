@@ -51,7 +51,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 - [x] **6. Position sizer v1** — `apps/api/src/position-sizer.ts` with pure helpers for fixed_lots / risk_percent / cash_risk / kelly (fractional 0.25) / atr_scaled. Route `POST /api/alerts/:id/sizer-preview` backtests the alert to derive Kelly inputs (winRate, avg win/loss) + reads latest ATR, returns lot suggestions across all 5 modes. UI: Calculator icon per alert row → modal with 6 inputs (balance/risk%/risk$/SL pips/$pip/fixed lots), 4 backtest stat cards, side-by-side results table with formula breakdown.
 - [x] **7. Portfolio heat v1** — `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`. Pearson correlation of log returns across open paper positions (or a `?symbols=` basket). Day-bucketed alignment so cross-provider daily bars (gold futures vs spot FX vs crypto, which open at different session times) line up by UTC day. Folds position SIDE into the correlation → a *directional* concentration score (two longs on a +0.9 pair = stacked risk; long+short = hedged). Asset-class buckets + net currency exposure (EUR_USD long → +EUR / −USD; the "5 EUR longs" check). UI: **Heat tab** in the alerts dialog — concentration headline + avg|corr| + stacked-pair count, amber stacked-risk warnings (clustered via union-find), N×N correlation heatmap (red = move together, blue = offset), asset-class + net-currency bars. "Analyse active alerts" maps the watched basket; empty state when <2 open positions. Exposure is equal-weight (paper_trades carry no lot size) — stated, not faked.
-- [ ] 8. Per-strategy P&L attribution dashboard
+- [x] **8. Per-strategy P&L attribution v1** — `apps/api/src/pnl-attribution.ts` (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up three ways: per alert (strategy *instance*), per strategy *signature* (the MA/RSI recipe across every symbol it runs on), and per asset class. Realised = Σ closed `pnl_percent`; open = mark-to-market unrealized (reuses `markRow`). Per-instance: trades, win%, realised/open/total %, avg win/loss, profit factor, best/worst. UI: **P&L tab** in the alerts dialog — 4 headline cards (total/realised/open, win rate, strategy count, best/worst), per-instance table with diverging contribution bars, and by-recipe + by-asset-class rollups. 5s auto-refresh. Return attribution (equal-weight per trade) — stated, not faked. **Also fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so the paper-trade toggle was silently stripped on save and no positions were ever booked — restored `paper: z.boolean().optional()`.
 - [ ] 9. Daily / weekly stat report (web + Telegram summary)
 - [ ] 10. Max-drawdown breaker — pause all recipes when daily-DD breached
 
@@ -90,38 +90,37 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 🔥 **Phase 2 #7 — Portfolio heat.** Correlation + concentration across open positions
-  (or any basket). `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`.
-- Pearson of log returns over a lookback; **day-bucketed alignment** so cross-provider
-  daily bars (gold futures vs spot FX vs crypto) line up by UTC day (fixed gold showing
-  all-null correlations on exact-timestamp match).
-- **Directional** concentration: position SIDE folds into the correlation, so two longs on
-  a +0.9 pair register as *stacked* risk while a long+short reads as a hedge. Plus net
-  currency exposure (EUR_USD long → +EUR / −USD) and asset-class buckets.
-- UI: new **Heat tab** in the alerts dialog — concentration headline, stacked-risk
-  warnings (union-find clusters), N×N heatmap (red together / blue offset), asset-class +
-  currency bars, "Analyse active alerts" to map the watched basket. Empty state <2 positions.
-- Verified in browser on the live 12-symbol basket: crypto block all 0.80–0.95 correlated
-  (flagged as 10 stacked positions, net −10 USDT), FX near-zero vs crypto. Real data.
-- Cleared **108 GB** of dev caches off the SSD at the owner's request (reinstalled +
-  rebuilt supercharts to bring services back). 144 alerts + 3 bots intact.
+- 📊 **Phase 2 #8 — Per-strategy P&L attribution.** `apps/api/src/pnl-attribution.ts`
+  (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up by alert (strategy
+  instance), by strategy *signature* (MA/RSI recipe across symbols), and by asset class.
+  Realised = Σ closed pnl%; open = mark-to-market unrealized. Per-instance trades/win%/
+  avg win-loss/profit-factor/best-worst.
+- UI: new **P&L tab** — total/realised/open headline, win rate, strategy count, best/worst,
+  per-instance table with diverging contribution bars, by-recipe + by-asset-class rollups,
+  5s refresh. Return attribution (equal-weight per trade) — stated, not faked.
+- 🐞 **Fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so
+  the paper-trade toggle was silently stripped on save → no positions ever booked. Restored
+  `paper: z.boolean().optional()`. Verified end-to-end: armed 3 fast 1m paper alerts, engine
+  booked + flipped them (1 closed +0.11%, 3 open), P&L tab + portfolio banner populated with
+  real marks. Cleaned up the demo alerts after. 144 alerts + 3 bots intact.
 
 ## Earlier
 
-- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert ships a rendered PNG of the
-  crossover (`alert-chart.ts` via `@napi-rs/canvas`, marker on the exact cross bar, same
-  `computeMaCross` math). `sendTelegramPhoto()` multipart; text fallback so alerts never
-  drop. Verified by a live engine fire (DOGE/BTC 1m) that auto-sent photos to the owner.
-- 🔴→🟢 Fixed the **cold-start false-alert flood**: `initSubscription()` backfills history +
-  seeds `lastFiredAt` before wiring the listener. The flood was the 114 forex alerts waking
-  on Yahoo; crypto (Binance WS) could never flood. 0 events post-restart.
-- Free FX/metals/indices via `YahooProvider`; 3 review-bug fixes; live paper PnL.
+- 🔥 **Phase 2 #7 — Portfolio heat**: correlation matrix + directional concentration +
+  net-currency / asset-class exposure across open positions (or a basket). `portfolio-heat.ts`
+  + `GET /api/portfolio/heat`, day-bucketed cross-provider alignment, Heat tab UI. Verified
+  on a 12-symbol basket (crypto block 0.80–0.95 correlated, net −10 USDT).
+- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert ships a rendered crossover PNG
+  (`alert-chart.ts` via `@napi-rs/canvas`); verified by a live engine fire.
+- 🔴→🟢 Fixed the **cold-start false-alert flood** (`initSubscription()` backfill + watermark).
+- Cleared 108 GB of dev caches off the SSD; reinstalled + rebuilt to bring services back.
 
 ## Next pick
 
-**Phase 2 · #8 — Per-strategy P&L attribution dashboard.** Break realised + open P&L down
-by alert/strategy (and by symbol / asset class), so the trader sees which recipes actually
-earn. Reuse `paper_trades` + the heat exposure helpers; surface as a dashboard tab.
+**Phase 2 · #9 — Daily / weekly stat report (web + Telegram summary).** Scheduled rollup of
+the paper book + alert activity (fires, win rate, realised/open P&L, top/bottom strategies)
+delivered as a Telegram message + a web summary card. Reuse the attribution + heat helpers;
+add a scheduler (cron-style) and a `sendTelegramMessage` summary. #10 = max-drawdown breaker.
 
 ## Questions for owner
 

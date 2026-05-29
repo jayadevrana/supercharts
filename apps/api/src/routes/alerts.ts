@@ -13,6 +13,7 @@ import { runOptimizer, type OptimizeRequest } from '../optimizer';
 import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
 import { previewSizing, latestAtr } from '../position-sizer';
 import { buildPortfolioHeat, type HeatPosition } from '../portfolio-heat';
+import { buildAttribution, type AlertMeta } from '../pnl-attribution';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -43,6 +44,9 @@ const maCrossConfigSchema = z.object({
     web: z.boolean().default(true),
     telegram: z.boolean().default(false),
     telegramBotId: z.string().optional(),
+    // Paper-trading flag (Phase 1 #5). Was missing here, so the modal's toggle was
+    // silently stripped on save and no paper positions were ever booked. Restored.
+    paper: z.boolean().optional(),
   }),
   timezone: z.string().min(2).max(40).default('UTC'),
   style: z
@@ -717,6 +721,45 @@ export function alertRoutes(
 
     const heat = buildPortfolioHeat(positions, candlesBySymbol, { lookback, interval });
     return { empty: false, ...heat };
+  });
+
+  /**
+   * Per-strategy P&L attribution across the paper book. Rolls realised (closed-trade
+   * pnl_percent) + mark-to-market unrealized up by alert, by strategy signature (the MA
+   * recipe across every symbol it runs on), and by asset class. Return attribution —
+   * equal-weight per trade, percentage-based (paper_trades carry no lot size).
+   */
+  fastify.get('/api/portfolio/attribution', async (req) => {
+    const user = getUser(req, db);
+    const closedRows = db.raw
+      .prepare(
+        `SELECT alert_id as alertId, pnl_percent as pnlPercent FROM paper_trades
+         WHERE user_id = ? AND status = 'closed' AND pnl_percent IS NOT NULL`,
+      )
+      .all(user.id) as { alertId: string; pnlPercent: number }[];
+    const openRows = db.raw
+      .prepare(
+        `SELECT id, alert_id as alertId, user_id as userId, symbol, interval, side, status,
+                entry_time as entryTime, entry_price as entryPrice
+         FROM paper_trades WHERE user_id = ? AND status = 'open'`,
+      )
+      .all(user.id) as PaperRow[];
+    const open = openRows.map((r) => {
+      const marked = markRow(r, ctx);
+      return { alertId: r.alertId, side: r.side, unrealizedPct: marked.unrealizedPct ?? 0 };
+    });
+    const metaRows = db.raw
+      .prepare(`SELECT id, symbol_id as symbol, interval, config FROM alerts WHERE user_id = ?`)
+      .all(user.id) as { id: string; symbol: string; interval: string; config: string }[];
+    const meta = new Map<string, AlertMeta>();
+    for (const m of metaRows) {
+      try {
+        meta.set(m.id, { symbol: m.symbol, interval: m.interval, config: JSON.parse(m.config) as MaCrossAlertConfig });
+      } catch {
+        /* skip unparseable config */
+      }
+    }
+    return buildAttribution(closedRows, open, meta);
   });
 
   // Force-close every still-open paper position for an alert (or wipe history with
