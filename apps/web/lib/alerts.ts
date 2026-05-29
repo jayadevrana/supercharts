@@ -236,6 +236,65 @@ export async function fetchPaperPortfolio(): Promise<PaperPortfolio> {
   return api<PaperPortfolio>('/alerts/paper/portfolio');
 }
 
+/* ────── Portfolio heat ────── */
+
+export interface HeatCorrelatedPair {
+  a: string;
+  b: string;
+  corr: number;
+  /** true → positions amplify each other (stacked risk); false → they hedge. */
+  stacked: boolean;
+  n: number;
+}
+
+export interface HeatAssetClass {
+  category: string;
+  label: string;
+  longs: number;
+  shorts: number;
+  count: number;
+}
+
+export interface HeatCurrency {
+  currency: string;
+  net: number;
+  longs: number;
+  shorts: number;
+}
+
+export interface PortfolioHeatResponse {
+  empty: boolean;
+  reason?: 'no_open_positions' | 'need_two_symbols';
+  positions?: number;
+  symbols?: string[];
+  labels?: Record<string, string>;
+  matrix?: (number | null)[][];
+  pairs?: HeatCorrelatedPair[];
+  assetClasses?: HeatAssetClass[];
+  currencies?: HeatCurrency[];
+  concentration?: number;
+  concentrationLabel?: 'Low' | 'Moderate' | 'High';
+  avgAbsCorr?: number;
+  barsUsed?: Record<string, number>;
+  lookback: number;
+  interval: string;
+  warnings?: string[];
+  threshold?: number;
+}
+
+export async function fetchPortfolioHeat(params?: {
+  symbols?: string;
+  lookback?: number;
+  interval?: string;
+}): Promise<PortfolioHeatResponse> {
+  const qs = new URLSearchParams();
+  if (params?.symbols) qs.set('symbols', params.symbols);
+  if (params?.lookback) qs.set('lookback', String(params.lookback));
+  if (params?.interval) qs.set('interval', params.interval);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return api<PortfolioHeatResponse>(`/portfolio/heat${suffix}`);
+}
+
 /* ────── Position sizer ────── */
 
 export type SizingMode = 'fixed_lots' | 'risk_percent' | 'cash_risk' | 'kelly' | 'atr_scaled';

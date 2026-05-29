@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import type { AppDB } from '../db';
 import { getUser } from '../auth';
-import type { AlertDefinition, AlertEvent, Interval, MaCrossAlertConfig } from '@supercharts/types';
+import type { AlertDefinition, AlertEvent, Candle, Interval, MaCrossAlertConfig } from '@supercharts/types';
 import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG, getCatalogSymbol } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
@@ -12,6 +12,7 @@ import { runMaCrossBacktest } from '../backtester';
 import { runOptimizer, type OptimizeRequest } from '../optimizer';
 import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
 import { previewSizing, latestAtr } from '../position-sizer';
+import { buildPortfolioHeat, type HeatPosition } from '../portfolio-heat';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -644,6 +645,78 @@ export function alertRoutes(
       bySymbol,
       markedAt: Date.now(),
     };
+  });
+
+  /**
+   * Portfolio heat — correlation matrix + concentration + asset-class / currency
+   * exposure across the trader's OPEN paper positions. Pass `?symbols=A,B,C` to analyse
+   * an ad-hoc basket instead (each treated as a long). `?lookback` (bars) + `?interval`
+   * tune the correlation window (default 120 bars of 1d). All correlations come from
+   * real candles pulled from the store (fetched from the provider when the cache is
+   * shallow) — never synthesized.
+   */
+  fastify.get('/api/portfolio/heat', async (req) => {
+    const user = getUser(req, db);
+    const q = (req.query ?? {}) as { symbols?: string; lookback?: string; interval?: string };
+    const lookback = Math.max(30, Math.min(365, Number(q.lookback) || 120));
+    const interval: Interval =
+      q.interval && INTERVAL_SET.has(q.interval as Interval) ? (q.interval as Interval) : '1d';
+
+    let positions: HeatPosition[];
+    if (q.symbols) {
+      positions = q.symbols
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((symbol) => ({ symbol, side: 'buy' as const }));
+    } else {
+      const rows = db.raw
+        .prepare(`SELECT symbol, side FROM paper_trades WHERE user_id = ? AND status = 'open'`)
+        .all(user.id) as { symbol: string; side: 'buy' | 'sell' }[];
+      positions = rows.map((r) => ({ symbol: r.symbol, side: r.side }));
+    }
+
+    const distinct = [...new Set(positions.map((p) => p.symbol))];
+    if (distinct.length < 2) {
+      return {
+        empty: true,
+        reason: positions.length === 0 ? 'no_open_positions' : 'need_two_symbols',
+        positions: positions.length,
+        interval,
+        lookback,
+      };
+    }
+
+    const candlesBySymbol = new Map<string, Candle[]>();
+    const step = INTERVAL_TO_MS[interval] ?? 86_400_000;
+    await Promise.all(
+      distinct.map(async (symbol) => {
+        let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, lookback);
+        if (candles.length < Math.min(lookback, 40)) {
+          const provider = resolveProvider(symbol, ctx);
+          if (provider) {
+            try {
+              const now = Date.now();
+              const fetched = await provider.fetchHistoricalCandles(
+                symbol,
+                interval,
+                now - lookback * step,
+                now,
+                lookback,
+              );
+              for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+              candles = ctx.candleStore.query(symbol, interval, undefined, undefined, lookback);
+            } catch {
+              /* keep whatever the cache had */
+            }
+          }
+        }
+        candlesBySymbol.set(symbol, candles);
+      }),
+    );
+
+    const heat = buildPortfolioHeat(positions, candlesBySymbol, { lookback, interval });
+    return { empty: false, ...heat };
   });
 
   // Force-close every still-open paper position for an alert (or wipe history with

@@ -50,7 +50,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 ### Phase 2 — Risk & Portfolio
 
 - [x] **6. Position sizer v1** — `apps/api/src/position-sizer.ts` with pure helpers for fixed_lots / risk_percent / cash_risk / kelly (fractional 0.25) / atr_scaled. Route `POST /api/alerts/:id/sizer-preview` backtests the alert to derive Kelly inputs (winRate, avg win/loss) + reads latest ATR, returns lot suggestions across all 5 modes. UI: Calculator icon per alert row → modal with 6 inputs (balance/risk%/risk$/SL pips/$pip/fixed lots), 4 backtest stat cards, side-by-side results table with formula breakdown.
-- [ ] 7. Portfolio heat — open-position correlation matrix + sector exposure pie
+- [x] **7. Portfolio heat v1** — `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`. Pearson correlation of log returns across open paper positions (or a `?symbols=` basket). Day-bucketed alignment so cross-provider daily bars (gold futures vs spot FX vs crypto, which open at different session times) line up by UTC day. Folds position SIDE into the correlation → a *directional* concentration score (two longs on a +0.9 pair = stacked risk; long+short = hedged). Asset-class buckets + net currency exposure (EUR_USD long → +EUR / −USD; the "5 EUR longs" check). UI: **Heat tab** in the alerts dialog — concentration headline + avg|corr| + stacked-pair count, amber stacked-risk warnings (clustered via union-find), N×N correlation heatmap (red = move together, blue = offset), asset-class + net-currency bars. "Analyse active alerts" maps the watched basket; empty state when <2 open positions. Exposure is equal-weight (paper_trades carry no lot size) — stated, not faked.
 - [ ] 8. Per-strategy P&L attribution dashboard
 - [ ] 9. Daily / weekly stat report (web + Telegram summary)
 - [ ] 10. Max-drawdown breaker — pause all recipes when daily-DD breached
@@ -90,44 +90,38 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert now ships with a rendered
-  PNG of the crossover so it's self-proving (owner asked: "send a photo that cross is
-  happening on that symbol").
-- `apps/api/src/alert-chart.ts` (NEW): server-side candlestick renderer via
-  `@napi-rs/canvas` (prebuilt N-API binary — no native build, ABI-stable on Node 26).
-  Draws candles + both EMA legs + a BUY/SELL triangle-and-chip **on the exact bar that
-  crossed**, using the SAME `computeMaCross` math as the fire, so the picture can't drift
-  from the signal. Dark theme matches the terminal; price axis, time axis (date for ≥1d,
-  time intraday), legend, watermark. ~10-30ms, ~65KB PNG.
-- `telegram.ts`: new `sendTelegramPhoto()` — multipart `sendPhoto` built from native
-  FormData + Blob (no new HTTP dep), 15s timeout.
-- `alert-engine.ts`: on a telegram fire, render the chart and send it as a photo with the
-  alert text as caption; **degrades to text-only** if render or upload fails (an alert is
-  never dropped). `sourceNote` tags the feed (Binance/Yahoo/…).
-- Verified: rendered real BTC 30m (SELL + BUY) + ETH 1d charts, marker lands exactly on
-  the cross; **sent a live verification photo to the owner's chat** (BTC/USDT 30m). Both
-  BUY (green triangle below) + SELL (red triangle above) confirmed.
-- Confirmed `/api/candles` returns sorted, dedup'd, stable bars (ruled out a data-ordering
-  cause for bad crosses). 144 alerts + 3 Telegram bots untouched.
+- 🔥 **Phase 2 #7 — Portfolio heat.** Correlation + concentration across open positions
+  (or any basket). `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`.
+- Pearson of log returns over a lookback; **day-bucketed alignment** so cross-provider
+  daily bars (gold futures vs spot FX vs crypto) line up by UTC day (fixed gold showing
+  all-null correlations on exact-timestamp match).
+- **Directional** concentration: position SIDE folds into the correlation, so two longs on
+  a +0.9 pair register as *stacked* risk while a long+short reads as a hedge. Plus net
+  currency exposure (EUR_USD long → +EUR / −USD) and asset-class buckets.
+- UI: new **Heat tab** in the alerts dialog — concentration headline, stacked-risk
+  warnings (union-find clusters), N×N heatmap (red together / blue offset), asset-class +
+  currency bars, "Analyse active alerts" to map the watched basket. Empty state <2 positions.
+- Verified in browser on the live 12-symbol basket: crypto block all 0.80–0.95 correlated
+  (flagged as 10 stacked positions, net −10 USDT), FX near-zero vs crypto. Real data.
+- Cleared **108 GB** of dev caches off the SSD at the owner's request (reinstalled +
+  rebuilt supercharts to bring services back). 144 alerts + 3 bots intact.
 
 ## Earlier
 
-- 🔴→🟢 Fixed the **cold-start false-alert flood** ("alerts coming wrong"): on boot 81
-  alerts fired in one second because the Yahoo poll emitted a batch of recent bars and the
-  engine replayed each pre-existing cross. New `initSubscription()` backfills real history
-  + seeds `lastFiredAt` to the newest bar BEFORE wiring the listener, so only bars closing
-  after subscribe can fire. Verified 0 events / no burst post-restart. Crypto could never
-  flood (Binance WS streams one closed bar at a time; backfill/upsert are bus-silent) — the
-  flood was the 114 forex alerts waking up on Yahoo; the 30 crypto alerts were clean.
-- Free FX/metals/indices via `YahooProvider` (no OANDA token). 114 subs verified.
-- Fixed 3 review bugs (ATR pip-size, telegram-status persist, MA warmup window).
-- Live PnL on paper trades (TradingView-style), portfolio aggregate route + 3s modal.
+- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert ships a rendered PNG of the
+  crossover (`alert-chart.ts` via `@napi-rs/canvas`, marker on the exact cross bar, same
+  `computeMaCross` math). `sendTelegramPhoto()` multipart; text fallback so alerts never
+  drop. Verified by a live engine fire (DOGE/BTC 1m) that auto-sent photos to the owner.
+- 🔴→🟢 Fixed the **cold-start false-alert flood**: `initSubscription()` backfills history +
+  seeds `lastFiredAt` before wiring the listener. The flood was the 114 forex alerts waking
+  on Yahoo; crypto (Binance WS) could never flood. 0 events post-restart.
+- Free FX/metals/indices via `YahooProvider`; 3 review-bug fixes; live paper PnL.
 
 ## Next pick
 
-**Phase 2 · #7 — Portfolio heat.** Open-position correlation matrix + sector exposure
-pie. Goal: surface "I have 5 EUR-pair longs that all move together" so the trader
-can throttle correlated risk before MT5 fires them.
+**Phase 2 · #8 — Per-strategy P&L attribution dashboard.** Break realised + open P&L down
+by alert/strategy (and by symbol / asset class), so the trader sees which recipes actually
+earn. Reuse `paper_trades` + the heat exposure helpers; surface as a dashboard tab.
 
 ## Questions for owner
 

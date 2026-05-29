@@ -25,6 +25,7 @@ import {
   Shuffle,
   ClipboardList,
   Calculator,
+  Flame,
 } from 'lucide-react';
 import type { PaperPortfolio, PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
@@ -66,6 +67,8 @@ import {
   fetchWatchlists,
   fetchPaperPortfolio,
   fetchPaperTrades,
+  fetchPortfolioHeat,
+  type PortfolioHeatResponse,
   resetPaperTrades,
   runBacktest,
   runOptimize,
@@ -133,9 +136,14 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
           </p>
         </DialogHeader>
         <Tabs defaultValue="active" className="px-4 pb-2">
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-6">
             <TabsTrigger value="active">Active</TabsTrigger>
             <TabsTrigger value="create">New</TabsTrigger>
+            <TabsTrigger value="heat">
+              <span className="inline-flex items-center gap-1.5">
+                <Flame className="h-3 w-3" /> Heat
+              </span>
+            </TabsTrigger>
             <TabsTrigger value="lists">
               <span className="inline-flex items-center gap-1.5">
                 <Star className="h-3 w-3" /> Lists
@@ -161,6 +169,9 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
               onCreated={() => setOpen(false)}
             />
           </TabsContent>
+          <TabsContent value="heat" className="max-h-[60vh] overflow-y-auto scroll-thin">
+            <PortfolioHeatPanel />
+          </TabsContent>
           <TabsContent value="lists" className="max-h-[60vh] overflow-y-auto scroll-thin">
             <WatchlistsManager />
           </TabsContent>
@@ -176,6 +187,292 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ──────────────────────────────────────────────────────── Portfolio heat */
+
+function heatCellColor(v: number | null): string {
+  if (v === null) return 'transparent';
+  const a = Math.min(1, Math.abs(v));
+  // Red = positive correlation (moves together), blue = negative (offsets).
+  return v >= 0 ? `rgba(239,68,68,${0.1 + a * 0.62})` : `rgba(59,130,246,${0.1 + a * 0.62})`;
+}
+
+function compactTag(symbol: string): string {
+  const raw = symbol.includes(':') ? symbol.split(':')[1]! : symbol;
+  return raw.replace('_', '');
+}
+
+const HEAT_INTERVALS: Interval[] = ['1d', '4h', '1h'];
+const HEAT_LOOKBACKS = [60, 120, 250];
+
+function PortfolioHeatPanel() {
+  const [data, setData] = useState<PortfolioHeatResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [lookback, setLookback] = useState(120);
+  const [tf, setTf] = useState<Interval>('1d');
+  const [basketBusy, setBasketBusy] = useState(false);
+
+  const load = useCallback(
+    async (symbols?: string) => {
+      setLoading(true);
+      try {
+        setData(await fetchPortfolioHeat({ symbols, lookback, interval: tf }));
+      } catch (e) {
+        toast({
+          title: 'Heat failed',
+          description: e instanceof Error ? e.message : String(e),
+          tone: 'error',
+        });
+      } finally {
+        setLoading(false);
+      }
+    },
+    [lookback, tf],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const analyseActiveAlerts = useCallback(async () => {
+    setBasketBusy(true);
+    try {
+      const alerts = await fetchAlerts();
+      const syms = [...new Set(alerts.filter((a) => a.enabled).map((a) => a.symbol))].slice(0, 12);
+      if (syms.length < 2) {
+        toast({ title: 'Need at least 2 distinct symbols' });
+        return;
+      }
+      await load(syms.join(','));
+    } finally {
+      setBasketBusy(false);
+    }
+  }, [load]);
+
+  const concColor =
+    data?.concentrationLabel === 'High'
+      ? 'text-red-400'
+      : data?.concentrationLabel === 'Moderate'
+        ? 'text-amber-400'
+        : 'text-emerald-400';
+
+  const symbols = data?.symbols ?? [];
+  const matrix = data?.matrix ?? [];
+
+  return (
+    <div className="space-y-4 px-1 py-2">
+      {/* Controls */}
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border/60 bg-card/40 p-3">
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Timeframe</label>
+          <Select value={tf} onValueChange={(v) => setTf(v as Interval)}>
+            <SelectTrigger className="h-8 w-24 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {HEAT_INTERVALS.map((i) => (
+                <SelectItem key={i} value={i} className="text-xs">
+                  {i}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Lookback</label>
+          <Select value={String(lookback)} onValueChange={(v) => setLookback(Number(v))}>
+            <SelectTrigger className="h-8 w-28 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {HEAT_LOOKBACKS.map((n) => (
+                <SelectItem key={n} value={String(n)} className="text-xs">
+                  {n} bars
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={analyseActiveAlerts} disabled={basketBusy || loading}>
+          {basketBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Activity className="h-3 w-3" />}
+          Analyse active alerts
+        </Button>
+        <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void load()} disabled={loading}>
+          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <BellRing className="h-3 w-3" />}
+          Open positions
+        </Button>
+      </div>
+
+      {loading && !data ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Computing correlations…
+        </div>
+      ) : data?.empty ? (
+        <div className="rounded-lg border border-dashed border-border/60 bg-card/30 px-4 py-10 text-center text-sm text-muted-foreground">
+          {data.reason === 'no_open_positions' ? (
+            <>
+              <Flame className="mx-auto mb-2 h-5 w-5 opacity-50" />
+              No open paper positions yet. Heat needs ≥2 to map correlation —
+              <br />
+              enable paper-trading on a few alerts, or click{' '}
+              <span className="font-medium text-foreground">Analyse active alerts</span> to map your watched basket.
+            </>
+          ) : (
+            <>Need at least 2 distinct symbols to compute a correlation matrix.</>
+          )}
+        </div>
+      ) : data ? (
+        <>
+          {/* Concentration headline */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Risk concentration</div>
+              <div className={`mt-1 text-2xl font-semibold ${concColor}`}>{data.concentrationLabel}</div>
+              <div className="text-[11px] text-muted-foreground">
+                directional score {(data.concentration ?? 0).toFixed(2)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Avg |correlation|</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">{(data.avgAbsCorr ?? 0).toFixed(2)}</div>
+              <div className="text-[11px] text-muted-foreground">{symbols.length} symbols · {data.interval} · {data.lookback} bars</div>
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Stacked pairs</div>
+              <div className="mt-1 text-2xl font-semibold text-foreground">
+                {(data.pairs ?? []).filter((p) => p.stacked).length}
+              </div>
+              <div className="text-[11px] text-muted-foreground">|corr| ≥ {data.threshold ?? 0.6}, same direction</div>
+            </div>
+          </div>
+
+          {/* Warnings */}
+          {(data.warnings ?? []).length > 0 && (
+            <div className="space-y-1.5">
+              {data.warnings!.map((w, i) => (
+                <div key={i} className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  <Flame className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{w}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Correlation matrix */}
+          {symbols.length >= 2 && (
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-foreground">Correlation matrix</span>
+                <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: 'rgba(239,68,68,0.7)' }} /> together
+                  <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: 'rgba(59,130,246,0.7)' }} /> offset
+                </span>
+              </div>
+              <div className="overflow-x-auto scroll-thin">
+                <table className="border-collapse text-[10px]">
+                  <thead>
+                    <tr>
+                      <th className="sticky left-0 z-10 bg-card/40 p-1" />
+                      {symbols.map((s) => (
+                        <th key={s} className="p-1 font-medium text-muted-foreground" title={data.labels?.[s] ?? s}>
+                          <div className="w-10 truncate">{compactTag(s)}</div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {symbols.map((rowSym, r) => (
+                      <tr key={rowSym}>
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-card/40 pr-2 font-medium text-muted-foreground" title={data.labels?.[rowSym] ?? rowSym}>
+                          {compactTag(rowSym)}
+                        </td>
+                        {symbols.map((colSym, c) => {
+                          const v = matrix[r]?.[c] ?? null;
+                          const diag = r === c;
+                          return (
+                            <td
+                              key={colSym}
+                              className="h-9 w-10 border border-border/30 text-center tabular-nums"
+                              style={{ backgroundColor: diag ? 'rgba(148,163,184,0.12)' : heatCellColor(v) }}
+                            >
+                              {diag ? '—' : v === null ? '·' : v.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Exposure */}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="mb-2 text-xs font-medium text-foreground">Asset-class exposure</div>
+              {(data.assetClasses ?? []).length === 0 ? (
+                <div className="text-[11px] text-muted-foreground">No positions.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {data.assetClasses!.map((b) => {
+                    const max = Math.max(...data.assetClasses!.map((x) => x.count), 1);
+                    return (
+                      <div key={b.category} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-20 shrink-0 truncate text-muted-foreground">{b.label}</span>
+                        <div className="h-3 flex-1 overflow-hidden rounded-sm bg-muted/30">
+                          <div className="h-full bg-accent/70" style={{ width: `${(b.count / max) * 100}%` }} />
+                        </div>
+                        <span className="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
+                          {b.longs}L / {b.shorts}S
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="rounded-lg border border-border/60 bg-card/40 p-3">
+              <div className="mb-2 text-xs font-medium text-foreground">Net currency exposure</div>
+              {(data.currencies ?? []).length === 0 ? (
+                <div className="text-[11px] text-muted-foreground">No decodable currencies.</div>
+              ) : (
+                <div className="space-y-1.5">
+                  {data.currencies!.slice(0, 8).map((c) => {
+                    const max = Math.max(...data.currencies!.map((x) => Math.abs(x.net)), 1);
+                    const pct = (Math.abs(c.net) / max) * 100;
+                    const long = c.net >= 0;
+                    return (
+                      <div key={c.currency} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-12 shrink-0 font-medium text-muted-foreground">{c.currency}</span>
+                        <div className="flex h-3 flex-1 items-center">
+                          <div className="flex h-full w-1/2 justify-end">
+                            {!long && <div className="h-full rounded-sm bg-red-500/70" style={{ width: `${pct}%` }} />}
+                          </div>
+                          <div className="h-full w-px bg-border" />
+                          <div className="flex h-full w-1/2">
+                            {long && <div className="h-full rounded-sm bg-emerald-500/70" style={{ width: `${pct}%` }} />}
+                          </div>
+                        </div>
+                        <span className={`w-10 shrink-0 text-right tabular-nums ${long ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {c.net > 0 ? '+' : ''}
+                          {c.net}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            Correlations from real {data.interval} returns. Exposure is equal-weight per position (paper trades carry no lot size).
+          </p>
+        </>
+      ) : null}
+    </div>
   );
 }
 
