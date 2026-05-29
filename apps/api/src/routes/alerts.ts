@@ -4,7 +4,7 @@ import { nanoid } from 'nanoid';
 import type { AppDB } from '../db';
 import { getUser } from '../auth';
 import type { AlertDefinition, AlertEvent, Interval, MaCrossAlertConfig } from '@supercharts/types';
-import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG } from '@supercharts/types';
+import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG, getCatalogSymbol } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
@@ -512,6 +512,7 @@ export function alertRoutes(
       atrPeriod?: number;
       atrMultiplier?: number;
       kellyFraction?: number;
+      pipSize?: number;
     };
 
     // Backtest to derive Kelly stats. Cap at 500 bars so the preview is fast.
@@ -552,6 +553,9 @@ export function alertRoutes(
       fixedLots: body.fixedLots,
       atrValue,
       atrMultiplier: body.atrMultiplier,
+      // Pip size differs by instrument class — without this, atr_scaled is only
+      // correct for 5-decimal FX. Caller may override via body.pipSize.
+      pipSize: body.pipSize ?? pipSizeForSymbol(row.symbol),
       winRate: backtest.summary.winRate,
       avgWinPct: backtest.summary.avgWinPct,
       avgLossPct: backtest.summary.avgLossPct,
@@ -1163,6 +1167,22 @@ function paperSummaryByAlert(userId: string, db: AppDB, ctx: IngestionContext) {
       openPosition: open,
     };
   });
+}
+
+/**
+ * Pip size (price increment of one pip) per instrument class. Used to convert an ATR
+ * price distance into pips for the atr_scaled position sizer. Conventions:
+ *   FX 5-decimal = 0.0001 · JPY pairs = 0.01 · metals = 0.01 · indices = 1 · crypto = 1
+ */
+function pipSizeForSymbol(symbol: string): number {
+  const cat = getCatalogSymbol(symbol)?.category;
+  const raw = symbol.split(':')[1] ?? symbol;
+  if (cat === 'crypto') return 1;
+  if (cat === 'index') return 1;
+  if (cat === 'commodity') return 0.01;
+  // FX: JPY-quoted pairs price to 3 decimals → pip is 0.01; everything else 0.0001.
+  if (raw.includes('JPY')) return 0.01;
+  return 0.0001;
 }
 
 // Mirror of the routes/market.ts helper. Kept inline so this module is self-contained

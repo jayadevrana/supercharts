@@ -47,6 +47,13 @@ export interface SizerInputs {
   atrValue?: number;
   /** Multiplier on ATR for the SL distance (e.g. 1.5 × ATR). */
   atrMultiplier?: number;
+  /**
+   * Price increment of one pip for THIS instrument, used to convert the ATR price
+   * distance into pips. Defaults to 0.0001 (5-decimal FX). Callers MUST pass the
+   * right value for crypto / JPY / metals / indices or atr_scaled lots are nonsense:
+   *   FX 5-dp = 0.0001 · JPY = 0.01 · metals = 0.01 · indices = 1 · crypto = 1
+   */
+  pipSize?: number;
   /** Historical win rate, 0..1. */
   winRate?: number;
   /** Mean winning trade in % (positive). */
@@ -199,15 +206,19 @@ export function previewSizing(inputs: SizerInputs): SizerPreview {
   /* atr_scaled */
   if (atrValue != null && atrValue > 0 && riskAmount && riskAmount > 0 && pipValue) {
     const mult = atrMultiplier ?? 1.5;
-    const slPipsFromAtr = (atrValue * mult) / 0.0001; // assume 4-decimal forex pip; caller may override slPips
+    // Convert the ATR price distance to pips using the instrument's pip size. A
+    // hardcoded 0.0001 here was wrong for everything but 5-decimal FX — for BTC it
+    // turned a $2k ATR into "29M pips" and floored every size to zero.
+    const pip = inputs.pipSize && inputs.pipSize > 0 ? inputs.pipSize : 0.0001;
+    const slPipsFromAtr = (atrValue * mult) / pip;
     const lots = floorToStep(riskAmount / (slPipsFromAtr * pipValue));
     rows.push({
       mode: 'atr_scaled',
       lots,
       riskAmount,
       formula:
-        `SL = ${mult} × ATR(${atrValue.toFixed(5)}) = ${slPipsFromAtr.toFixed(1)} pips; ` +
-        `$${riskAmount} / (${slPipsFromAtr.toFixed(1)} × $${pipValue}) = ${lots} lots`,
+        `SL = ${mult} × ATR(${atrValue.toFixed(5)}) = ${slPipsFromAtr.toFixed(1)} pips ` +
+        `(pip=${pip}); $${riskAmount} / (${slPipsFromAtr.toFixed(1)} × $${pipValue}) = ${lots} lots`,
     });
   } else {
     rows.push({

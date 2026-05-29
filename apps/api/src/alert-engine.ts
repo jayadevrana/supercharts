@@ -126,8 +126,11 @@ export class AlertEngine {
 
   /** Run the detector for one just-closed candle. */
   private async evaluate(alert: AlertDefinition, justClosed: Candle): Promise<void> {
-    // We need at least (length + 2) closed candles for a stable cross check.
-    const needed = alert.config.ma.length + 5;
+    // Need enough closed candles for BOTH legs to warm up. Size off the longer of the
+    // fast/slow MA lengths — using only ma.length under-fed the slow EMA on dual-MA
+    // alerts with a long slow leg (e.g. EMA(50)/EMA(200)) and produced garbage crosses.
+    const longestMa = Math.max(alert.config.ma.length, alert.config.crossWith?.length ?? 0);
+    const needed = longestMa * 3 + 5;
     const recent = this.ctx.candleStore.query(
       alert.symbol,
       alert.interval,
@@ -209,10 +212,10 @@ export class AlertEngine {
           event.maValue,
           event.label,
           event.firedAt,
-          // Note: rsiValue isn't persisted to alert_events yet — the value lives in
-          // the in-memory event we broadcast. Add a column if/when the history view
-          // needs it.
-          null,
+          // Persist the initial telegram status ('disabled' for web-only alerts, null
+          // when a send is pending). markTelegram() overwrites with sent/failed after
+          // the actual send attempt. (rsiValue is intentionally not persisted yet.)
+          event.telegram ?? null,
         );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
