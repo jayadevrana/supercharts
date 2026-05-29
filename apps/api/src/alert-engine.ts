@@ -6,6 +6,7 @@ import type {
   MaCrossAlertConfig,
 } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
+import { INTERVAL_MS } from '@supercharts/types';
 import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart-core/pure';
 import { nanoid } from 'nanoid';
 import type { AppDB } from './db';
@@ -48,6 +49,8 @@ export class AlertEngine {
   private readonly broadcast: WebBroadcaster;
   private readonly telegram: TelegramSender;
   private subs = new Map<string, ActiveSubscription>();
+  /** Alert ids that should be active. Guards the async backfill→listen race. */
+  private wanted = new Set<string>();
 
   constructor(opts: AlertEngineOptions) {
     this.db = opts.db;
@@ -94,25 +97,83 @@ export class AlertEngine {
       return;
     }
     this.unsubscribe(alert.id);
-    // Acquire the underlying market data so the candle store has data to compute MA.
+    this.wanted.add(alert.id);
+    // Acquire the underlying market-data stream so candles flow into the store.
     this.ctx.subscriptions.acquire({ symbol: alert.symbol, kind: 'candles', interval: alert.interval });
+    // Backfill history + seed the watermark BEFORE wiring the listener so we never
+    // replay pre-existing crosses as live alerts (the cold-start flood bug). Until
+    // init resolves, no candle events are processed for this alert.
+    void this.initSubscription(alert);
+  }
+
+  /**
+   * One-time per-subscription init:
+   *   1. Backfill enough closed bars into the store so the MAs are computed on real
+   *      history, not the handful a poll has accumulated (garbage-cross bug).
+   *   2. Seed `lastFiredAt` to the newest stored bar so ONLY bars that close AFTER we
+   *      start watching can fire. This kills the boot flood (81 events/sec) where the
+   *      Yahoo poll emitted a batch of recent bars and each replayed as a "live" cross.
+   *   3. Wire the candle listener.
+   */
+  private async initSubscription(alert: AlertDefinition): Promise<void> {
+    const longestMa = Math.max(alert.config.ma.length, alert.config.crossWith?.length ?? 0);
+    const want = Math.max(longestMa * 3 + 50, 150);
+    try {
+      const have = this.ctx.candleStore.query(alert.symbol, alert.interval, undefined, undefined, want);
+      if (have.length < want) {
+        const provider = this.resolveProvider(alert.symbol);
+        if (provider) {
+          const now = Date.now();
+          const stepMs = INTERVAL_MS[alert.interval] ?? 60_000;
+          const bars = await provider.fetchHistoricalCandles(
+            alert.symbol,
+            alert.interval,
+            now - want * stepMs,
+            now,
+            want,
+          );
+          for (const c of bars) this.ctx.candleStore.upsert(alert.symbol, alert.interval, c);
+        }
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[alert-engine] backfill failed, seeding from cache only', { alertId: alert.id, err });
+    }
+
+    // The subscription may have been removed/replaced while we awaited the backfill —
+    // bail without wiring a listener if so.
+    if (!this.wanted.has(alert.id)) return;
+
+    // Seed the watermark to the newest bar currently in the store. Never lower a
+    // persisted lastFiredAt (so a real prior fire still dedups across restarts).
+    const recent = this.ctx.candleStore.query(alert.symbol, alert.interval, undefined, undefined, 2);
+    const newestOpen = recent.length ? recent[recent.length - 1]!.openTime : 0;
+    alert.lastFiredAt = Math.max(alert.lastFiredAt ?? 0, newestOpen);
 
     const off = this.ctx.bus.onSymbol('candle', alert.symbol, (e) => {
       if (e.interval !== alert.interval) return;
       if (!e.data.isClosed) return;
-      // Skip if we've already fired on this bar (cheap in-memory check; the DB unique
-      // constraint is the hard floor below).
+      // Only fire on bars strictly newer than the watermark — no replay.
       if (alert.lastFiredAt !== undefined && e.data.openTime <= alert.lastFiredAt) return;
       this.evaluate(alert, e.data).catch((err) => {
         // eslint-disable-next-line no-console
         console.error('[alert-engine] evaluate failed', { alertId: alert.id, err });
       });
     });
-
     this.subs.set(alert.id, { alert, off });
   }
 
+  /** Resolve the data provider for a symbol by venue prefix. */
+  private resolveProvider(symbol: string) {
+    const venue = symbol.split(':')[0]?.toLowerCase();
+    if (venue === 'binance') return this.ctx.providers.binance;
+    if (venue === 'oanda') return this.ctx.providers.oanda;
+    if (venue === 'mock') return this.ctx.providers.mock;
+    return null;
+  }
+
   unsubscribe(alertId: string): void {
+    this.wanted.delete(alertId);
     const sub = this.subs.get(alertId);
     if (!sub) return;
     sub.off();

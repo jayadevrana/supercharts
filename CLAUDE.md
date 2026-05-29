@@ -90,37 +90,35 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- ✅ Free forex/metals/indices data via new `YahooProvider` (no OANDA token needed).
-- `packages/market-data/src/providers/yahoo.ts` — Yahoo Finance chart API, no key.
-  Maps catalog OANDA ids → Yahoo tickers (EUR_USD→EURUSD=X, XAU_USD→GC=F,
-  SPX500_USD→^GSPC, …). REST `fetchHistoricalCandles` (period1/period2) + poll-based
-  `subscribeCandles` (¼-bar, 15s–5min) emitting closed bars. volumeKind 'tick'.
-- Bootstrap picks OANDA when token present, else Yahoo — registered under the `oanda`
-  provider key so the venue resolver + all routes are unchanged.
-- Verified live: yahoo **114 subs (38 symbols × 3 TF)** — every previously-dark alert
-  now has data. EUR/USD 1d backtest pulled 711 real Yahoo bars (74 trades); gold
-  (4534) + S&P500 (7563) candles flowing.
-- Caveats (documented in provider): unofficial endpoint, IP-rate-limited, poll-only,
-  no real FX volume, indices only during session. Fine for personal MVP, not resale.
-- Also fixed 3 review bugs (ATR pip-size, telegram-status persist, MA warmup window).
-- 144 alerts + 3 Telegram bots untouched; crypto still on Binance.
+- 🔴→🟢 Fixed the **cold-start false-alert flood** ("alerts coming wrong"): on boot 81
+  alerts fired in ONE second (buy+sell on the same symbol) because the Yahoo poll emitted
+  a batch of recent bars and the engine replayed each pre-existing cross as a "live" fire.
+- `apps/api/src/alert-engine.ts`: new `initSubscription()` runs once per alert —
+  (1) backfills `max(longestMa*3+50, 150)` real closed bars into the store so MAs are
+  computed on real history, not a thin poll window; (2) seeds `lastFiredAt` to the newest
+  stored bar so ONLY bars closing AFTER subscription can fire; (3) then wires the candle
+  listener. A `wanted` Set guards the async backfill→listen race; `resolveProvider()`
+  maps the venue prefix to the right feed for backfill.
+- Wiped 156 bogus events + paper trades + reset all watermarks. Restarted → **0 events in
+  25s, no burst** (was 81/sec).
+- Verified crosses are REAL: independently recomputed EMA9×21 on raw BTC 30m candles → 8
+  crosses / 120 bars (latest SELL 05-29 02:30 @ 73225). Chart screenshot shows SCALP
+  BUY/SELL chips sitting exactly on those cross bars (yellow EMA9 over blue EMA21 = BUY,
+  under = SELL). Labels honest — sent to owner.
+- 144 alerts + 3 Telegram bots untouched.
 
 ## Earlier
 
-- Live PnL on paper trades (TradingView-style).
-- Server marks every open paper position against `candleStore`'s latest close on each
-  query — no WebSocket plumbing, sub-5ms per portfolio call. Open rows now carry
-  `currentPrice`, `unrealizedPct`, `markedAt`.
-- `PaperSummary` gained `unrealizedPct` + `totalPct`. New aggregate route
-  `GET /api/alerts/paper/portfolio` returns `realisedPct + unrealizedPct + totalPct`
-  + per-symbol breakdown sorted by total equity.
-- UI: PaperTradesModal now polls every 3s + renders a `LiveOpenPositionCard` with
-  big colour-coded PnL number (BUY/SELL · OPEN, held age, ENTRY/MARK/MOVE grid).
-- Active tab header shows a live Paper Portfolio banner (realised / unrealized /
-  total equity) when any paper position exists. Auto-refreshes every 3s.
-- Live-verified on BTC 30m paper buy (entry 72500 → mark 73484): +1.36% live in
-  modal, +1.32% in portfolio banner. Tick refresh works.
-- 144 alerts + 3 Telegram bots untouched.
+- Free FX/metals/indices via `YahooProvider` (no OANDA token). Maps catalog OANDA ids →
+  Yahoo tickers; REST backfill + poll-based closed-bar emit, volumeKind 'tick'. Bootstrap
+  picks OANDA when token set, else Yahoo, registered under the `oanda` provider key so the
+  venue resolver + all routes are unchanged. Verified 114 subs (38 symbols × 3 TF);
+  EUR/USD 1d backtest = 711 real bars. Caveats: unofficial endpoint, poll-only, no real FX
+  volume — fine for personal MVP, not resale.
+- Fixed 3 review bugs (ATR pip-size, telegram-status persist, MA warmup window).
+- Live PnL on paper trades (TradingView-style): server marks open positions to latest
+  close per query; `PaperSummary` + `/api/alerts/paper/portfolio` carry unrealized +
+  total %; modal polls 3s with colour-coded `LiveOpenPositionCard`.
 
 ## Next pick
 
