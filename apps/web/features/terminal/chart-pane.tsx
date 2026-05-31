@@ -329,7 +329,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           change: firstK.close > 0 ? ((lastK.close - firstK.close) / firstK.close) * 100 : 0,
         });
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[pane] historical load failed', err);
         if (!cancelled) {
           setLoading(false);
@@ -550,7 +550,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       hvnLvn: hv,
       regimeLabel: rg?.currentLabel ?? null,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [
     pane.smc,
     candleBufRef.current.length,
@@ -636,7 +636,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         }
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [
     pane.overlays.signalsTrendScore,
     pane.stsSettings,
@@ -699,7 +699,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       sellColor: target.config.style?.sellColor ?? '#ef4444',
     });
     layer.setFrame(result);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [
     paneAlerts,
     candleBufRef.current.length,

@@ -144,8 +144,8 @@ export function runMaCrossBacktest(
         pnlPercent: pnl,
         rsiAtEntry: open.rsi,
       });
-      open = null;
     }
+    // Open a fresh position on this cross (`open` is unconditionally reassigned here).
     open = {
       side: c.side,
       entryIdx: c.index,

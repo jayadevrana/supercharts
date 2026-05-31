@@ -80,12 +80,12 @@ export async function backfillHistory(opts: BackfillOptions): Promise<void> {
           cursor = nextCursor;
           if (candles.length < chunkSize) break;
         }
-        // eslint-disable-next-line no-console
+         
         console.log(
           `[backfill] ${target.symbol} ${interval}: ${loaded}/${totalExpected} bars`,
         );
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn(`[backfill] ${target.symbol} ${interval} failed:`, err);
       }
     }

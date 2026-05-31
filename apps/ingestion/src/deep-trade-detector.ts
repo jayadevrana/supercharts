@@ -59,7 +59,7 @@ export class DeepTradeDetector {
     }
 
     const mode = this.modes.get(symbol) ?? { mode: 'percentile', percentile: 0.99, lookbackMs: 600_000 };
-    let threshold = this.computeThreshold(win, mode);
+    const threshold = this.computeThreshold(win, mode);
     if (!Number.isFinite(threshold) || threshold <= 0) return null;
     // Require a minimum sample before producing bubbles.
     if (win.trades.length < 20 && (mode.mode === 'percentile' || mode.mode === 'z_score')) return null;

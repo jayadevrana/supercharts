@@ -146,7 +146,7 @@ export class AlertEngine {
         }
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[alert-engine] backfill failed, seeding from cache only', { alertId: alert.id, err });
     }
 
@@ -166,7 +166,7 @@ export class AlertEngine {
       // Only fire on bars strictly newer than the watermark — no replay.
       if (alert.lastFiredAt !== undefined && e.data.openTime <= alert.lastFiredAt) return;
       this.evaluate(alert, e.data).catch((err) => {
-        // eslint-disable-next-line no-console
+         
         console.error('[alert-engine] evaluate failed', { alertId: alert.id, err });
       });
     });
@@ -372,7 +372,7 @@ export class AlertEngine {
           sourceNote: providerId ? providerId[0]!.toUpperCase() + providerId.slice(1) : undefined,
         });
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[alert-engine] chart render failed; sending text only', { alertId: alert.id, err });
       }
       try {

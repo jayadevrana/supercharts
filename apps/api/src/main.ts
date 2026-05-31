@@ -236,7 +236,7 @@ async function start(): Promise<void> {
 }
 
 start().catch((err) => {
-  // eslint-disable-next-line no-console
+   
   console.error('[api] fatal', err);
   process.exit(1);
 });

@@ -326,7 +326,7 @@ function migrate(db: DatabaseSync): void {
       ).run(id, row.userId, 'Default', row.botToken, row.chatId, row.enabled, row.updatedAt, row.updatedAt);
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[db] telegram_bots backfill skipped:', err);
   }
 

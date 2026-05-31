@@ -96,7 +96,7 @@ export function registerWebSocketGateway(
     }, 5_000);
 
     socket.on('message', (raw) => {
-      let parsed: ClientToServerMessage | { type: 'subscribe_mt5' } | null = null;
+      let parsed: ClientToServerMessage | { type: 'subscribe_mt5' } | null;
       try {
         parsed = JSON.parse(raw.toString()) as ClientToServerMessage | { type: 'subscribe_mt5' };
       } catch {
@@ -121,7 +121,7 @@ export function registerWebSocketGateway(
         return;
       }
       handleClientMessage(conn, parsed as ClientToServerMessage, ctx).catch((err) => {
-        // eslint-disable-next-line no-console
+         
         console.error('[ws] handler error', err);
         // Never echo raw error text back to the client — server stack/trace strings
         // can leak DB paths, file system layout, internal IPs, etc.

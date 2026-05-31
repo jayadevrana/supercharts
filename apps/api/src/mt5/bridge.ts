@@ -48,7 +48,7 @@ export function startMT5Bridge(opts: {
   const byAccount = new Map<string, EAConnection>();
 
   function handleLine(conn: EAConnection, line: string): void {
-    let parsed: MT5EAToServerMessage | null = null;
+    let parsed: MT5EAToServerMessage | null;
     try {
       parsed = JSON.parse(line) as MT5EAToServerMessage;
     } catch (err) {

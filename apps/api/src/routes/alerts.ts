@@ -408,7 +408,7 @@ export function alertRoutes(
           candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
         } catch (err) {
           // Don't fail the backtest just because the provider blipped — run with what we have.
-          // eslint-disable-next-line no-console
+           
           console.warn('[backtest] candle fetch failed, running on cache:', err);
         }
       }
@@ -469,7 +469,7 @@ export function alertRoutes(
           for (const c of fetched) ctx.candleStore.upsert(row.symbol, interval, c);
           candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
         } catch (err) {
-          // eslint-disable-next-line no-console
+           
           console.warn('[optimize] candle fetch failed, running on cache:', err);
         }
       }
@@ -547,7 +547,7 @@ export function alertRoutes(
           for (const c of fetched) ctx.candleStore.upsert(row.symbol, row.interval as Interval, c);
           candles = ctx.candleStore.query(row.symbol, row.interval as Interval, undefined, undefined, desired);
         } catch (err) {
-          // eslint-disable-next-line no-console
+           
           console.warn('[sizer] candle fetch failed, running on cache:', err);
         }
       }
@@ -865,7 +865,7 @@ export function alertRoutes(
           for (const c of fetched) ctx.candleStore.upsert(row.symbol, interval, c);
           candles = ctx.candleStore.query(row.symbol, interval, undefined, undefined, desired);
         } catch (err) {
-          // eslint-disable-next-line no-console
+           
           console.warn('[walk-forward] candle fetch failed, running on cache:', err);
         }
       }

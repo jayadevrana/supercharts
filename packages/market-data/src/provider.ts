@@ -67,7 +67,7 @@ export class TinyEmitter<T> {
         fn(value);
       } catch (err) {
         // Subscribers must not crash the emitter.
-        // eslint-disable-next-line no-console
+         
         console.error('[TinyEmitter] listener threw', err);
       }
     }

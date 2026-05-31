@@ -65,7 +65,7 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
     try {
       await binance.connect();
     } catch (err) {
-      // eslint-disable-next-line no-console
+       
       console.warn('[ingestion] Binance connect failed, will retry in background:', err);
     }
   }
@@ -75,7 +75,7 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
   try {
     await forex.connect();
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn('[ingestion] forex provider connect failed:', err);
   }
 
@@ -91,10 +91,10 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
             intervals: DEFAULT_BACKFILL_INTERVALS,
           })),
         });
-        // eslint-disable-next-line no-console
+         
         console.log('[ingestion] backfill complete');
       } catch (err) {
-        // eslint-disable-next-line no-console
+         
         console.warn('[ingestion] backfill failed', err);
       }
     })();
@@ -115,7 +115,7 @@ const isMain = process.argv[1]?.endsWith('main.ts') || process.argv[1]?.endsWith
 if (isMain) {
   bootstrapIngestion()
     .then((ctx) => {
-      // eslint-disable-next-line no-console
+       
       console.log('[ingestion] running. providers=%o', Object.keys(ctx.providers));
       // Pre-subscribe to a couple of popular markets so the in-memory store warms.
       ctx.subscriptions.acquire({ symbol: 'BINANCE:BTCUSDT', kind: 'candles', interval: '1m' });
@@ -125,7 +125,7 @@ if (isMain) {
       ctx.subscriptions.acquire({ symbol: 'BINANCE:ETHUSDT', kind: 'trades' });
     })
     .catch((err) => {
-      // eslint-disable-next-line no-console
+       
       console.error('[ingestion] fatal', err);
       process.exit(1);
     });

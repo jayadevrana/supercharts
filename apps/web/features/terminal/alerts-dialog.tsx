@@ -3423,7 +3423,7 @@ function describeChat(c: DiscoveredChat): string {
   return c.title ? `${c.title} (${c.type})` : c.type;
 }
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+ 
 const _unusedX: typeof XIcon = XIcon;
 const _unused: typeof updateAlert = updateAlert;
-/* eslint-enable @typescript-eslint/no-unused-vars */
+ 
