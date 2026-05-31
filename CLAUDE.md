@@ -97,13 +97,17 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
   - **ESLint flat config** (`eslint.config.mjs`): `eslint .` now works monorepo-wide (0 errors,
     22 advisory warnings = pre-existing dead imports + 4 react-hooks/exhaustive-deps). Fixed 3 real
     `no-useless-assignment` errors (backtester / mt5 bridge / ws-gateway).
-  - **2 new candle-derived indicators** (real on every symbol & timeframe, never faked):
-    **Relative Volume (RVOL)** — bar volume ÷ prior-N average, sub-pane; and **VWAP Bands (σ)** —
-    session/cumulative VWAP with ±σ volume-weighted std-dev bands, price overlay. Added to
-    `packages/indicators` (volume.ts + registry + runner), wired into the blank-default Indicators
-    dialog, VWAP-bands overlay case in `chart-pane.tsx`. Verified in-browser on BTCUSDT 1m + 1h:
-    both render, recompute on interval change, console clean. (10 more of the requested 24 to go:
-    Market Profile/TPO, Naked POC, Initial Balance, the Binance-only order-flow set, Open Interest.)
+  - **3 new candle-derived indicators** (real on every symbol & timeframe, never faked):
+    **Relative Volume (RVOL)** — bar volume ÷ prior-N average, sub-pane; **VWAP Bands (σ)** —
+    session/cumulative VWAP with ±σ volume-weighted std-dev bands, price overlay; **Initial
+    Balance** — first-hour session high/low drawn as flat per-day reference levels, price overlay.
+    Added to `packages/indicators` (volume.ts + registry + runner), wired into the blank-default
+    Indicators dialog + overlay cases in `chart-pane.tsx` (the band/line builders, no new layer).
+    Verified in-browser on BTCUSDT 1m + 1h: all render, recompute on interval change, console clean.
+    (RVOL/VWAP-bands on 1m+1h; IB needs the session's first hour in-buffer so it shows from 1h up.)
+    (9 more of the requested 24 to go: Market Profile/TPO, Naked POC, the Binance-only order-flow
+    set — bid/ask & stacked imbalance, absorption, DOM ladder, iceberg, whale, Time & Sales — and
+    Open Interest/liquidations.)
   - ⚠️ **Transient SSD unmount** mid-session (exFAT/USB nap) wedged both dev servers → remounted,
     cleared `.next`, restarted api+web; alert engine reloaded all alerts on boot. Uncommitted work
     survived the drop intact.
@@ -143,11 +147,12 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**Continue the 24-indicator request — candle-derived set next, all real, blank-by-default.**
-Done: RVOL, VWAP σ-bands. Next candle-derived (work on every symbol/timeframe, no new feed):
-**Initial Balance** (first-hour session H/L), **Naked/Virgin POC** (untouched prior-session POCs),
-**Market Profile / TPO**. Each needs a new chart-core overlay layer + pane flag + dialog entry +
-browser verify. Then the **Binance-only order-flow set** (bid/ask & stacked imbalance, absorption,
+**Continue the 24-indicator request — candle-derived set first, all real, blank-by-default.**
+Done: RVOL, VWAP σ-bands, Initial Balance. Next candle-derived (every symbol/timeframe, no new feed):
+**Naked/Virgin POC** (untouched prior-session POCs — reuse `profile-builder` per session) and
+**Market Profile / TPO** (TPO letter blocks — this one needs a new chart-core layer). Each: registry +
+runner + dialog entry + overlay render + browser verify. Then the **Binance-only order-flow set**
+(bid/ask & stacked imbalance, absorption,
 DOM ladder, iceberg, whale/block tracker, Time & Sales) — gated to crypto, "needs data" on FX,
 never faked. Then **Open Interest / liquidations** (needs a Binance-futures feed in ingestion).
 After indicators: Phase 3 · #11 — OANDA token onboarding wizard.

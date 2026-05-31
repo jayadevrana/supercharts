@@ -991,6 +991,15 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           if (vw) lines.push({ id: inst.id + '_vwap', channel: 'vwap', values: vw, color: color('color'), lineWidth: 1.5 });
           break;
         }
+        case 'initial_balance': {
+          const ibHigh = channels.get('ibHigh');
+          const ibLow = channels.get('ibLow');
+          const ibMid = channels.get('ibMid');
+          if (ibHigh) lines.push({ id: inst.id + '_ibh', channel: 'ibHigh', values: ibHigh, color: color('color'), lineWidth: 1.25 });
+          if (ibLow) lines.push({ id: inst.id + '_ibl', channel: 'ibLow', values: ibLow, color: color('color'), lineWidth: 1.25 });
+          if (ibMid) lines.push({ id: inst.id + '_ibm', channel: 'ibMid', values: ibMid, color: String(inst.style.midColor ?? spec.style.midColor ?? color('color')), lineWidth: 1, dash: [4, 4] });
+          break;
+        }
       }
     }
     layer.visible = lines.length > 0 || bands.length > 0 || dots.length > 0;

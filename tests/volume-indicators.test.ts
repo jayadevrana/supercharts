@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { rvol, vwapBands } from '../packages/indicators/src/volume';
+import { rvol, vwapBands, initialBalance } from '../packages/indicators/src/volume';
 import { k } from './_helpers';
 
 describe('rvol (relative volume)', () => {
@@ -69,5 +69,38 @@ describe('vwapBands', () => {
     const b = vwapBands(sess, { mode: 'session' });
     // First bar of the new day → VWAP is just that bar's typical price.
     expect(b.vwap[2]!).toBeCloseTo((201 + 199 + 200) / 3, 6);
+  });
+});
+
+describe('initialBalance', () => {
+  const day0 = [
+    k(0, 100, 105, 95, 102, 100), // session open, in IB
+    k(1_800_000, 102, 110, 100, 108, 100), // +30m, in IB
+    k(5_400_000, 108, 120, 90, 95, 100), // +90m, AFTER the 60m IB window — wider range
+  ];
+
+  it('takes high/low from the first-hour window only and holds them flat across the session', () => {
+    const ib = initialBalance(day0, { ibMinutes: 60 });
+    // 90-minute candle's 120/90 must NOT widen the IB.
+    expect(ib.ibHigh.every((v) => v === 110)).toBe(true);
+    expect(ib.ibLow.every((v) => v === 95)).toBe(true);
+    expect(ib.ibMid.every((v) => v === 102.5)).toBe(true);
+  });
+
+  it('respects a shorter IB window', () => {
+    const ib = initialBalance(day0, { ibMinutes: 20 }); // only the openTime=0 bar qualifies
+    expect(ib.ibHigh[0]!).toBe(105);
+    expect(ib.ibLow[0]!).toBe(95);
+  });
+
+  it('resets per UTC session', () => {
+    const two = [
+      k(0, 100, 105, 95, 102, 100),
+      k(86_400_000, 200, 210, 190, 205, 100), // next UTC day
+    ];
+    const ib = initialBalance(two, { ibMinutes: 60 });
+    expect(ib.ibHigh[0]!).toBe(105);
+    expect(ib.ibHigh[1]!).toBe(210);
+    expect(ib.ibLow[1]!).toBe(190);
   });
 });

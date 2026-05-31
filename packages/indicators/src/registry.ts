@@ -326,6 +326,16 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     description:
       'Volume-weighted average price with ±σ standard-deviation bands. Session mode resets at the UTC day. Candle-derived — real on all symbols/timeframes.',
   },
+  {
+    type: 'initial_balance',
+    label: 'Initial Balance',
+    pane: 'overlay',
+    channels: ['ibHigh', 'ibLow', 'ibMid'],
+    inputs: [{ key: 'ibMinutes', label: 'IB minutes', type: 'int', default: 60, min: 5 }],
+    style: { color: '#f06292', midColor: 'rgba(240,98,146,0.5)' },
+    description:
+      'High/low established in the first hour of each UTC session, drawn as flat reference levels. Intraday market-profile staple — real on all symbols.',
+  },
 ];
 
 export const INDICATOR_LOOKUP: Record<string, IndicatorSpec> = Object.fromEntries(

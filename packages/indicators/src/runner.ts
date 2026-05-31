@@ -16,7 +16,7 @@ import { sma, ema, wma, hma, dema, tema, type PriceSource } from './ma';
 import { rsi, macd, stochastic, williamsR, cci, mfi, roc } from './oscillators';
 import { atr, bollinger, keltner, donchian } from './volatility';
 import { adx, supertrend, psar, ichimoku, aroon } from './trend';
-import { vwap, vwapBands, rvol, obv, cmf, volumeOscillator } from './volume';
+import { vwap, vwapBands, rvol, initialBalance, obv, cmf, volumeOscillator } from './volume';
 import { INDICATOR_LOOKUP } from './registry';
 
 export interface IndicatorRef {
@@ -255,6 +255,14 @@ export function computeAll(
         ['lower1', f.lower1],
         ['upper2', f.upper2],
         ['lower2', f.lower2],
+      ]);
+    }
+    case 'initial_balance': {
+      const ib = initialBalance(candles, { ibMinutes: numberInput(inputs.ibMinutes, 60) });
+      return new Map<string, number[]>([
+        ['ibHigh', ib.ibHigh],
+        ['ibLow', ib.ibLow],
+        ['ibMid', ib.ibMid],
       ]);
     }
     case 'obv':

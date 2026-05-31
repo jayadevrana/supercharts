@@ -181,3 +181,68 @@ export function vwapBands(candles: readonly Candle[], opts: VWAPBandsOptions = {
   }
   return res;
 }
+
+export interface InitialBalanceOptions {
+  /** Length of the initial-balance window from each session open, in minutes. */
+  ibMinutes?: number;
+}
+
+export interface InitialBalanceResult {
+  ibHigh: number[];
+  ibLow: number[];
+  ibMid: number[];
+}
+
+/**
+ * Initial Balance — the high/low range established in the first `ibMinutes`
+ * (default 60) of each session, drawn as flat reference levels across that
+ * whole session. Sessions are UTC days (matches the session VWAP here); the
+ * first-hour range is a classic market-profile reference for the day's
+ * acceptance/rejection. Price-derived → real on every symbol & timeframe.
+ *
+ * On daily+ timeframes a single bar spans the whole IB window, so the levels
+ * degenerate to that bar's own high/low — IB is an intraday concept, so this
+ * is expected rather than meaningful there.
+ */
+export function initialBalance(
+  candles: readonly Candle[],
+  opts: InitialBalanceOptions = {},
+): InitialBalanceResult {
+  const ibMs = Math.max(1, opts.ibMinutes ?? 60) * 60_000;
+  const n = candles.length;
+  const res: InitialBalanceResult = {
+    ibHigh: new Array<number>(n).fill(NaN),
+    ibLow: new Array<number>(n).fill(NaN),
+    ibMid: new Array<number>(n).fill(NaN),
+  };
+  let i = 0;
+  while (i < n) {
+    const dayIdx = Math.floor(candles[i]!.openTime / 86_400_000);
+    const sessionStart = dayIdx * 86_400_000;
+    const ibEnd = sessionStart + ibMs;
+    let hi = -Infinity;
+    let lo = Infinity;
+    let haveIB = false;
+    let j = i;
+    // Walk every candle in this UTC-day session; take H/L over the IB window only.
+    while (j < n && Math.floor(candles[j]!.openTime / 86_400_000) === dayIdx) {
+      const c = candles[j]!;
+      if (c.openTime < ibEnd) {
+        if (c.high > hi) hi = c.high;
+        if (c.low < lo) lo = c.low;
+        haveIB = true;
+      }
+      j++;
+    }
+    if (haveIB && hi > -Infinity && lo < Infinity) {
+      const mid = (hi + lo) / 2;
+      for (let k = i; k < j; k++) {
+        res.ibHigh[k] = hi;
+        res.ibLow[k] = lo;
+        res.ibMid[k] = mid;
+      }
+    }
+    i = j;
+  }
+  return res;
+}
