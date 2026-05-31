@@ -14,6 +14,13 @@ import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
 import { previewSizing, latestAtr } from '../position-sizer';
 import { buildPortfolioHeat, type HeatPosition } from '../portfolio-heat';
 import { buildAttribution, type AlertMeta } from '../pnl-attribution';
+import {
+  buildStatReport,
+  formatReportTelegram,
+  reportWindow,
+  type ReportPeriod,
+  type ReportAlertMeta,
+} from '../stat-report';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -762,6 +769,40 @@ export function alertRoutes(
     return buildAttribution(closedRows, open, meta);
   });
 
+  /**
+   * Daily / weekly stat report — alert fires + paper P&L rollup for the window. Web card
+   * reads this; `?period=daily|weekly` (default daily).
+   */
+  fastify.get('/api/portfolio/report', async (req) => {
+    const user = getUser(req, db);
+    const period: ReportPeriod = (req.query as { period?: string }).period === 'weekly' ? 'weekly' : 'daily';
+    return gatherStatReport(user.id, db, ctx, period);
+  });
+
+  /** Send the report as a Telegram digest via the user's first enabled bot. */
+  fastify.post('/api/portfolio/report/send', async (req, reply) => {
+    const user = getUser(req, db);
+    const period: ReportPeriod = (req.query as { period?: string }).period === 'weekly' ? 'weekly' : 'daily';
+    const report = gatherStatReport(user.id, db, ctx, period);
+    const cfg = db.raw
+      .prepare(
+        `SELECT bot_token as botToken, chat_id as chatId FROM telegram_bots
+         WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+      )
+      .get(user.id) as { botToken: string; chatId: string } | undefined;
+    if (!cfg) {
+      reply.code(400);
+      return { error: 'no_telegram_bot', message: 'No enabled Telegram bot configured.' };
+    }
+    try {
+      await sendTelegramMessage({ botToken: cfg.botToken, chatId: cfg.chatId, text: formatReportTelegram(report) });
+      return { ok: true, sent: true, period };
+    } catch (err) {
+      reply.code(502);
+      return { error: 'telegram_failed', message: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   // Force-close every still-open paper position for an alert (or wipe history with
   // ?wipe=1). Helpful when the user wants to reset after parameter changes.
   fastify.post('/api/alerts/:id/paper/reset', async (req) => {
@@ -1283,6 +1324,36 @@ function paperSummaryByAlert(userId: string, db: AppDB, ctx: IngestionContext) {
       openPosition: open,
     };
   });
+}
+
+/** Gather + build a daily/weekly stat report for a user. */
+function gatherStatReport(userId: string, db: AppDB, ctx: IngestionContext, period: ReportPeriod) {
+  const { windowStart, windowEnd } = reportWindow(period, Date.now());
+  const fires = db.raw
+    .prepare(`SELECT side, symbol FROM alert_events WHERE user_id = ? AND fired_at >= ? AND fired_at < ?`)
+    .all(userId, windowStart, windowEnd) as { side: 'buy' | 'sell'; symbol: string }[];
+  const closed = db.raw
+    .prepare(
+      `SELECT alert_id as alertId, pnl_percent as pnlPercent FROM paper_trades
+       WHERE user_id = ? AND status = 'closed' AND pnl_percent IS NOT NULL AND exit_time >= ? AND exit_time < ?`,
+    )
+    .all(userId, windowStart, windowEnd) as { alertId: string; pnlPercent: number }[];
+  const metaRows = db.raw
+    .prepare(`SELECT id, symbol_id as symbol, interval, config, enabled FROM alerts WHERE user_id = ?`)
+    .all(userId) as { id: string; symbol: string; interval: string; config: string; enabled: number }[];
+  const meta = new Map<string, ReportAlertMeta>();
+  let activeAlerts = 0;
+  for (const m of metaRows) {
+    if (m.enabled) activeAlerts += 1;
+    try {
+      meta.set(m.id, { symbol: m.symbol, interval: m.interval, config: JSON.parse(m.config) as MaCrossAlertConfig });
+    } catch {
+      /* skip unparseable */
+    }
+  }
+  const summary = paperSummaryByAlert(userId, db, ctx);
+  const unrealizedPct = summary.reduce((s, x) => s + (x.unrealizedPct ?? 0), 0);
+  return buildStatReport({ period, windowStart, windowEnd, fires, closed, meta, unrealizedPct, activeAlerts });
 }
 
 /**

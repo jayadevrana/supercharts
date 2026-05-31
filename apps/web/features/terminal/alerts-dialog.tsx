@@ -72,6 +72,9 @@ import {
   type PortfolioHeatResponse,
   fetchPortfolioAttribution,
   type PnlAttributionResponse,
+  fetchPortfolioReport,
+  sendPortfolioReport,
+  type StatReportResponse,
   resetPaperTrades,
   runBacktest,
   runOptimize,
@@ -181,6 +184,7 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
             <PortfolioHeatPanel />
           </TabsContent>
           <TabsContent value="pnl" className="max-h-[60vh] overflow-y-auto scroll-thin">
+            <StatReportCard />
             <PnlAttributionPanel />
           </TabsContent>
           <TabsContent value="lists" className="max-h-[60vh] overflow-y-auto scroll-thin">
@@ -481,6 +485,110 @@ function PortfolioHeatPanel() {
           <p className="text-[10px] text-muted-foreground">
             Correlations from real {data.interval} returns. Exposure is equal-weight per position (paper trades carry no lot size).
           </p>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────── Stat report card */
+
+function StatReportCard() {
+  const [period, setPeriod] = useState<'daily' | 'weekly'>('daily');
+  const [data, setData] = useState<StatReportResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  const load = useCallback(async (p: 'daily' | 'weekly') => {
+    setLoading(true);
+    try {
+      setData(await fetchPortfolioReport(p));
+    } catch (e) {
+      toast({ title: 'Report failed', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load(period);
+  }, [load, period]);
+
+  const send = useCallback(async () => {
+    setSending(true);
+    try {
+      await sendPortfolioReport(period);
+      toast({ title: `${period === 'daily' ? 'Daily' : 'Weekly'} report sent to Telegram` });
+    } catch (e) {
+      toast({ title: 'Telegram send failed', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setSending(false);
+    }
+  }, [period]);
+
+  return (
+    <div className="mb-4 rounded-lg border border-border/60 bg-card/40 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-medium text-foreground">Summary report</span>
+        <div className="flex items-center gap-1">
+          {(['daily', 'weekly'] as const).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriod(p)}
+              className={`rounded px-2 py-0.5 text-[11px] capitalize ${period === p ? 'bg-accent/20 text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              {p}
+            </button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-2 h-7 gap-1.5 text-[11px]"
+            onClick={() => void send()}
+            disabled={sending || !data}
+          >
+            {sending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />} Telegram
+          </Button>
+        </div>
+      </div>
+      {loading && !data ? (
+        <div className="py-4 text-center text-muted-foreground">
+          <Loader2 className="mx-auto h-4 w-4 animate-spin" />
+        </div>
+      ) : data ? (
+        <>
+          <div className="grid grid-cols-2 gap-3 text-[11px] sm:grid-cols-4">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Signals</div>
+              <div className="text-base font-semibold text-foreground">{data.fires.total}</div>
+              <div className="text-muted-foreground">{data.fires.buy} buy / {data.fires.sell} sell</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Paper P&amp;L</div>
+              <div className={`text-base font-semibold ${pctClass(data.paper.totalPct)}`}>{fmtPct(data.paper.totalPct)}</div>
+              <div className="text-muted-foreground">real {fmtPct(data.paper.realisedPct)} · open {fmtPct(data.paper.unrealizedPct)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Closed</div>
+              <div className="text-base font-semibold text-foreground">{data.paper.closedTrades}</div>
+              <div className="text-muted-foreground">win {(data.paper.winRate * 100).toFixed(0)}%</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Active alerts</div>
+              <div className="text-base font-semibold text-foreground">{data.activeAlerts}</div>
+              <div className="text-muted-foreground">{period} window</div>
+            </div>
+          </div>
+          {(data.best.length > 0 || data.worst.length > 0) && (
+            <div className="mt-2 space-y-0.5 border-t border-border/40 pt-2 text-[11px]">
+              {[...data.best, ...data.worst].map((l, i) => (
+                <div key={i} className="flex justify-between gap-2">
+                  <span className="truncate text-muted-foreground">{l.label}</span>
+                  <span className={`shrink-0 tabular-nums ${pctClass(l.realisedPct)}`}>{fmtPct(l.realisedPct)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       ) : null}
     </div>

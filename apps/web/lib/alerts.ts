@@ -352,6 +352,35 @@ export async function fetchPortfolioAttribution(): Promise<PnlAttributionRespons
   return api<PnlAttributionResponse>('/portfolio/attribution');
 }
 
+/* ────── Stat report (daily / weekly) ────── */
+
+export interface StatReportResponse {
+  period: 'daily' | 'weekly';
+  windowStart: number;
+  windowEnd: number;
+  fires: { total: number; buy: number; sell: number; topSymbols: Array<{ symbol: string; label: string; count: number }> };
+  paper: {
+    closedTrades: number;
+    wins: number;
+    winRate: number;
+    realisedPct: number;
+    unrealizedPct: number;
+    totalPct: number;
+    avgPct: number;
+  };
+  best: Array<{ label: string; trades: number; realisedPct: number }>;
+  worst: Array<{ label: string; trades: number; realisedPct: number }>;
+  activeAlerts: number;
+}
+
+export async function fetchPortfolioReport(period: 'daily' | 'weekly' = 'daily'): Promise<StatReportResponse> {
+  return api<StatReportResponse>(`/portfolio/report?period=${period}`);
+}
+
+export async function sendPortfolioReport(period: 'daily' | 'weekly' = 'daily'): Promise<{ ok: boolean; sent: boolean }> {
+  return api(`/portfolio/report/send?period=${period}`, { method: 'POST' });
+}
+
 /* ────── Position sizer ────── */
 
 export type SizingMode = 'fixed_lots' | 'risk_percent' | 'cash_risk' | 'kelly' | 'atr_scaled';

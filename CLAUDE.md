@@ -52,7 +52,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 - [x] **6. Position sizer v1** — `apps/api/src/position-sizer.ts` with pure helpers for fixed_lots / risk_percent / cash_risk / kelly (fractional 0.25) / atr_scaled. Route `POST /api/alerts/:id/sizer-preview` backtests the alert to derive Kelly inputs (winRate, avg win/loss) + reads latest ATR, returns lot suggestions across all 5 modes. UI: Calculator icon per alert row → modal with 6 inputs (balance/risk%/risk$/SL pips/$pip/fixed lots), 4 backtest stat cards, side-by-side results table with formula breakdown.
 - [x] **7. Portfolio heat v1** — `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`. Pearson correlation of log returns across open paper positions (or a `?symbols=` basket). Day-bucketed alignment so cross-provider daily bars (gold futures vs spot FX vs crypto, which open at different session times) line up by UTC day. Folds position SIDE into the correlation → a *directional* concentration score (two longs on a +0.9 pair = stacked risk; long+short = hedged). Asset-class buckets + net currency exposure (EUR_USD long → +EUR / −USD; the "5 EUR longs" check). UI: **Heat tab** in the alerts dialog — concentration headline + avg|corr| + stacked-pair count, amber stacked-risk warnings (clustered via union-find), N×N correlation heatmap (red = move together, blue = offset), asset-class + net-currency bars. "Analyse active alerts" maps the watched basket; empty state when <2 open positions. Exposure is equal-weight (paper_trades carry no lot size) — stated, not faked.
 - [x] **8. Per-strategy P&L attribution v1** — `apps/api/src/pnl-attribution.ts` (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up three ways: per alert (strategy *instance*), per strategy *signature* (the MA/RSI recipe across every symbol it runs on), and per asset class. Realised = Σ closed `pnl_percent`; open = mark-to-market unrealized (reuses `markRow`). Per-instance: trades, win%, realised/open/total %, avg win/loss, profit factor, best/worst. UI: **P&L tab** in the alerts dialog — 4 headline cards (total/realised/open, win rate, strategy count, best/worst), per-instance table with diverging contribution bars, and by-recipe + by-asset-class rollups. 5s auto-refresh. Return attribution (equal-weight per trade) — stated, not faked. **Also fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so the paper-trade toggle was silently stripped on save and no positions were ever booked — restored `paper: z.boolean().optional()`.
-- [ ] 9. Daily / weekly stat report (web + Telegram summary)
+- [x] **9. Daily / weekly stat report v1** — `apps/api/src/stat-report.ts` (pure) + `GET /api/portfolio/report?period=daily|weekly` + `POST /api/portfolio/report/send`. Windows alert fires (`fired_at`) + closed paper trades (`exit_time`); rolls up signals (total/buy/sell + top symbols), paper P&L (realised/open/total, win rate, avg), best/worst strategy lines, active-alert count. `formatReportTelegram()` renders an HTML digest sent via the user's first enabled bot. UI: **Summary report card** atop the P&L tab — daily/weekly toggle + 4 stat cards + best/worst + a "Telegram" send button. Verified: weekly = 39 fires (22 buy/17 sell); send button delivered the digest (toast confirmed). Scheduler is external for now (cron → POST the send route); documented as a follow-up.
 - [ ] 10. Max-drawdown breaker — pause all recipes when daily-DD breached
 
 ### Phase 3 — Data & Integrations
@@ -90,34 +90,21 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 🌐 **Read-only DEMO mode** for a safe public demo from the Mac (owner wants to share a
-  link via a tunnel + FreeDomain subdomain). The API has no auth yet, so `DEMO_MODE=1`
-  installs an onRequest guard (`apps/api/src/demo-guard.ts`): blocks every mutation +
-  secret GET (telegram/mt5/billing) with 403, allows charts/alerts/heat/P&L + read-only
-  backtest/optimizer. Web shows a "demo · read-only" badge (`NEXT_PUBLIC_DEMO_MODE`).
-  Verified the allow/deny matrix. Run guide + tunnel/FreeDomain steps in `DEMO.md` (the
-  ngrok/Cloudflare account + the GitHub PR are owner-only actions). Nothing exposed yet.
-- 🔌 **Fixed frozen-chart-after-reconnect.** The terminal WS already had backoff reconnect,
-  but a backgrounded tab throttles the timer, so after a server restart / network blip the
-  chart could stay frozen for a long time. `ws-client.ts` now reconnects **immediately on
-  tab focus + `online`** (resets backoff), exposes a `WSStatus` + `useWSStatus()` hook, and
-  the top-bar badge shows **live / reconnecting / offline** (green/amber/red, pulsing). On
-  reconnect the server's `market_snapshot` re-anchors the chart to now. Verified live:
-  killed the API → badge → RECONNECTING; relaunched → auto-healed to LIVE + chart re-anchored,
-  no manual reload.
-- 📊 **Phase 2 #8 — Per-strategy P&L attribution.** `apps/api/src/pnl-attribution.ts`
-  (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up by alert (strategy
-  instance), by strategy *signature* (MA/RSI recipe across symbols), and by asset class.
-  Realised = Σ closed pnl%; open = mark-to-market unrealized. Per-instance trades/win%/
-  avg win-loss/profit-factor/best-worst.
-- UI: new **P&L tab** — total/realised/open headline, win rate, strategy count, best/worst,
-  per-instance table with diverging contribution bars, by-recipe + by-asset-class rollups,
-  5s refresh. Return attribution (equal-weight per trade) — stated, not faked.
-- 🐞 **Fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so
-  the paper-trade toggle was silently stripped on save → no positions ever booked. Restored
-  `paper: z.boolean().optional()`. Verified end-to-end: armed 3 fast 1m paper alerts, engine
-  booked + flipped them (1 closed +0.11%, 3 open), P&L tab + portfolio banner populated with
-  real marks. Cleaned up the demo alerts after. 144 alerts + 3 bots intact.
+- 📈 **Phase 2 #9 — Daily / weekly stat report.** `apps/api/src/stat-report.ts` (pure) +
+  GET `/api/portfolio/report?period=daily|weekly` + POST `/api/portfolio/report/send`.
+  Windows alert fires (`fired_at`) + closed paper trades (`exit_time`) → signals
+  (total/buy/sell + top symbols), paper P&L (realised/open/total, win rate), best/worst
+  strategy lines, active-alert count. `formatReportTelegram()` HTML digest sent via the
+  first enabled bot. UI: **Summary report card** atop the P&L tab (daily/weekly toggle +
+  Telegram button). Verified: weekly = 39 fires (22 buy/17 sell); the send button delivered
+  the digest (toast confirmed). External cron → POST the send route for scheduling.
+- 🌐 **Read-only DEMO mode** (`DEMO_MODE=1` guard, `demo-guard.ts`) + a live **raw** 1-hour
+  demo via two cloudflared quick tunnels (web + API, WS wired through). `DEMO.md` has the
+  run/tunnel/FreeDomain steps. Note: quick tunnels are flaky — the edge connection dropped
+  mid-session (auto-retries; hostname can change). 60-min auto-takedown watchdog armed.
+- 🔌 **WS self-heal**: reconnect on tab-focus/`online`; top-bar live/reconnecting/offline badge.
+- 📊 **Phase 2 #8 — P&L attribution** (`pnl-attribution.ts`) + fixed a latent Phase 1 #5 bug:
+  the zod `delivery` schema was missing `paper`, so the paper-toggle was silently stripped.
 
 ## Earlier
 
@@ -132,10 +119,11 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**Phase 2 · #9 — Daily / weekly stat report (web + Telegram summary).** Scheduled rollup of
-the paper book + alert activity (fires, win rate, realised/open P&L, top/bottom strategies)
-delivered as a Telegram message + a web summary card. Reuse the attribution + heat helpers;
-add a scheduler (cron-style) and a `sendTelegramMessage` summary. #10 = max-drawdown breaker.
+**Phase 2 · #10 — Max-drawdown breaker.** Pause all MT5 signal recipes (and optionally
+paper) when a daily-drawdown threshold is breached, so a bad day can't compound. Track
+realised+open drawdown per day vs a configurable limit, flip recipes off + Telegram-alert
+when tripped, auto-reset at the UTC day boundary. Reuse the stat-report window helpers.
+Closes Phase 2 → Risk & Portfolio.
 
 ## Questions for owner
 
