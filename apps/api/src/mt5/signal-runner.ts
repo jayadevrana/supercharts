@@ -57,8 +57,10 @@ export function createSignalRunner(opts: {
   ingestion: IngestionContext;
   router: IntentRouter;
   store: MT5Store;
+  /** Max-drawdown breaker: when it returns true, recipes evaluate but never dispatch. */
+  shouldHalt?: () => boolean;
 }): SignalRunner {
-  const { ingestion, router, store } = opts;
+  const { ingestion, router, store, shouldHalt } = opts;
   const active = new Map<string, RecipeRuntime>();
 
   function indicatorRefs(recipe: SignalRecipe): IndicatorRef[] {
@@ -264,6 +266,8 @@ export function createSignalRunner(opts: {
       if (!recipe.enabled) return;
       if (e.data.interval !== (recipe.interval as Interval)) return;
       if (!e.data.isClosed) return;
+      // Max-drawdown breaker — halt new automation when the day's loss limit is breached.
+      if (shouldHalt?.()) return;
       const bars = ingestion.candleStore.query(
         recipe.symbol,
         recipe.interval as Interval,

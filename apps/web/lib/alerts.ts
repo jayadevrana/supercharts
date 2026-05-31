@@ -381,6 +381,31 @@ export async function sendPortfolioReport(period: 'daily' | 'weekly' = 'daily'):
   return api(`/portfolio/report/send?period=${period}`, { method: 'POST' });
 }
 
+/* ────── Max-drawdown breaker ────── */
+
+export interface BreakerStatus {
+  enabled: boolean;
+  limitPct: number;
+  dailyPnlPct: number;
+  drawdownPct: number;
+  halted: boolean;
+  haltedAt: number | null;
+  dayStart: number;
+  reason?: string;
+}
+
+export async function fetchBreaker(): Promise<BreakerStatus> {
+  return api<BreakerStatus>('/portfolio/breaker');
+}
+
+export async function configureBreaker(patch: { enabled?: boolean; limitPct?: number }): Promise<BreakerStatus> {
+  return api<BreakerStatus>('/portfolio/breaker', { method: 'POST', body: JSON.stringify(patch) });
+}
+
+export async function resumeBreaker(): Promise<BreakerStatus> {
+  return api<BreakerStatus>('/portfolio/breaker/resume', { method: 'POST' });
+}
+
 /* ────── Position sizer ────── */
 
 export type SizingMode = 'fixed_lots' | 'risk_percent' | 'cash_risk' | 'kelly' | 'atr_scaled';

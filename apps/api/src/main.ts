@@ -18,9 +18,12 @@ import { signalRoutes } from './routes/signals';
 import { indicatorRoutes } from './routes/indicators';
 import { registerWebSocketGateway } from './ws-gateway';
 import { registerDemoGuard } from './demo-guard';
+import { createDrawdownBreaker } from './dd-breaker';
+import { breakerRoutes } from './routes/breaker';
+import { sendTelegramMessage } from './telegram';
 import { MT5Store, startMT5Bridge, createIntentRouter } from './mt5';
 import { createSignalRunner } from './mt5/signal-runner';
-import type { SignalRecipe } from '@supercharts/types';
+import type { SignalRecipe, Interval } from '@supercharts/types';
 import { AlertEngine } from './alert-engine';
 
 const PORT = Number(process.env.PORT ?? 4000);
@@ -96,7 +99,65 @@ async function start(): Promise<void> {
     if (e.kind === 'positions')
       intentRouter.onPositionsSnapshot(e.accountId, e.positions);
   });
-  const signalRunner = createSignalRunner({ ingestion, router: intentRouter, store: mt5Store });
+  // Max-drawdown breaker (#10): halts signal recipes when the day's paper P&L breaches the
+  // limit. P&L source is swappable; today it's the paper book (realised closed-today % +
+  // open unrealized %). Halting only ADDS a skip gate — recipes are never deleted.
+  const computeDailyPnlPct = (dayStart: number): number => {
+    const realised = (
+      db.raw
+        .prepare(
+          `SELECT COALESCE(SUM(pnl_percent), 0) v FROM paper_trades
+           WHERE status = 'closed' AND pnl_percent IS NOT NULL AND exit_time >= ?`,
+        )
+        .get(dayStart) as { v: number }
+    ).v;
+    const opens = db.raw
+      .prepare(`SELECT symbol, interval, side, entry_price as entryPrice FROM paper_trades WHERE status = 'open'`)
+      .all() as { symbol: string; interval: string; side: 'buy' | 'sell'; entryPrice: number }[];
+    let unreal = 0;
+    for (const o of opens) {
+      const c = ingestion.candleStore.query(o.symbol, o.interval as Interval, undefined, undefined, 1);
+      const last = c[c.length - 1];
+      if (!last || o.entryPrice <= 0) continue;
+      unreal +=
+        o.side === 'buy'
+          ? ((last.close - o.entryPrice) / o.entryPrice) * 100
+          : ((o.entryPrice - last.close) / o.entryPrice) * 100;
+    }
+    return realised + unreal;
+  };
+  const ddBreaker = createDrawdownBreaker({
+    computeDailyPnlPct,
+    limitPct: Number(process.env.DD_LIMIT_PCT ?? 5),
+    enabled: process.env.DD_BREAKER_ENABLED !== 'false',
+    onTrip: (status) => {
+      app.log.warn(`[breaker] tripped — ${status.reason}`);
+      try {
+        const bot = db.raw
+          .prepare(
+            `SELECT bot_token as botToken, chat_id as chatId FROM telegram_bots
+             WHERE enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+          )
+          .get() as { botToken: string; chatId: string } | undefined;
+        if (bot) {
+          void sendTelegramMessage({
+            botToken: bot.botToken,
+            chatId: bot.chatId,
+            text: `🛑 <b>Max-drawdown breaker tripped</b>\nDaily P&amp;L ${status.dailyPnlPct.toFixed(2)}% ≤ −${status.limitPct}% limit. New automation paused until manual resume or the next UTC day.`,
+          });
+        }
+      } catch (err) {
+        app.log.error({ err }, '[breaker] alert send failed');
+      }
+    },
+  });
+
+  const signalRunner = createSignalRunner({
+    ingestion,
+    router: intentRouter,
+    store: mt5Store,
+    shouldHalt: () => ddBreaker.isHalted(),
+  });
   const recipeRows = db.raw
     .prepare(
       'SELECT id, user_id, account_id, symbol, interval, enabled, name, payload, created_at, updated_at FROM signal_recipes WHERE enabled = 1',
@@ -152,8 +213,19 @@ async function start(): Promise<void> {
   });
   alertEngine.load();
   alertRoutes(app, db, alertEngine, ingestion);
+  breakerRoutes(app, db, ddBreaker);
+
+  // Poll the breaker so it trips + auto-resets at the UTC boundary even without traffic.
+  const breakerTimer = setInterval(() => {
+    try {
+      ddBreaker.check();
+    } catch (err) {
+      app.log.error({ err }, '[breaker] check failed');
+    }
+  }, 60_000);
 
   app.addHook('onClose', async () => {
+    clearInterval(breakerTimer);
     alertEngine.shutdown();
     signalRunner.shutdown();
     await mt5Bridge.close();

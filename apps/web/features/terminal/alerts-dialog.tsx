@@ -27,6 +27,7 @@ import {
   Calculator,
   Flame,
   PieChart,
+  ShieldAlert,
 } from 'lucide-react';
 import type { PaperPortfolio, PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
@@ -75,6 +76,10 @@ import {
   fetchPortfolioReport,
   sendPortfolioReport,
   type StatReportResponse,
+  fetchBreaker,
+  configureBreaker,
+  resumeBreaker,
+  type BreakerStatus,
   resetPaperTrades,
   runBacktest,
   runOptimize,
@@ -184,6 +189,7 @@ export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
             <PortfolioHeatPanel />
           </TabsContent>
           <TabsContent value="pnl" className="max-h-[60vh] overflow-y-auto scroll-thin">
+            <BreakerCard />
             <StatReportCard />
             <PnlAttributionPanel />
           </TabsContent>
@@ -487,6 +493,102 @@ function PortfolioHeatPanel() {
           </p>
         </>
       ) : null}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────── Max-drawdown breaker */
+
+function BreakerCard() {
+  const [s, setS] = useState<BreakerStatus | null>(null);
+  const [limit, setLimit] = useState('5');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await fetchBreaker();
+      setS(r);
+      setLimit(String(r.limitPct));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const id = setInterval(() => void refresh(), 10_000);
+    return () => clearInterval(id);
+  }, [refresh]);
+
+  const apply = useCallback(async (patch: { enabled?: boolean; limitPct?: number }) => {
+    setBusy(true);
+    try {
+      setS(await configureBreaker(patch));
+    } catch (e) {
+      toast({ title: 'Breaker update failed', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const resume = useCallback(async () => {
+    setBusy(true);
+    try {
+      setS(await resumeBreaker());
+      toast({ title: 'Automation resumed' });
+    } catch (e) {
+      toast({ title: 'Resume failed', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  if (!s) return null;
+  return (
+    <div className={`mb-4 rounded-lg border p-3 ${s.halted ? 'border-red-500/50 bg-red-500/10' : 'border-border/60 bg-card/40'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className={`h-4 w-4 ${s.halted ? 'text-red-400' : 'text-muted-foreground'}`} />
+          <span className="text-xs font-medium text-foreground">Max-drawdown breaker</span>
+          {s.halted && <Badge tone="bear">HALTED</Badge>}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted-foreground">Enabled</span>
+          <Switch checked={s.enabled} onCheckedChange={(v) => void apply({ enabled: v })} disabled={busy} />
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-3 gap-3 text-[11px]">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Today P&amp;L</div>
+          <div className={`text-base font-semibold ${pctClass(s.dailyPnlPct)}`}>{fmtPct(s.dailyPnlPct)}</div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Halt at −%</div>
+          <div className="mt-0.5 flex items-center gap-1">
+            <Input value={limit} onChange={(e) => setLimit(e.target.value)} className="h-7 w-14 text-xs" />
+            <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => void apply({ limitPct: Number(limit) })} disabled={busy || !(Number(limit) > 0)}>
+              Set
+            </Button>
+          </div>
+        </div>
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Status</div>
+          <div className={`text-sm font-semibold ${s.halted ? 'text-red-400' : s.enabled ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+            {s.halted ? 'Paused' : s.enabled ? 'Armed' : 'Off'}
+          </div>
+        </div>
+      </div>
+      {s.halted && (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-red-500/30 pt-2 text-[11px] text-red-200">
+          <span className="truncate">{s.reason} — new automation paused.</span>
+          <Button variant="outline" size="sm" className="h-7 shrink-0 gap-1 text-[11px]" onClick={() => void resume()} disabled={busy}>
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Resume
+          </Button>
+        </div>
+      )}
+      <p className="mt-2 text-[10px] text-muted-foreground">
+        Pauses MT5 signal recipes when today&apos;s paper P&amp;L ≤ −limit. Auto-resets at UTC midnight.
+      </p>
     </div>
   );
 }

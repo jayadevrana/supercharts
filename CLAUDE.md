@@ -53,7 +53,7 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 - [x] **7. Portfolio heat v1** — `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`. Pearson correlation of log returns across open paper positions (or a `?symbols=` basket). Day-bucketed alignment so cross-provider daily bars (gold futures vs spot FX vs crypto, which open at different session times) line up by UTC day. Folds position SIDE into the correlation → a *directional* concentration score (two longs on a +0.9 pair = stacked risk; long+short = hedged). Asset-class buckets + net currency exposure (EUR_USD long → +EUR / −USD; the "5 EUR longs" check). UI: **Heat tab** in the alerts dialog — concentration headline + avg|corr| + stacked-pair count, amber stacked-risk warnings (clustered via union-find), N×N correlation heatmap (red = move together, blue = offset), asset-class + net-currency bars. "Analyse active alerts" maps the watched basket; empty state when <2 open positions. Exposure is equal-weight (paper_trades carry no lot size) — stated, not faked.
 - [x] **8. Per-strategy P&L attribution v1** — `apps/api/src/pnl-attribution.ts` (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up three ways: per alert (strategy *instance*), per strategy *signature* (the MA/RSI recipe across every symbol it runs on), and per asset class. Realised = Σ closed `pnl_percent`; open = mark-to-market unrealized (reuses `markRow`). Per-instance: trades, win%, realised/open/total %, avg win/loss, profit factor, best/worst. UI: **P&L tab** in the alerts dialog — 4 headline cards (total/realised/open, win rate, strategy count, best/worst), per-instance table with diverging contribution bars, and by-recipe + by-asset-class rollups. 5s auto-refresh. Return attribution (equal-weight per trade) — stated, not faked. **Also fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so the paper-trade toggle was silently stripped on save and no positions were ever booked — restored `paper: z.boolean().optional()`.
 - [x] **9. Daily / weekly stat report v1** — `apps/api/src/stat-report.ts` (pure) + `GET /api/portfolio/report?period=daily|weekly` + `POST /api/portfolio/report/send`. Windows alert fires (`fired_at`) + closed paper trades (`exit_time`); rolls up signals (total/buy/sell + top symbols), paper P&L (realised/open/total, win rate, avg), best/worst strategy lines, active-alert count. `formatReportTelegram()` renders an HTML digest sent via the user's first enabled bot. UI: **Summary report card** atop the P&L tab — daily/weekly toggle + 4 stat cards + best/worst + a "Telegram" send button. Verified: weekly = 39 fires (22 buy/17 sell); send button delivered the digest (toast confirmed). Scheduler is external for now (cron → POST the send route); documented as a follow-up.
-- [ ] 10. Max-drawdown breaker — pause all recipes when daily-DD breached
+- [x] **10. Max-drawdown breaker v1** — `apps/api/src/dd-breaker.ts` (createDrawdownBreaker) + `routes/breaker.ts` (`GET/POST /api/portfolio/breaker`, `POST /resume`). Watches the day's P&L (injected `computeDailyPnlPct` — today the paper book: realised closed-today % + open unrealized %); when it drops ≤ −limit it HALTS the signal-runner (new addative `shouldHalt` gate — recipes evaluate but never dispatch; never deletes), fires a Telegram alert (onTrip), and auto-resets at the UTC day boundary. Manual resume holds for the day; configurable enable + limit. 60s poll in `main.ts`. UI: **Breaker card** atop the P&L tab — enable switch, today's P&L, halt-at-% input, Armed/Paused/Off status, red HALTED banner + Resume. Default `DD_LIMIT_PCT=5`, `DD_BREAKER_ENABLED` (on). Verified: isolated logic test (trip / no-double-trip / manual-resume-holds / day-rollover re-arm / disable) + live route (status + configure). **Phase 2 complete.**
 
 ### Phase 3 — Data & Integrations
 
@@ -90,6 +90,13 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🛑 **Phase 2 #10 — Max-drawdown breaker (Phase 2 COMPLETE).** `dd-breaker.ts` +
+  `routes/breaker.ts`. Watches the day's paper P&L; ≤ −limit → HALTS the signal-runner via
+  an additive `shouldHalt` gate (recipes evaluate, never dispatch — never deleted), Telegram
+  alert on trip, auto-reset at UTC midnight, manual resume holds for the day. Breaker card
+  atop the P&L tab (enable / today P&L / halt-at-% / Resume). Verified: deterministic logic
+  test (trip/no-double-trip/resume-holds/rollover-rearm/disable) + live GET+configure routes.
+  (Browser card shot deferred — chrome-MCP screenshot transport was glitching.)
 - 📈 **Phase 2 #9 — Daily / weekly stat report.** `apps/api/src/stat-report.ts` (pure) +
   GET `/api/portfolio/report?period=daily|weekly` + POST `/api/portfolio/report/send`.
   Windows alert fires (`fired_at`) + closed paper trades (`exit_time`) → signals
@@ -119,11 +126,10 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**Phase 2 · #10 — Max-drawdown breaker.** Pause all MT5 signal recipes (and optionally
-paper) when a daily-drawdown threshold is breached, so a bad day can't compound. Track
-realised+open drawdown per day vs a configurable limit, flip recipes off + Telegram-alert
-when tripped, auto-reset at the UTC day boundary. Reuse the stat-report window helpers.
-Closes Phase 2 → Risk & Portfolio.
+**Phase 3 · #11 — OANDA token onboarding wizard.** In-app form to enter an OANDA API token
++ account id → validate against the OANDA API → persist to user config so the forex/metals/
+indices feed upgrades from free Yahoo to real broker prices. (Phases 1 & 2 done.) #12 =
+News filter per watchlist; #13 = economic-calendar overlay.
 
 ## Questions for owner
 
