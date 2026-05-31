@@ -144,11 +144,13 @@ function defaultPane(id: string, symbol: string): PaneState {
     symbol,
     interval: '1m',
     chartType: 'candlestick',
+    // All overlays OFF by default — a fresh chart is candles-only. The user turns
+    // indicators on from the Indicators dialog (TradingView-style blank-first UX).
     overlays: {
-      heatmap: true,
-      profile: true,
-      deepTrades: true,
-      volume: true,
+      heatmap: false,
+      profile: false,
+      deepTrades: false,
+      volume: false,
       footprint: false,
       signalsTrendScore: false,
     },

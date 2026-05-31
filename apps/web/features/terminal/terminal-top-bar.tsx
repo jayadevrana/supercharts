@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { useWSStatus } from '@/lib/ws-client';
+import { IndicatorsDialog } from './indicators-dialog';
 import type { ChartType, Interval } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 
@@ -184,6 +185,7 @@ export function TerminalTopBar() {
         </SelectContent>
       </Select>
       <LayoutPicker />
+      <IndicatorsDialog />
       <div className="ml-auto flex items-center gap-2">
         <MT5Chip />
         <StrategyBuilderDialog

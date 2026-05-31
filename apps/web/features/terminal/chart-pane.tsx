@@ -1222,6 +1222,10 @@ function applyOverlays(core: ChartCore, pane: PaneState): void {
     footprint.options.enabled = on;
     footprint.visible = on;
   }
+  // Volume sub-pane histogram — was always-on; now respects the Volume toggle so a
+  // fresh chart is truly blank (candles only).
+  const volume = core.getLayer('volume');
+  if (volume) volume.visible = pane.overlays.volume;
 }
 
 function estimateRowSize(symbol: string): number {
