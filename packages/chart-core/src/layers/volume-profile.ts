@@ -34,7 +34,10 @@ export class VolumeProfileLayer implements Layer {
     const pane = geometry.pricePane;
     const w = pane.width * this.options.widthFraction;
     const baseX = this.options.anchor === 'right' ? pane.x + pane.width - w : pane.x;
-    const maxVol = Math.max(...profile.levels.map((l) => l.totalVolume), 1);
+    // Plain loop, never `Math.max(...spread)` — a large levels array would overflow the
+    // call stack (RangeError) when spread as function arguments.
+    let maxVol = 1;
+    for (const l of profile.levels) if (l.totalVolume > maxVol) maxVol = l.totalVolume;
 
     c.save();
     // Optional value area shading.

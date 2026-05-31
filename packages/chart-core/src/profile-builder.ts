@@ -43,16 +43,28 @@ export function buildVisibleRangeProfile(
   if (candles.length === 0 || rowSize <= 0) {
     return { poc: 0, vah: 0, val: 0, totalVolume: 0, rowSize, levels: [] };
   }
+  // Guard against a too-fine rowSize blowing the bucket count up (e.g. a $4,500 gold
+  // price with a 0.0001 FX row size → millions of bins → render stack-overflow / freeze).
+  // Floor the row size so the whole visible range never exceeds MAX_ROWS buckets.
+  const MAX_ROWS = 600;
+  let minLow = Infinity;
+  let maxHigh = -Infinity;
+  for (const k of candles) {
+    if (k.low < minLow) minLow = k.low;
+    if (k.high > maxHigh) maxHigh = k.high;
+  }
+  const span = maxHigh - minLow;
+  const row = span > 0 && span / rowSize > MAX_ROWS ? span / MAX_ROWS : rowSize;
   const buckets = new Map<number, { buy: number; sell: number; total: number; trades: number }>();
   for (const k of candles) {
-    const low = Math.floor(k.low / rowSize) * rowSize;
-    const high = Math.ceil(k.high / rowSize) * rowSize;
-    const rows = Math.max(1, Math.round((high - low) / rowSize));
+    const low = Math.floor(k.low / row) * row;
+    const high = Math.ceil(k.high / row) * row;
+    const rows = Math.max(1, Math.round((high - low) / row));
     const perRow = k.volume / rows;
     const buyShare = k.volume > 0 ? k.buyVolume / k.volume : 0;
     for (let i = 0; i < rows; i += 1) {
-      const price = low + i * rowSize + rowSize / 2;
-      const key = Math.round(price / rowSize) * rowSize;
+      const price = low + i * row + row / 2;
+      const key = Math.round(price / row) * row;
       const slot = buckets.get(key) ?? { buy: 0, sell: 0, total: 0, trades: 0 };
       slot.total += perRow;
       slot.buy += perRow * buyShare;
@@ -108,5 +120,5 @@ export function buildVisibleRangeProfile(
     isLVN: v.total <= lvn,
     inValueArea: i >= lo && i <= hi,
   }));
-  return { poc, vah, val, totalVolume: total, rowSize, levels };
+  return { poc, vah, val, totalVolume: total, rowSize: row, levels };
 }
