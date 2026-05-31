@@ -16,7 +16,7 @@ import { sma, ema, wma, hma, dema, tema, type PriceSource } from './ma';
 import { rsi, macd, stochastic, williamsR, cci, mfi, roc } from './oscillators';
 import { atr, bollinger, keltner, donchian } from './volatility';
 import { adx, supertrend, psar, ichimoku, aroon } from './trend';
-import { vwap, obv, cmf, volumeOscillator } from './volume';
+import { vwap, vwapBands, rvol, obv, cmf, volumeOscillator } from './volume';
 import { INDICATOR_LOOKUP } from './registry';
 
 export interface IndicatorRef {
@@ -241,6 +241,22 @@ export function computeAll(
         'value',
         vwap(candles, { mode: (inputs.mode as 'session' | 'cumulative') ?? 'session' }),
       );
+    case 'rvol':
+      return single('value', rvol(candles, { length: numberInput(inputs.length, 20) }));
+    case 'vwap_bands': {
+      const f = vwapBands(candles, {
+        mode: (inputs.mode as 'session' | 'cumulative') ?? 'session',
+        multiplier1: numberInput(inputs.multiplier1, 1),
+        multiplier2: numberInput(inputs.multiplier2, 2),
+      });
+      return new Map<string, number[]>([
+        ['vwap', f.vwap],
+        ['upper1', f.upper1],
+        ['lower1', f.lower1],
+        ['upper2', f.upper2],
+        ['lower2', f.lower2],
+      ]);
+    }
     case 'obv':
       return single('value', obv(candles));
     case 'cmf':

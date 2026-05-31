@@ -979,6 +979,18 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           }
           break;
         }
+        case 'vwap_bands': {
+          const vw = channels.get('vwap');
+          const u1 = channels.get('upper1');
+          const l1 = channels.get('lower1');
+          const u2 = channels.get('upper2');
+          const l2 = channels.get('lower2');
+          const bandFill = String(inst.style.bandColor ?? spec.style.bandColor ?? 'rgba(38,198,218,0.10)');
+          if (u2 && l2) bands.push({ id: inst.id + '_outer', upper: u2, lower: l2, fillColor: bandFill });
+          if (u1 && l1) bands.push({ id: inst.id + '_inner', upper: u1, lower: l1, fillColor: bandFill });
+          if (vw) lines.push({ id: inst.id + '_vwap', channel: 'vwap', values: vw, color: color('color'), lineWidth: 1.5 });
+          break;
+        }
       }
     }
     layer.visible = lines.length > 0 || bands.length > 0 || dots.length > 0;

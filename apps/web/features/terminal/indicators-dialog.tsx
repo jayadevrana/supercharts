@@ -53,6 +53,7 @@ const CATALOG: Group[] = [
       { kind: 'classic', type: 'obv', label: 'On-Balance Volume', desc: 'Cumulative volume flow.' },
       { kind: 'classic', type: 'cmf', label: 'Chaikin Money Flow', desc: 'Money-flow over a period.' },
       { kind: 'classic', type: 'mfi', label: 'Money Flow Index', desc: 'Volume-weighted RSI.' },
+      { kind: 'classic', type: 'rvol', label: 'Relative Volume (RVOL)', desc: 'Bar volume vs the average of prior bars. >1 = above-average.' },
     ],
   },
   {
@@ -96,6 +97,7 @@ const CATALOG: Group[] = [
     group: 'Bands & Channels',
     items: [
       { kind: 'classic', type: 'bollinger', label: 'Bollinger Bands', desc: 'SMA ± n·σ bands.' },
+      { kind: 'classic', type: 'vwap_bands', label: 'VWAP Bands (σ)', desc: 'Session VWAP with ±σ standard-deviation bands.' },
       { kind: 'classic', type: 'keltner', label: 'Keltner Channels', desc: 'EMA ± ATR channels.' },
       { kind: 'classic', type: 'donchian', label: 'Donchian Channels', desc: 'N-bar high/low channel.' },
     ],

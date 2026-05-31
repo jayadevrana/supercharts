@@ -90,6 +90,23 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🧪 **Quality pass (normal mode, caveman off): test suite + working lint + first new indicators.**
+  - **Vitest suite** (`tests/`, `vitest.config.ts`): 26 tests across profile-builder, ma-cross,
+    indicators runner, dd-breaker, portfolio-heat, pnl-attribution, and the new volume indicators —
+    all green. Import pure modules by relative source path to stay out of package tsconfigs.
+  - **ESLint flat config** (`eslint.config.mjs`): `eslint .` now works monorepo-wide (0 errors,
+    22 advisory warnings = pre-existing dead imports + 4 react-hooks/exhaustive-deps). Fixed 3 real
+    `no-useless-assignment` errors (backtester / mt5 bridge / ws-gateway).
+  - **2 new candle-derived indicators** (real on every symbol & timeframe, never faked):
+    **Relative Volume (RVOL)** — bar volume ÷ prior-N average, sub-pane; and **VWAP Bands (σ)** —
+    session/cumulative VWAP with ±σ volume-weighted std-dev bands, price overlay. Added to
+    `packages/indicators` (volume.ts + registry + runner), wired into the blank-default Indicators
+    dialog, VWAP-bands overlay case in `chart-pane.tsx`. Verified in-browser on BTCUSDT 1m + 1h:
+    both render, recompute on interval change, console clean. (10 more of the requested 24 to go:
+    Market Profile/TPO, Naked POC, Initial Balance, the Binance-only order-flow set, Open Interest.)
+  - ⚠️ **Transient SSD unmount** mid-session (exFAT/USB nap) wedged both dev servers → remounted,
+    cleared `.next`, restarted api+web; alert engine reloaded all alerts on boot. Uncommitted work
+    survived the drop intact.
 - 🛑 **Phase 2 #10 — Max-drawdown breaker (Phase 2 COMPLETE).** `dd-breaker.ts` +
   `routes/breaker.ts`. Watches the day's paper P&L; ≤ −limit → HALTS the signal-runner via
   an additive `shouldHalt` gate (recipes evaluate, never dispatch — never deleted), Telegram
@@ -126,10 +143,14 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**Phase 3 · #11 — OANDA token onboarding wizard.** In-app form to enter an OANDA API token
-+ account id → validate against the OANDA API → persist to user config so the forex/metals/
-indices feed upgrades from free Yahoo to real broker prices. (Phases 1 & 2 done.) #12 =
-News filter per watchlist; #13 = economic-calendar overlay.
+**Continue the 24-indicator request — candle-derived set next, all real, blank-by-default.**
+Done: RVOL, VWAP σ-bands. Next candle-derived (work on every symbol/timeframe, no new feed):
+**Initial Balance** (first-hour session H/L), **Naked/Virgin POC** (untouched prior-session POCs),
+**Market Profile / TPO**. Each needs a new chart-core overlay layer + pane flag + dialog entry +
+browser verify. Then the **Binance-only order-flow set** (bid/ask & stacked imbalance, absorption,
+DOM ladder, iceberg, whale/block tracker, Time & Sales) — gated to crypto, "needs data" on FX,
+never faked. Then **Open Interest / liquidations** (needs a Binance-futures feed in ingestion).
+After indicators: Phase 3 · #11 — OANDA token onboarding wizard.
 
 ## Questions for owner
 

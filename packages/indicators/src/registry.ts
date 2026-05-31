@@ -293,6 +293,39 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     ],
     style: { color: '#26a69a' },
   },
+  {
+    type: 'rvol',
+    label: 'Relative Volume (RVOL)',
+    pane: 'sub',
+    channels: ['value'],
+    inputs: [{ key: 'length', label: 'Lookback', type: 'int', default: 20, min: 2 }],
+    style: { color: '#ffa726' },
+    description:
+      'Current bar volume ÷ average of the prior N bars. >1 = above-average participation. Works on every symbol (tick volume on FX).',
+  },
+  {
+    type: 'vwap_bands',
+    label: 'VWAP Bands (σ)',
+    pane: 'overlay',
+    channels: ['vwap', 'upper1', 'lower1', 'upper2', 'lower2'],
+    inputs: [
+      {
+        key: 'mode',
+        label: 'Mode',
+        type: 'enum',
+        default: 'session',
+        options: [
+          { label: 'Session', value: 'session' },
+          { label: 'Cumulative', value: 'cumulative' },
+        ],
+      },
+      { key: 'multiplier1', label: 'Inner σ', type: 'float', default: 1, step: 0.5, min: 0.5 },
+      { key: 'multiplier2', label: 'Outer σ', type: 'float', default: 2, step: 0.5, min: 0.5 },
+    ],
+    style: { color: '#26c6da', bandColor: 'rgba(38,198,218,0.10)' },
+    description:
+      'Volume-weighted average price with ±σ standard-deviation bands. Session mode resets at the UTC day. Candle-derived — real on all symbols/timeframes.',
+  },
 ];
 
 export const INDICATOR_LOOKUP: Record<string, IndicatorSpec> = Object.fromEntries(
