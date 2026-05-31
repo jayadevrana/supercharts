@@ -820,6 +820,31 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     const core = chartRef.current;
     if (!core) return;
     applyOverlays(core, pane);
+    // Volume profile is built lazily (on load / on pan) only when it was already on. With
+    // the blank-by-default chart the user toggles it on AFTER load, so build it now from
+    // the current visible range — otherwise the layer is visible but has no data.
+    if (pane.overlays.profile) {
+      const { fromTime, toTime } = core.getVisibleRange();
+      const arr = candleBufRef.current;
+      const visible = arr.filter((k) => k.openTime >= fromTime && k.openTime <= toTime);
+      const src = visible.length > 0 ? visible : arr;
+      if (src.length > 0) {
+        const built = buildVisibleRangeProfile(src, estimateRowSize(pane.symbol), 0.7);
+        core.setVolumeProfile({
+          mode: 'visible_range',
+          symbol: pane.symbol,
+          fromTime: src[0]!.openTime,
+          toTime: src[src.length - 1]!.closeTime,
+          rowSize: built.rowSize,
+          valueAreaPercent: 0.7,
+          poc: built.poc,
+          vah: built.vah,
+          val: built.val,
+          totalVolume: built.totalVolume,
+          levels: built.levels,
+        });
+      }
+    }
   }, [
     pane.overlays.heatmap,
     pane.overlays.profile,
