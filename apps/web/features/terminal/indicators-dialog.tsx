@@ -55,6 +55,7 @@ const CATALOG: Group[] = [
       { kind: 'classic', type: 'mfi', label: 'Money Flow Index', desc: 'Volume-weighted RSI.' },
       { kind: 'classic', type: 'rvol', label: 'Relative Volume (RVOL)', desc: 'Bar volume vs the average of prior bars. >1 = above-average.' },
       { kind: 'classic', type: 'initial_balance', label: 'Initial Balance', desc: 'First-hour session high/low range, drawn as reference levels.' },
+      { kind: 'classic', type: 'naked_poc', label: 'Naked POC', desc: 'Untouched prior-session volume POCs (virgin points of control).' },
     ],
   },
   {

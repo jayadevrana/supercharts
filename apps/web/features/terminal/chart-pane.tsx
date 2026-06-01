@@ -40,7 +40,7 @@ import type {
   IndicatorOverlayDots,
   IndicatorOverlayLine,
 } from '@supercharts/chart-core';
-import { computeAll, INDICATOR_LOOKUP } from '@supercharts/indicators';
+import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { SubPaneIndicators } from './sub-pane-indicators';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
@@ -998,6 +998,27 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           if (ibHigh) lines.push({ id: inst.id + '_ibh', channel: 'ibHigh', values: ibHigh, color: color('color'), lineWidth: 1.25 });
           if (ibLow) lines.push({ id: inst.id + '_ibl', channel: 'ibLow', values: ibLow, color: color('color'), lineWidth: 1.25 });
           if (ibMid) lines.push({ id: inst.id + '_ibm', channel: 'ibMid', values: ibMid, color: String(inst.style.midColor ?? spec.style.midColor ?? color('color')), lineWidth: 1, dash: [4, 4] });
+          break;
+        }
+        case 'naked_poc': {
+          // Variable number of levels (one per prior session) — computed directly
+          // from bars, not via the fixed-channel runner. Naked levels extend to now
+          // in the bright color; filled (revisited) ones stop at the touch, dimmed.
+          const levels = nakedPOC(bars, { maxLevels: Number(inst.inputs.maxLevels ?? 25) });
+          const filledColor = String(inst.style.filledColor ?? spec.style.filledColor ?? 'rgba(255,255,255,0.16)');
+          for (let li = 0; li < levels.length; li++) {
+            const lv = levels[li]!;
+            const vals = new Array<number>(bars.length).fill(NaN);
+            for (let k = lv.fromIndex; k <= lv.toIndex; k++) vals[k] = lv.price;
+            lines.push({
+              id: inst.id + '_npoc' + li,
+              channel: 'poc',
+              values: vals,
+              color: lv.naked ? color('color') : filledColor,
+              lineWidth: lv.naked ? 1.25 : 0.75,
+              dash: lv.naked ? undefined : [3, 3],
+            });
+          }
           break;
         }
       }

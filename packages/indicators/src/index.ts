@@ -10,6 +10,7 @@ export * from './oscillators';
 export * from './volatility';
 export * from './trend';
 export * from './volume';
+export * from './profile';
 export * from './patterns';
 export * from './runner';
 export * from './registry';

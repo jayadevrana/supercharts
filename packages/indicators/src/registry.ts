@@ -336,6 +336,16 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
     description:
       'High/low established in the first hour of each UTC session, drawn as flat reference levels. Intraday market-profile staple — real on all symbols.',
   },
+  {
+    type: 'naked_poc',
+    label: 'Naked POC',
+    pane: 'overlay',
+    channels: ['poc'],
+    inputs: [{ key: 'maxLevels', label: 'Max levels', type: 'int', default: 25, min: 1 }],
+    style: { color: '#ffca28', filledColor: 'rgba(255,255,255,0.16)' },
+    description:
+      "Each completed session's volume Point of Control, drawn forward until price trades back through it. Untouched (virgin) POCs extend to now. Volume-profile POC on candle volume — real on all symbols.",
+  },
 ];
 
 export const INDICATOR_LOOKUP: Record<string, IndicatorSpec> = Object.fromEntries(
