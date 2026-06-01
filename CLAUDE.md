@@ -90,6 +90,12 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 📒 **DOM Ladder — live depth-of-market.** New `dom-ladder-panel.tsx` top-left corner panel:
+  asks above the spread (red), bids below (green), per-row depth bars sized by volume, fed by the
+  Binance `orderbook_delta` top-20 snapshot stream (same ref+flush pattern as the tape, with the
+  `domOnRef` stale-closure guard). Verified on BTCUSDT: real book renders — best ask carried an
+  11.35 BTC wall, spread + bid/ask split correct, console clean. Bumped both panels' price format to
+  2 decimals so adjacent BTC levels (0.01 tick) don't collapse to the same row.
 - 🩹 **Time & Sales — live trade tape.** New `time-sales-panel.tsx` corner panel fed by the
   `trade_tick` stream (newest-first, green = buyer-lifted-ask / red = seller, crypto-only with a
   "Binance only" note on FX). The WS handler fills a ring buffer; a 400 ms timer flushes it to

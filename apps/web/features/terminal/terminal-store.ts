@@ -22,6 +22,8 @@ export interface PaneState {
     marketProfile: boolean;
     /** Live Time & Sales tape (per-trade prints) — crypto only. */
     timeAndSales: boolean;
+    /** Live DOM ladder (top-of-book depth) — crypto only. */
+    domLadder: boolean;
     /** "Signals & Trend Score" indicator: MA cloud + ATR trail + Buy/Sell + MTF dashboards. */
     signalsTrendScore: boolean;
   };
@@ -158,6 +160,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       footprint: false,
       marketProfile: false,
       timeAndSales: false,
+      domLadder: false,
       signalsTrendScore: false,
     },
     smc: {

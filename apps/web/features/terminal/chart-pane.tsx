@@ -45,6 +45,7 @@ import { SubPaneIndicators } from './sub-pane-indicators';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
 import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
+import { DomLadderPanel, type Level } from './dom-ladder-panel';
 import type {
   Candle,
   ChartType,
@@ -90,6 +91,10 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   /** Live mirror of the tape toggle — the WS handler closure is pinned to symbol/interval,
    * so it must read the current value through a ref rather than the stale `pane`. */
   const tapeOnRef = useRef(false);
+  /** Latest top-of-book snapshot for the DOM ladder, flushed to state on a timer. */
+  const bookRef = useRef<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
+  const [domBook, setDomBook] = useState<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
+  const domOnRef = useRef(false);
   const drawingsRef = useRef<DrawingObject[]>([]);
   const drawingControllerRef = useRef<DrawingController | null>(null);
   const loadedRangeRef = useRef<{ from: number; to: number }>({ from: 0, to: 0 });
@@ -463,6 +468,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             t.aggressorSide === 'buyer' ? 'buy' : t.aggressorSide === 'seller' ? 'sell' : 'unknown';
           tapeRef.current.unshift({ id: t.id, price: t.price, qty: t.quantity, side, time: t.eventTime });
           if (tapeRef.current.length > 60) tapeRef.current.length = 60;
+          return;
+        }
+
+        case 'orderbook_delta': {
+          if (msg.symbol !== pane.symbol || !domOnRef.current) return;
+          // depth20 snapshots — just keep the latest top-of-book for the ladder.
+          bookRef.current = { bids: msg.delta.bids, asks: msg.delta.asks };
           return;
         }
       }
@@ -939,6 +951,21 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     return () => clearInterval(timer);
   }, [pane.overlays.timeAndSales, pane.symbol, pane.interval]);
 
+  // DOM ladder: same pattern — orderbook_delta fills bookRef, flushed to state ~4×/s.
+  useEffect(() => {
+    domOnRef.current = pane.overlays.domLadder;
+    if (!pane.overlays.domLadder) {
+      bookRef.current = { bids: [], asks: [] };
+      setDomBook({ bids: [], asks: [] });
+      return;
+    }
+    bookRef.current = { bids: [], asks: [] };
+    setDomBook({ bids: [], asks: [] });
+    const flush = (): void => setDomBook({ bids: bookRef.current.bids, asks: bookRef.current.asks });
+    const timer = setInterval(flush, 250);
+    return () => clearInterval(timer);
+  }, [pane.overlays.domLadder, pane.symbol, pane.interval]);
+
   // Bar replay — clip candles to the replay cursor while replayMode is on.
   useEffect(() => {
     const core = chartRef.current;
@@ -1185,6 +1212,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         ) : null}
         {pane.overlays.timeAndSales ? (
           <TimeSalesPanel rows={tapeRows} hasData={pane.symbol.startsWith('BINANCE:')} />
+        ) : null}
+        {pane.overlays.domLadder ? (
+          <DomLadderPanel bids={domBook.bids} asks={domBook.asks} hasData={pane.symbol.startsWith('BINANCE:')} />
         ) : null}
       </div>
       <SubPaneIndicators

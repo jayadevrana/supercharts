@@ -66,6 +66,7 @@ const CATALOG: Group[] = [
       { kind: 'overlay', key: 'deepTrades', label: 'Delta Bubbles', desc: 'Per-trade aggressive-flow bubbles.', orderflow: true },
       { kind: 'smc', key: 'cvdDivergence', label: 'CVD + Delta Divergence', desc: 'Cumulative volume delta + price/delta divergence.', orderflow: true },
       { kind: 'overlay', key: 'timeAndSales', label: 'Time & Sales', desc: 'Live trade-by-trade tape (price · size · side).', orderflow: true },
+      { kind: 'overlay', key: 'domLadder', label: 'DOM Ladder', desc: 'Live depth-of-market — top bid/ask sizes per price.', orderflow: true },
     ],
   },
   {

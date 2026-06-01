@@ -14,7 +14,7 @@ function fmtTime(ms: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 function fmtPrice(p: number): string {
-  if (p >= 1000) return p.toFixed(1);
+  if (p >= 1000) return p.toFixed(2);
   if (p >= 1) return p.toFixed(2);
   return p.toFixed(5);
 }
