@@ -67,6 +67,7 @@ const CATALOG: Group[] = [
       { kind: 'smc', key: 'cvdDivergence', label: 'CVD + Delta Divergence', desc: 'Cumulative volume delta + price/delta divergence.', orderflow: true },
       { kind: 'overlay', key: 'timeAndSales', label: 'Time & Sales', desc: 'Live trade-by-trade tape (price · size · side).', orderflow: true },
       { kind: 'overlay', key: 'domLadder', label: 'DOM Ladder', desc: 'Live depth-of-market — top bid/ask sizes per price.', orderflow: true },
+      { kind: 'overlay', key: 'openInterest', label: 'Open Interest', desc: 'Binance USD-M futures open interest + trend.', orderflow: true },
     ],
   },
   {

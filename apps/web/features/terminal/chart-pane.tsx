@@ -46,6 +46,7 @@ import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
 import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
 import { DomLadderPanel, type Level } from './dom-ladder-panel';
+import { OpenInterestPanel, type OIData } from './open-interest-panel';
 import type {
   Candle,
   ChartType,
@@ -95,6 +96,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const bookRef = useRef<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
   const [domBook, setDomBook] = useState<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
   const domOnRef = useRef(false);
+  /** Open Interest (REST-polled from /api/futures/oi while the panel is on). */
+  const [oiData, setOiData] = useState<OIData | null>(null);
+  const [oiLoading, setOiLoading] = useState(false);
   const drawingsRef = useRef<DrawingObject[]>([]);
   const drawingControllerRef = useRef<DrawingController | null>(null);
   const loadedRangeRef = useRef<{ from: number; to: number }>({ from: 0, to: 0 });
@@ -966,6 +970,33 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     return () => clearInterval(timer);
   }, [pane.overlays.domLadder, pane.symbol, pane.interval]);
 
+  // Open Interest: REST-poll the cached fapi proxy while the panel is on (OI moves slowly).
+  useEffect(() => {
+    if (!pane.overlays.openInterest) {
+      setOiData(null);
+      return;
+    }
+    let cancelled = false;
+    const load = async (): Promise<void> => {
+      setOiLoading(true);
+      try {
+        const res = await fetch(`/api/futures/oi?symbol=${encodeURIComponent(pane.symbol)}`);
+        const json = (await res.json()) as OIData;
+        if (!cancelled) setOiData(json);
+      } catch {
+        if (!cancelled) setOiData({ available: false, openInterest: null, history: [] });
+      } finally {
+        if (!cancelled) setOiLoading(false);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pane.overlays.openInterest, pane.symbol]);
+
   // Bar replay — clip candles to the replay cursor while replayMode is on.
   useEffect(() => {
     const core = chartRef.current;
@@ -1216,6 +1247,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         {pane.overlays.domLadder ? (
           <DomLadderPanel bids={domBook.bids} asks={domBook.asks} hasData={pane.symbol.startsWith('BINANCE:')} />
         ) : null}
+        {pane.overlays.openInterest ? <OpenInterestPanel data={oiData} loading={oiLoading} /> : null}
       </div>
       <SubPaneIndicators
         candles={candleBufRef.current}

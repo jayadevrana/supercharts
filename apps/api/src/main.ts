@@ -16,6 +16,7 @@ import { preferenceRoutes } from './routes/preferences';
 import { mt5Routes } from './routes/mt5';
 import { signalRoutes } from './routes/signals';
 import { indicatorRoutes } from './routes/indicators';
+import { futuresRoutes } from './routes/futures';
 import { registerWebSocketGateway } from './ws-gateway';
 import { registerDemoGuard } from './demo-guard';
 import { createDrawdownBreaker } from './dd-breaker';
@@ -203,6 +204,7 @@ async function start(): Promise<void> {
   mt5Routes(app, db, mt5Store, intentRouter);
   signalRoutes(app, db, signalRunner);
   indicatorRoutes(app, db);
+  futuresRoutes(app);
   const wsBroadcaster = registerWebSocketGateway(app, ingestion, mt5Store);
 
   // Alert engine — needs the WS broadcaster, so register routes AFTER the gateway is up.

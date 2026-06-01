@@ -90,6 +90,14 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🔭 **Open Interest — last indicator (the 24-indicator request is now done).** New
+  `apps/api/src/routes/futures.ts` proxies + 30s-caches Binance USD-M futures OI
+  (`fapi.binance.com`, public, no key) — current OI + a 5-min history series. Browser can't hit
+  fapi directly (CORS), so it goes through our API. `open-interest-panel.tsx` is a bottom-left
+  panel: current OI, % change over the window, and a sparkline; `pane.overlays.openInterest` flag,
+  REST-polled every 30s while on. Symbols with no USD-M perp (FX/metals) return `available:false`
+  → "no futures market" note, never faked. Verified on BTCUSDT: panel shows **106.66K ▲1.38%** with
+  the trend sparkline; EURUSD correctly shows no data. (This is the app's first futures data source.)
 - 📒 **DOM Ladder — live depth-of-market.** New `dom-ladder-panel.tsx` top-left corner panel:
   asks above the spread (red), bids below (green), per-row depth bars sized by volume, fed by the
   Binance `orderbook_delta` top-20 snapshot stream (same ref+flush pattern as the tape, with the

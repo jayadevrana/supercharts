@@ -24,6 +24,8 @@ export interface PaneState {
     timeAndSales: boolean;
     /** Live DOM ladder (top-of-book depth) — crypto only. */
     domLadder: boolean;
+    /** Open Interest (Binance USD-M futures) panel — crypto only. */
+    openInterest: boolean;
     /** "Signals & Trend Score" indicator: MA cloud + ATR trail + Buy/Sell + MTF dashboards. */
     signalsTrendScore: boolean;
   };
@@ -161,6 +163,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       marketProfile: false,
       timeAndSales: false,
       domLadder: false,
+      openInterest: false,
       signalsTrendScore: false,
     },
     smc: {
