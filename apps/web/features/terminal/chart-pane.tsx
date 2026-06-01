@@ -466,7 +466,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           if (tapeRef.current.some((r) => r.id === t.id)) return;
           const side: TapeRow['side'] =
             t.aggressorSide === 'buyer' ? 'buy' : t.aggressorSide === 'seller' ? 'sell' : 'unknown';
-          tapeRef.current.unshift({ id: t.id, price: t.price, qty: t.quantity, side, time: t.eventTime });
+          tapeRef.current.unshift({ id: t.id, price: t.price, qty: t.quantity, notional: t.notional, side, time: t.eventTime });
           if (tapeRef.current.length > 60) tapeRef.current.length = 60;
           return;
         }

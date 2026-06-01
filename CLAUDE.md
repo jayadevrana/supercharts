@@ -105,6 +105,10 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
   live; (2) the stream re-delivers prints, colliding on the React key (~thousands of console errors)
   — fixed by deduping the buffer by trade id on insert. Verified on BTCUSDT 1m: tape fills with real
   prints, console clean after the fix.
+- 🐋 **Whale / block highlighting in the tape** (the non-duplicate take on "whale tracker" — Delta
+  Bubbles already plots big trades on the chart). Prints ≥ $50k notional get a dot + bold + tinted
+  row in the Time & Sales tape. Real (uses the trade's `notional`); typecheck-clean, builds on the
+  live-verified tape — the highlight itself is data-dependent (shows when a block prints).
 - 📊 **Real footprint data pipeline (was stubbed `footprint_pending_phase_11`).** New
   `apps/ingestion/src/footprint-aggregator.ts` buckets the live Binance trade stream into
   per-candle, per-price-row **bid/ask** cells (buyer-aggressed → ask, seller → bid; `unknown`

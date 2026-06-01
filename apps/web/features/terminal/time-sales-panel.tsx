@@ -4,9 +4,14 @@ export interface TapeRow {
   id: string;
   price: number;
   qty: number;
+  /** Quote-currency value of the print (≈ USD on USDT pairs) — drives whale highlighting. */
+  notional: number;
   side: 'buy' | 'sell' | 'unknown';
   time: number;
 }
+
+/** Prints at or above this quote-value are flagged as block / "whale" trades. */
+const WHALE_NOTIONAL = 50_000;
 
 function fmtTime(ms: number): string {
   const d = new Date(ms);
@@ -49,9 +54,18 @@ export function TimeSalesPanel({ rows, hasData }: { rows: TapeRow[]; hasData: bo
           </div>
           {rows.map((r) => {
             const tone = r.side === 'sell' ? 'text-bear' : 'text-bull';
+            const whale = r.notional >= WHALE_NOTIONAL;
+            const whaleBg = whale ? (r.side === 'sell' ? 'bg-bear/15 font-semibold' : 'bg-bull/15 font-semibold') : '';
             return (
-              <div key={r.id} className="flex items-center justify-between px-2 py-[1px] tabular-nums">
-                <span className="text-muted-foreground/80">{fmtTime(r.time)}</span>
+              <div
+                key={r.id}
+                className={`flex items-center justify-between px-2 py-[1px] tabular-nums ${whaleBg}`}
+                title={whale ? `Block: ${fmtQty(r.qty)} @ ${fmtPrice(r.price)}` : undefined}
+              >
+                <span className="flex items-center gap-1 text-muted-foreground/80">
+                  {whale ? <span className={tone}>●</span> : null}
+                  {fmtTime(r.time)}
+                </span>
                 <span className={tone}>{fmtPrice(r.price)}</span>
                 <span className={tone}>{fmtQty(r.qty)}</span>
               </div>
