@@ -851,6 +851,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     pane.overlays.deepTrades,
     pane.overlays.volume,
     pane.overlays.footprint,
+    pane.overlays.marketProfile,
     pane.heatmapSettings.opacity,
     pane.heatmapSettings.depth,
     pane.heatmapSettings.timeBucketMs,
@@ -1289,6 +1290,9 @@ function applyOverlays(core: ChartCore, pane: PaneState): void {
     footprint.options.enabled = on;
     footprint.visible = on;
   }
+  // Per-session Market Profile / TPO backdrop — self-computes from candles.
+  const marketProfile = core.getLayer('market-profile');
+  if (marketProfile) marketProfile.visible = pane.overlays.marketProfile;
   // Volume sub-pane histogram — was always-on; now respects the Volume toggle so a
   // fresh chart is truly blank (candles only).
   const volume = core.getLayer('volume');

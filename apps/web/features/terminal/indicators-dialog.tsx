@@ -47,6 +47,7 @@ const CATALOG: Group[] = [
     items: [
       { kind: 'overlay', key: 'volume', label: 'Volume', desc: 'Per-bar volume histogram.' },
       { kind: 'overlay', key: 'profile', label: 'Volume Profile (VPVR)', desc: 'Volume traded at each price · POC / VAH / VAL.' },
+      { kind: 'overlay', key: 'marketProfile', label: 'Market Profile (TPO)', desc: 'Per-session time-at-price histogram · POC + value area.' },
       { kind: 'overlay', key: 'heatmap', label: 'Liquidity Heatmap', desc: 'Resting order-book liquidity over time.', orderflow: true },
       { kind: 'smc', key: 'hvnLvn', label: 'HVN / LVN nodes', desc: 'High / low volume nodes.' },
       { kind: 'classic', type: 'vwap', label: 'VWAP', desc: 'Volume-weighted average price (session).' },

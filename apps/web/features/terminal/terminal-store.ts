@@ -18,6 +18,8 @@ export interface PaneState {
     deepTrades: boolean;
     volume: boolean;
     footprint: boolean;
+    /** Per-session Market Profile / TPO histogram (POC + value area) behind candles. */
+    marketProfile: boolean;
     /** "Signals & Trend Score" indicator: MA cloud + ATR trail + Buy/Sell + MTF dashboards. */
     signalsTrendScore: boolean;
   };
@@ -152,6 +154,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       deepTrades: false,
       volume: false,
       footprint: false,
+      marketProfile: false,
       signalsTrendScore: false,
     },
     smc: {

@@ -11,6 +11,7 @@ import { CrosshairLayer } from './layers/crosshair';
 import { LiquidityHeatmapLayer } from './layers/heatmap';
 import { DeepTradesLayer } from './layers/deep-trades';
 import { VolumeProfileLayer } from './layers/volume-profile';
+import { MarketProfileLayer } from './layers/market-profile';
 import { DrawingLayer } from './layers/drawings';
 import { TooltipLayer } from './layers/tooltip';
 import { FootprintLayer } from './layers/footprint';
@@ -261,6 +262,7 @@ export class ChartCore {
     this.registerLayer(new GridLayer());
     this.registerLayer(new LiquidityHeatmapLayer({ enabled: false }));
     this.registerLayer(new VolumeProfileLayer());
+    this.registerLayer(new MarketProfileLayer());
     this.registerLayer(new FootprintLayer({ enabled: false }));
     this.registerLayer(new VolumeLayer());
     this.registerLayer(new PriceSeriesLayer({ chartType: 'candlestick' }));

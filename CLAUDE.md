@@ -97,19 +97,21 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
   - **ESLint flat config** (`eslint.config.mjs`): `eslint .` now works monorepo-wide (0 errors,
     22 advisory warnings = pre-existing dead imports + 4 react-hooks/exhaustive-deps). Fixed 3 real
     `no-useless-assignment` errors (backtester / mt5 bridge / ws-gateway).
-  - **4 new candle-derived indicators** (real on every symbol & timeframe, never faked):
+  - **5 new institutional indicators** (real on every symbol & timeframe, never faked):
     **Relative Volume (RVOL)** — bar volume ÷ prior-N average, sub-pane; **VWAP Bands (σ)** —
     session/cumulative VWAP with ±σ volume-weighted std-dev bands, overlay; **Initial Balance** —
     first-hour session high/low as flat per-day reference levels, overlay; **Naked/Virgin POC** —
     each completed session's volume POC (OHLCV-approx, same as VPVR) drawn forward until price
-    trades back through it, untouched ones extending to now, overlay. Added to `packages/indicators`
-    (volume.ts / new profile.ts + registry + runner), wired into the blank-default Indicators dialog
-    + overlay cases in `chart-pane.tsx` (line/band builders; Naked POC's variable level count is
-    computed straight from bars there, not the fixed-channel runner). 33 tests green.
+    trades back through it, untouched ones extending to now, overlay; **Market Profile / TPO** —
+    per-session time-at-price histogram (POC + value area) as a translucent backdrop behind candles.
+    First four are registry indicators wired into the blank-default dialog + `chart-pane` overlay
+    cases. Market Profile is the first that needed a **new chart-core layer** (`MarketProfileLayer`
+    + `buildMarketProfiles`, a `pane.overlays.marketProfile` flag, self-memoised). 37 tests green.
     Verified in-browser on BTCUSDT 1m + 1h: all render, recompute on interval change, console clean.
-    (RVOL/VWAP-bands show from 1m; IB + Naked POC need multiple/complete sessions in-buffer → 1h up.)
-    (8 more of the requested 24 to go: Market Profile/TPO, the Binance-only order-flow set — bid/ask &
-    stacked imbalance, absorption, DOM ladder, iceberg, whale, Time & Sales — and Open Interest.)
+    (RVOL/VWAP-bands show from 1m; IB / Naked POC / Market Profile need complete sessions → 1h up.)
+    (7 more of the requested 24 to go: the Binance-only order-flow set — bid/ask & stacked imbalance,
+    absorption, DOM ladder, iceberg, whale, Time & Sales — and Open Interest. These need live L2/trade
+    streams or a futures feed, not just candles — a separate lift from the candle-derived set above.)
   - ⚠️ **Machine-sleep killed the dev servers twice** (laptop idle → USB SSD drops on sleep; on wake
     the API died and the web server followed it down on `unhandledRejection` from proxy ECONNREFUSED).
     Recovery each time: remount is automatic, then restart api+web (alert engine reloads on boot).
@@ -151,13 +153,14 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 ## Next pick
 
 **Continue the 24-indicator request — all real, blank-by-default.**
-Done: RVOL, VWAP σ-bands, Initial Balance, Naked/Virgin POC. Last candle-derived one:
-**Market Profile / TPO** (per-price time-at-price letter/block histogram per session) — this one
-needs a **new chart-core layer** (the line/band overlay can't draw TPO blocks), so it's the first
-that breaks the registry-only pattern. Then the **Binance-only order-flow set** (bid/ask & stacked
-imbalance, absorption, DOM ladder, iceberg, whale/block tracker, Time & Sales) — needs the live
-trade/orderbook streams wired to new layers/panels; gated to crypto, "needs data" on FX, never faked.
-Then **Open Interest / liquidations** (needs a Binance-futures feed in ingestion).
+Done (candle-derived, all verified): RVOL, VWAP σ-bands, Initial Balance, Naked/Virgin POC,
+Market Profile / TPO. Remaining set needs **live data, not just candles** — a different lift:
+the **Binance-only order-flow set** (bid/ask imbalance, stacked imbalance, absorption, DOM ladder,
+iceberg detector, whale/block tracker, Time & Sales) reads the live trade + orderbook (L2) streams
+the ingestion service already has for Binance — each becomes a new layer/panel, gated to crypto and
+showing "needs data" on FX/metals (never faked). **Open Interest / liquidations** needs a new
+Binance-futures feed added to ingestion. Suggested order: Time & Sales + DOM ladder (read existing
+trade/orderbook fan-out) → imbalance/absorption (footprint-style) → whale/iceberg → OI (new feed).
 After indicators: Phase 3 · #11 — OANDA token onboarding wizard.
 
 ## Questions for owner

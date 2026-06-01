@@ -11,6 +11,8 @@ export * from './layers/axis';
 export * from './layers/heatmap';
 export * from './layers/deep-trades';
 export * from './layers/volume-profile';
+export * from './layers/market-profile';
+export * from './market-profile';
 export * from './layers/drawings';
 export * from './layers/tooltip';
 export * from './layers/footprint';
