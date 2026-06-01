@@ -184,15 +184,21 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**Continue the 24-indicator request — all real, blank-by-default.**
-Done (verified): RVOL, VWAP σ-bands, Initial Balance, Naked/Virgin POC, Market Profile/TPO, and the
-**footprint pipeline** (real bid/ask cells + bid/ask imbalance + stacked imbalance + absorption).
-Remaining order-flow ones read live trade/orderbook streams but need **new UI surfaces**, not just a
-chart layer: **Time & Sales** (live trade tape — reads the trade stream, a corner panel) and **DOM
-ladder** (depth-of-market from the orderbook stream, a panel) are the next two; then **whale/block
-tracker** (note: overlaps the existing Delta-Bubbles overlay — refine, don't duplicate) and **iceberg
-detector** (trade/orderbook pattern). Last: **Open Interest / liquidations**, which needs a new
-Binance-futures feed in ingestion (infra). All gated to crypto, "needs data" on FX, never faked.
+**24-indicator request — essentially complete.** Done + verified: RVOL, VWAP σ-bands, Initial
+Balance, Naked/Virgin POC, Market Profile/TPO, the **footprint pipeline** (real bid/ask cells +
+bid/ask imbalance + stacked imbalance + absorption), **Time & Sales**, **DOM ladder**, and
+**whale/block** highlighting. All blank-by-default, real, crypto-gated where order-flow.
+
+Two left, both genuinely different from the indicator work above:
+1. **Open Interest / liquidations** — the app has no futures data today. Needs a NEW Binance-futures
+   feed in ingestion (`fapi.binance.com` OI poll — a REST source, not the existing spot WS) + an API
+   route (browser can't hit fapi directly = CORS) + a small OI panel/sub-pane. A clean ~1-session
+   infra add; external-feed reachability is the only risk.
+2. **Iceberg detector** — hidden refilling orders. This is *substantially already covered* by the
+   footprint **absorption** flag (heavy two-sided prints that don't move price = iceberg/absorption);
+   a dedicated detector would be largely speculative on top of that. Recommend folding into absorption
+   rather than shipping a separate inferred signal.
+
 After indicators: Phase 3 · #11 — OANDA token onboarding wizard.
 
 ## Questions for owner
