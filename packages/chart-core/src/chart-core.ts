@@ -1,4 +1,4 @@
-import type { Candle, DrawingObject, DeepTradeBubble, LiquidityHeatmapCell, VolumeProfile } from '@supercharts/types';
+import type { Candle, DrawingObject, DeepTradeBubble, FootprintBar, LiquidityHeatmapCell, VolumeProfile } from '@supercharts/types';
 import { PriceScale, TimeScale } from './scale';
 import { computeGeometry, type ChartGeometry } from './viewport';
 import { DARK_THEME, type ChartTheme } from './theme';
@@ -65,6 +65,7 @@ export class ChartCore {
     heatmapCells: [],
     deepTrades: [],
     volumeProfile: null,
+    footprint: [],
     drawings: [],
   };
   private crosshair: RenderContext['crosshair'] = null;
@@ -223,6 +224,11 @@ export class ChartCore {
 
   setVolumeProfile(profile: VolumeProfile | null): void {
     this.frame.volumeProfile = profile;
+    this.markDirty();
+  }
+
+  setFootprint(bars: FootprintBar[]): void {
+    this.frame.footprint = bars;
     this.markDirty();
   }
 

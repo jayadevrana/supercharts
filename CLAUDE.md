@@ -90,6 +90,19 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 📊 **Real footprint data pipeline (was stubbed `footprint_pending_phase_11`).** New
+  `apps/ingestion/src/footprint-aggregator.ts` buckets the live Binance trade stream into
+  per-candle, per-price-row **bid/ask** cells (buyer-aggressed → ask, seller → bid; `unknown`
+  split by the uptick rule — nothing fabricated). `finalizeFootprintBar` computes POC, totals,
+  and the per-cell **imbalance / stacked-imbalance / absorption** flags (3 of the order-flow
+  indicators, now real). Wired through: subscription-manager (`track` on candle-sub, `ingest`
+  on trade) → ingestion context → WS (`market_snapshot.footprint` + real `request_footprint`
+  → `footprint_update`) → `ChartFrame.footprint` + `core.setFootprint` → `FootprintLayer` renders
+  real cells (numbers + imbalance outlines + gold absorption), falling back to the candle-split
+  approximation only where there's no trade feed (Yahoo FX/metals). Web requests footprint on a
+  2.5 s timer while the overlay is on. 3 Vitest cases for the flag logic. **Verified end-to-end on
+  BTCUSDT 1m**: a WS probe returned 16 real bars (sample cell bid 0.599 / ask 0.368, POC 73520);
+  the overlay renders the cells; console clean; typecheck green across all 6 packages.
 - 🧪 **Quality pass (normal mode, caveman off): test suite + working lint + first new indicators.**
   - **Vitest suite** (`tests/`, `vitest.config.ts`): 26 tests across profile-builder, ma-cross,
     indicators runner, dd-breaker, portfolio-heat, pnl-attribution, and the new volume indicators —
@@ -153,14 +166,14 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 ## Next pick
 
 **Continue the 24-indicator request — all real, blank-by-default.**
-Done (candle-derived, all verified): RVOL, VWAP σ-bands, Initial Balance, Naked/Virgin POC,
-Market Profile / TPO. Remaining set needs **live data, not just candles** — a different lift:
-the **Binance-only order-flow set** (bid/ask imbalance, stacked imbalance, absorption, DOM ladder,
-iceberg detector, whale/block tracker, Time & Sales) reads the live trade + orderbook (L2) streams
-the ingestion service already has for Binance — each becomes a new layer/panel, gated to crypto and
-showing "needs data" on FX/metals (never faked). **Open Interest / liquidations** needs a new
-Binance-futures feed added to ingestion. Suggested order: Time & Sales + DOM ladder (read existing
-trade/orderbook fan-out) → imbalance/absorption (footprint-style) → whale/iceberg → OI (new feed).
+Done (verified): RVOL, VWAP σ-bands, Initial Balance, Naked/Virgin POC, Market Profile/TPO, and the
+**footprint pipeline** (real bid/ask cells + bid/ask imbalance + stacked imbalance + absorption).
+Remaining order-flow ones read live trade/orderbook streams but need **new UI surfaces**, not just a
+chart layer: **Time & Sales** (live trade tape — reads the trade stream, a corner panel) and **DOM
+ladder** (depth-of-market from the orderbook stream, a panel) are the next two; then **whale/block
+tracker** (note: overlaps the existing Delta-Bubbles overlay — refine, don't duplicate) and **iceberg
+detector** (trade/orderbook pattern). Last: **Open Interest / liquidations**, which needs a new
+Binance-futures feed in ingestion (infra). All gated to crypto, "needs data" on FX, never faked.
 After indicators: Phase 3 · #11 — OANDA token onboarding wizard.
 
 ## Questions for owner

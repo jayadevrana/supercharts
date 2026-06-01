@@ -17,6 +17,7 @@ import { bus } from './event-bus';
 import { candleStore } from './candle-store';
 import { deepTradeDetector } from './deep-trade-detector';
 import { heatmapAggregator } from './heatmap-aggregator';
+import { footprintAggregator } from './footprint-aggregator';
 import {
   backfillHistory,
   DEFAULT_BACKFILL_SYMBOLS,
@@ -28,6 +29,7 @@ export interface IngestionContext {
   candleStore: typeof candleStore;
   deepTradeDetector: typeof deepTradeDetector;
   heatmapAggregator: typeof heatmapAggregator;
+  footprintAggregator: typeof footprintAggregator;
   bus: typeof bus;
   providers: {
     binance: BinanceProvider;
@@ -105,6 +107,7 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
     candleStore,
     deepTradeDetector,
     heatmapAggregator,
+    footprintAggregator,
     bus,
     providers: { binance, oanda: forex, mock },
   };

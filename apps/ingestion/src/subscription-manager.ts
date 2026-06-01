@@ -4,6 +4,7 @@ import { bus } from './event-bus';
 import { candleStore } from './candle-store';
 import { deepTradeDetector } from './deep-trade-detector';
 import { heatmapAggregator } from './heatmap-aggregator';
+import { footprintAggregator } from './footprint-aggregator';
 
 /**
  * Tracks who is interested in what so we open one external subscription per (symbol, kind)
@@ -70,6 +71,7 @@ export class SubscriptionManager {
         handle = provider.subscribeTrades(key.symbol, (trade) => {
           bus.emit({ type: 'trade', symbol: trade.symbol, data: trade });
           deepTradeDetector.ingest(trade);
+          footprintAggregator.ingest(trade);
         });
         break;
       case 'quotes':
@@ -86,6 +88,7 @@ export class SubscriptionManager {
         break;
       case 'candles':
         if (!key.interval) throw new Error('candles subscription requires interval');
+        footprintAggregator.track(key.symbol, key.interval);
         handle = provider.subscribeCandles(key.symbol, key.interval, (candle) => {
           candleStore.upsert(candle.symbol, candle.interval, candle);
           bus.emit({ type: 'candle', symbol: candle.symbol, interval: candle.interval, data: candle });

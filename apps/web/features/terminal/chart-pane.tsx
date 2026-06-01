@@ -48,6 +48,7 @@ import type {
   Candle,
   ChartType,
   DeepTradeBubble,
+  FootprintBar,
   Interval,
   LiquidityHeatmapCell,
   ServerToClientMessage,
@@ -80,6 +81,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const candleBufRef = useRef<Candle[]>([]);
   const heatmapBufRef = useRef<LiquidityHeatmapCell[]>([]);
   const bubbleBufRef = useRef<DeepTradeBubble[]>([]);
+  /** Live footprint bars keyed by candle openTime (merged from snapshot + footprint_update). */
+  const footprintBufRef = useRef<Map<number, FootprintBar>>(new Map());
   const drawingsRef = useRef<DrawingObject[]>([]);
   const drawingControllerRef = useRef<DrawingController | null>(null);
   const loadedRangeRef = useRef<{ from: number; to: number }>({ from: 0, to: 0 });
@@ -363,6 +366,10 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             bubbleBufRef.current = msg.deepTrades.slice(-BUBBLE_LIMIT);
             core.setDeepTrades(bubbleBufRef.current);
           }
+          if (msg.footprint?.length && pane.overlays.footprint) {
+            footprintBufRef.current = new Map(msg.footprint.map((b) => [b.openTime, b]));
+            core.setFootprint([...footprintBufRef.current.values()]);
+          }
           return;
 
         case 'candle_update':
@@ -426,6 +433,18 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           bubbleBufRef.current = [...bubbleBufRef.current, msg.bubble].slice(-BUBBLE_LIMIT);
           core.setDeepTrades(bubbleBufRef.current);
           return;
+
+        case 'footprint_update': {
+          if (msg.symbol !== pane.symbol || msg.interval !== pane.interval || !pane.overlays.footprint) return;
+          const buf = footprintBufRef.current;
+          buf.set(msg.bar.openTime, msg.bar);
+          if (buf.size > 240) {
+            const keys = [...buf.keys()].sort((a, b) => a - b);
+            for (let i = 0; i < keys.length - 240; i += 1) buf.delete(keys[i]!);
+          }
+          core.setFootprint([...buf.values()].sort((a, b) => a.openTime - b.openTime));
+          return;
+        }
       }
     });
 
@@ -858,6 +877,31 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     pane.chartType,
     pane,
   ]);
+
+  // Real footprint: while the overlay is on, pull the per-cell bid/ask bars for the
+  // visible range from the server on a short timer (~2.5s so the live bar refreshes).
+  // Crypto (Binance trades) returns data; venues without a trade feed return nothing and
+  // the layer falls back to the candle-split approximation.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    if (!pane.overlays.footprint) {
+      footprintBufRef.current.clear();
+      core.setFootprint([]);
+      return;
+    }
+    const ws = getWSClient();
+    const request = (): void => {
+      const arr = candleBufRef.current;
+      if (arr.length === 0) return;
+      const from = arr[Math.max(0, arr.length - 120)]!.openTime;
+      const to = arr[arr.length - 1]!.closeTime;
+      ws.send({ type: 'request_footprint', symbol: pane.symbol, interval: pane.interval, from, to, tickGrouping: 1 });
+    };
+    request();
+    const timer = setInterval(request, 2500);
+    return () => clearInterval(timer);
+  }, [pane.overlays.footprint, pane.symbol, pane.interval]);
 
   // Bar replay — clip candles to the replay cursor while replayMode is on.
   useEffect(() => {

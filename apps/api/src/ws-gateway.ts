@@ -226,14 +226,16 @@ async function handleClientMessage(
       });
       return;
     }
-    case 'request_footprint':
-      // Footprint generation lives in a follow-up phase; ack so client knows it was received.
-      send(conn.socket, {
-        type: 'subscription_error',
-        code: 'internal',
-        message: 'footprint_pending_phase_11',
-      });
+    case 'request_footprint': {
+      // Real per-cell bid/ask footprint, aggregated from the live trade stream.
+      // Crypto (Binance trades) produces data; venues without a trade feed (Yahoo
+      // FX/metals) simply return nothing rather than a fabricated profile.
+      const bars = ctx.footprintAggregator.history(msg.symbol, msg.interval, msg.from, msg.to, 120);
+      for (const bar of bars) {
+        send(conn.socket, { type: 'footprint_update', symbol: msg.symbol, interval: msg.interval, bar });
+      }
       return;
+    }
     case 'set_visible_range':
       // No-op for the gateway: when the client requests deeper history it calls REST /api/candles.
       return;
@@ -278,6 +280,7 @@ async function subscribeMarket(
     candles,
     heatmap: ctx.heatmapAggregator.history(symbol, 500),
     deepTrades: ctx.deepTradeDetector.history(symbol, 300),
+    footprint: ctx.footprintAggregator.history(symbol, interval, undefined, undefined, 120),
     serverTime: Date.now(),
   };
   send(conn.socket, snapshot);

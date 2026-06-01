@@ -1,5 +1,5 @@
 import type { Layer, RenderContext } from './types';
-import type { Candle } from '@supercharts/types';
+import type { Candle, FootprintBar } from '@supercharts/types';
 
 export interface FootprintLayerOptions {
   enabled: boolean;
@@ -43,6 +43,9 @@ export class FootprintLayer implements Layer {
     const barPx = Math.max(1, timeScale.barPx() * 0.92);
     const showNumbers = barPx >= this.options.minBarPxForNumbers;
     const rows = this.options.rowsPerCandle;
+    // Real per-cell bid/ask footprint keyed by candle openTime (empty on venues
+    // without a trade feed — those fall back to the candle-split approximation below).
+    const realByTime = new Map<number, FootprintBar>(frame.footprint.map((b) => [b.openTime, b]));
     c.save();
     c.font = `${theme.font.sizeAxis - 1}px ${theme.font.family}`;
     c.textBaseline = 'middle';
@@ -55,6 +58,49 @@ export class FootprintLayer implements Layer {
       const top = priceScale.priceToY(k.high);
       const bot = priceScale.priceToY(k.low);
       if (!Number.isFinite(top) || !Number.isFinite(bot)) continue;
+
+      // ---- Real footprint cells (preferred when present) ----
+      const realBar = realByTime.get(k.openTime);
+      if (realBar && realBar.cells.length > 0) {
+        const cells = realBar.cells; // ascending by priceLevel (finalize sorts them)
+        let tick = Infinity;
+        for (let i = 1; i < cells.length; i += 1) {
+          const gap = cells[i]!.priceLevel - cells[i - 1]!.priceLevel;
+          if (gap > 0 && gap < tick) tick = gap;
+        }
+        if (!Number.isFinite(tick) || tick <= 0) {
+          tick = Math.max((k.high - k.low) / Math.max(cells.length, 1), 1e-9);
+        }
+        const cellH = Math.max(2, Math.abs(priceScale.priceToY(0) - priceScale.priceToY(tick)));
+        for (const cell of cells) {
+          const cy = priceScale.priceToY(cell.priceLevel);
+          const ry = cy - cellH / 2;
+          const buyShare = cell.askVolume / Math.max(cell.totalVolume, 1e-9);
+          c.fillStyle = mix(theme.bullDim, theme.bearDim, 1 - buyShare);
+          c.fillRect(left, ry, barPx, cellH - 0.5);
+          if (cell.absorptionFlag) {
+            c.strokeStyle = '#ffca28'; // gold = absorption
+            c.lineWidth = 1.5;
+            c.strokeRect(left + 0.5, ry + 0.5, barPx - 1, cellH - 1);
+          } else if (cell.imbalanceSide !== 'none') {
+            c.strokeStyle = cell.imbalanceSide === 'buy' ? theme.bull : theme.bear;
+            c.lineWidth = cell.stackedImbalanceFlag ? 2.2 : 1.1; // stacked = thicker
+            c.strokeRect(left + 0.5, ry + 0.5, barPx - 1, cellH - 1);
+          }
+          if (showNumbers && cellH > 9) {
+            c.fillStyle = theme.text;
+            c.textAlign = 'left';
+            c.fillText(compact(cell.bidVolume), left + 4, cy);
+            c.textAlign = 'right';
+            c.fillText(compact(cell.askVolume), left + barPx - 4, cy);
+          }
+        }
+        c.fillStyle = realBar.candleDelta >= 0 ? theme.bull : theme.bear;
+        c.fillRect(left, bot + 2, barPx, 2);
+        continue;
+      }
+
+      // ---- Fallback: candle buy/sell-split approximation ----
       const rowH = Math.max(1, (bot - top) / rows);
       const totalVol = Math.max(buyTotal + sellTotal, 1e-9);
       // Weight rows by a triangle distribution peaked at the close so the picture matches

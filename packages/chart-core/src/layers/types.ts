@@ -1,4 +1,4 @@
-import type { Candle, DeepTradeBubble, LiquidityHeatmapCell, VolumeProfile } from '@supercharts/types';
+import type { Candle, DeepTradeBubble, FootprintBar, LiquidityHeatmapCell, VolumeProfile } from '@supercharts/types';
 import type { ChartTheme } from '../theme';
 import type { PriceScale, TimeScale } from '../scale';
 import type { ChartGeometry } from '../viewport';
@@ -10,6 +10,8 @@ export interface ChartFrame {
   heatmapCells: LiquidityHeatmapCell[];
   deepTrades: DeepTradeBubble[];
   volumeProfile: VolumeProfile | null;
+  /** Real per-cell bid/ask footprint bars, keyed by candle openTime. Empty until requested / for venues without a trade feed. */
+  footprint: FootprintBar[];
   drawings: DrawingObject[];
 }
 
