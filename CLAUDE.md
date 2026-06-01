@@ -90,6 +90,13 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🧬 **Phase 6 kickoff — PulseScript, our own chart-scripting language + (coming) code terminal.**
+  Original design in `docs/pulsescript-design.md` (own keywords/syntax — NOT a clone of any existing
+  product; reuses `@supercharts/indicators` for the math). New `packages/script-lang` scaffolded;
+  **lexer done** (`tokens.ts` + `lexer.ts`: `#` comments, brace blocks, `[]` history, newline-as-
+  separator with in-bracket suppression, line/col errors) — 8 Vitest cases green, package typechecks.
+  Build roadmap (parser → interpreter → stdlib → inputs → CodeMirror terminal → persistence →
+  safety) is in **Next pick**, intended to be driven by a `/loop`.
 - 🔭 **Open Interest — last indicator (the 24-indicator request is now done).** New
   `apps/api/src/routes/futures.ts` proxies + 30s-caches Binance USD-M futures OI
   (`fapi.binance.com`, public, no key) — current OI + a 5-min history series. Browser can't hit
@@ -192,22 +199,37 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Next pick
 
-**24-indicator request — essentially complete.** Done + verified: RVOL, VWAP σ-bands, Initial
-Balance, Naked/Virgin POC, Market Profile/TPO, the **footprint pipeline** (real bid/ask cells +
-bid/ask imbalance + stacked imbalance + absorption), **Time & Sales**, **DOM ladder**, and
-**whale/block** highlighting. All blank-by-default, real, crypto-gated where order-flow.
+**24-indicator request — COMPLETE** (RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market
+Profile/TPO, footprint pipeline + imbalance/stacked/absorption, Time & Sales, DOM ladder, whale,
+Open Interest). Iceberg intentionally folded into the footprint **absorption** flag (a standalone
+detector would be speculative).
 
-Two left, both genuinely different from the indicator work above:
-1. **Open Interest / liquidations** — the app has no futures data today. Needs a NEW Binance-futures
-   feed in ingestion (`fapi.binance.com` OI poll — a REST source, not the existing spot WS) + an API
-   route (browser can't hit fapi directly = CORS) + a small OI panel/sub-pane. A clean ~1-session
-   infra add; external-feed reachability is the only risk.
-2. **Iceberg detector** — hidden refilling orders. This is *substantially already covered* by the
-   footprint **absorption** flag (heavy two-sided prints that don't move price = iceberg/absorption);
-   a dedicated detector would be largely speculative on top of that. Recommend folding into absorption
-   rather than shipping a separate inferred signal.
+### Phase 6 — PulseScript language & code terminal  ← active, build via /loop
 
-After indicators: Phase 3 · #11 — OANDA token onboarding wizard.
+**Goal:** SuperCharts' own chart-scripting language + an in-app coding terminal to write & run it.
+**Spec:** `docs/pulsescript-design.md`. **Package:** `packages/script-lang` (`@supercharts/script-lang`).
+**Hard rule:** ORIGINAL language — never reproduce another product's API/identifiers, keywords, or
+syntax. Reuse `@supercharts/indicators` for the TA/math so scripts and chart indicators share one
+tested implementation. Universal domain terms (`sma`, `close`) are fine; structure/declaration
+keywords are ours (`meta`/`let`/`mut`/`persist`/`when`/`draw`/`mark`/`fn`, `#` comments, `{ }` blocks).
+
+Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it here):
+- [x] **1. Lexer** — `src/lexer.ts` + `tokens.ts`. 8 Vitest cases green, package typechecks.
+- [ ] **2. AST + parser** — recursive-descent / precedence-climbing per the §4 grammar; syntax errors
+      carry line/col; tests over each statement + expression form.
+- [ ] **3. Interpreter core** — bar-by-bar evaluator over `Candle[]`: `Series` + `[]` history,
+      let/mut/persist scoping, arithmetic/logic/if/for, `fn` calls; per-bar output buffers. Test: a
+      script computing SMA matches `ta.sma`.
+- [ ] **4. Stdlib binding** — `close/open/...`, `ta.*`/`math.*` → `@supercharts/indicators`,
+      `crossOver`, `draw`/`mark` capture. Tests.
+- [ ] **5. Inputs** — parse `input.*`, expose an input schema; feed values into a run.
+- [ ] **6. Web code terminal** — route/panel with a lazy-loaded CodeMirror 6 editor, Run button,
+      sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` onto
+      the chart (reuse `IndicatorsLayer` + a markers layer). Browser-verify a real script on BTCUSDT.
+- [ ] **7. Persistence** — save/list/load user scripts (API route + table, like layouts).
+- [ ] **8. Safety** — execution timeout, bar/loop caps, no IO from scripts, line-numbered runtime errors.
+
+Then: Phase 3 · #11 — OANDA token onboarding wizard.
 
 ## Questions for owner
 
