@@ -20,6 +20,8 @@ export interface PaneState {
     footprint: boolean;
     /** Per-session Market Profile / TPO histogram (POC + value area) behind candles. */
     marketProfile: boolean;
+    /** Live Time & Sales tape (per-trade prints) — crypto only. */
+    timeAndSales: boolean;
     /** "Signals & Trend Score" indicator: MA cloud + ATR trail + Buy/Sell + MTF dashboards. */
     signalsTrendScore: boolean;
   };
@@ -155,6 +157,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       volume: false,
       footprint: false,
       marketProfile: false,
+      timeAndSales: false,
       signalsTrendScore: false,
     },
     smc: {

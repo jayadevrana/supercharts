@@ -44,6 +44,7 @@ import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators'
 import { SubPaneIndicators } from './sub-pane-indicators';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
+import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
 import type {
   Candle,
   ChartType,
@@ -83,6 +84,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const bubbleBufRef = useRef<DeepTradeBubble[]>([]);
   /** Live footprint bars keyed by candle openTime (merged from snapshot + footprint_update). */
   const footprintBufRef = useRef<Map<number, FootprintBar>>(new Map());
+  /** Time & Sales tape ring buffer (newest-first), flushed to state on a timer. */
+  const tapeRef = useRef<TapeRow[]>([]);
+  const [tapeRows, setTapeRows] = useState<TapeRow[]>([]);
+  /** Live mirror of the tape toggle — the WS handler closure is pinned to symbol/interval,
+   * so it must read the current value through a ref rather than the stale `pane`. */
+  const tapeOnRef = useRef(false);
   const drawingsRef = useRef<DrawingObject[]>([]);
   const drawingControllerRef = useRef<DrawingController | null>(null);
   const loadedRangeRef = useRef<{ from: number; to: number }>({ from: 0, to: 0 });
@@ -443,6 +450,19 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             for (let i = 0; i < keys.length - 240; i += 1) buf.delete(keys[i]!);
           }
           core.setFootprint([...buf.values()].sort((a, b) => a.openTime - b.openTime));
+          return;
+        }
+
+        case 'trade_tick': {
+          if (msg.symbol !== pane.symbol || !tapeOnRef.current) return;
+          const t = msg.trade;
+          // Drop duplicates — the stream can re-deliver a print, which would collide on the
+          // React key. The buffer is tiny (≤60) so the scan is cheap.
+          if (tapeRef.current.some((r) => r.id === t.id)) return;
+          const side: TapeRow['side'] =
+            t.aggressorSide === 'buyer' ? 'buy' : t.aggressorSide === 'seller' ? 'sell' : 'unknown';
+          tapeRef.current.unshift({ id: t.id, price: t.price, qty: t.quantity, side, time: t.eventTime });
+          if (tapeRef.current.length > 60) tapeRef.current.length = 60;
           return;
         }
       }
@@ -903,6 +923,22 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     return () => clearInterval(timer);
   }, [pane.overlays.footprint, pane.symbol, pane.interval]);
 
+  // Time & Sales: trades arrive too fast to setState per print, so the WS handler fills a
+  // ring buffer and this flushes it to render state ~2.5×/s. Resets on symbol/interval change.
+  useEffect(() => {
+    tapeOnRef.current = pane.overlays.timeAndSales;
+    if (!pane.overlays.timeAndSales) {
+      tapeRef.current = [];
+      setTapeRows([]);
+      return;
+    }
+    tapeRef.current = [];
+    setTapeRows([]);
+    const flush = (): void => setTapeRows([...tapeRef.current]);
+    const timer = setInterval(flush, 400);
+    return () => clearInterval(timer);
+  }, [pane.overlays.timeAndSales, pane.symbol, pane.interval]);
+
   // Bar replay — clip candles to the replay cursor while replayMode is on.
   useEffect(() => {
     const core = chartRef.current;
@@ -1146,6 +1182,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             mtfRows={mtfRows}
             showBottomStrip={pane.stsSettings.showBottomDash}
           />
+        ) : null}
+        {pane.overlays.timeAndSales ? (
+          <TimeSalesPanel rows={tapeRows} hasData={pane.symbol.startsWith('BINANCE:')} />
         ) : null}
       </div>
       <SubPaneIndicators

@@ -90,6 +90,15 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🩹 **Time & Sales — live trade tape.** New `time-sales-panel.tsx` corner panel fed by the
+  `trade_tick` stream (newest-first, green = buyer-lifted-ask / red = seller, crypto-only with a
+  "Binance only" note on FX). The WS handler fills a ring buffer; a 400 ms timer flushes it to
+  state (trades arrive too fast to setState per print). **Two real bugs found + fixed in browser:**
+  (1) the WS handler effect is pinned to `[symbol, interval]`, so the `trade_tick` guard read a
+  *stale* `timeAndSales=false` and dropped every print — fixed with a `tapeOnRef` the handler reads
+  live; (2) the stream re-delivers prints, colliding on the React key (~thousands of console errors)
+  — fixed by deduping the buffer by trade id on insert. Verified on BTCUSDT 1m: tape fills with real
+  prints, console clean after the fix.
 - 📊 **Real footprint data pipeline (was stubbed `footprint_pending_phase_11`).** New
   `apps/ingestion/src/footprint-aggregator.ts` buckets the live Binance trade stream into
   per-candle, per-price-row **bid/ask** cells (buyer-aggressed → ask, seller → bid; `unknown`
