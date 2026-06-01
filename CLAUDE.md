@@ -215,8 +215,10 @@ keywords are ours (`meta`/`let`/`mut`/`persist`/`when`/`draw`/`mark`/`fn`, `#` c
 
 Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it here):
 - [x] **1. Lexer** — `src/lexer.ts` + `tokens.ts`. 8 Vitest cases green, package typechecks.
-- [ ] **2. AST + parser** — recursive-descent / precedence-climbing per the §4 grammar; syntax errors
-      carry line/col; tests over each statement + expression form.
+- [x] **2. AST + parser** — `ast.ts` (typed nodes, every node carries `pos`) + `parser.ts`
+      (recursive-descent + precedence-climbing: meta, let/mut/persist, assign, if/else, when, both
+      `for` forms, `fn` expr+block bodies, draw, mark, member/index/call, named args; `ParseError`
+      with line/col). 10 Vitest cases green, package typechecks.
 - [ ] **3. Interpreter core** — bar-by-bar evaluator over `Candle[]`: `Series` + `[]` history,
       let/mut/persist scoping, arithmetic/logic/if/for, `fn` calls; per-bar output buffers. Test: a
       script computing SMA matches `ta.sma`.
