@@ -2,7 +2,51 @@
 
 import { create } from 'zustand';
 import type { ChartType, IndicatorInstance, Interval } from '@supercharts/types';
+import type { InputDef } from '@supercharts/script-lang';
 import { DEFAULT_LAYOUT_ID, getLayout, type PaneLayout } from './layouts';
+
+/** Default PulseScript shown in a fresh code terminal — exercises inputs, ta.*, draw, and marks. */
+export const SAMPLE_PULSE = `# EMA cross study — PulseScript
+meta(name: "EMA Cross", overlay: true)
+
+let fastLen = input.num(12, "Fast EMA", 2, 100)
+let slowLen = input.num(26, "Slow EMA", 2, 200)
+
+let fast = ema(close, fastLen)
+let slow = ema(close, slowLen)
+
+draw line(fast, color: "#38bdf8", title: "Fast EMA")
+draw line(slow, color: "#f59e0b", title: "Slow EMA")
+
+when crossOver(fast, slow) {
+  mark buy at low "Long"
+}
+when crossUnder(fast, slow) {
+  mark sell at high "Short"
+}
+`;
+
+/** Per-pane PulseScript editor + render state. */
+export interface PulseState {
+  source: string;
+  /** Whether the last successful run's draw/mark output is shown on the chart. */
+  enabled: boolean;
+  /** Input overrides keyed by the script's input id. */
+  inputValues: Record<string, number | boolean | string>;
+  /** Bump to force ChartPane to re-run (Run button, input change). */
+  runToken: number;
+}
+
+/** Result of a run, written by ChartPane and read by the code terminal dialog. */
+export interface PulseResult {
+  ok: boolean;
+  error: string | null;
+  meta: Record<string, number | boolean | string | null>;
+  inputs: InputDef[];
+  plotCount: number;
+  markCount: number;
+  ranAt: number;
+}
 
 /** Legacy export kept for backwards-compat with old saved layouts. */
 export type GridSize = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 12 | 14 | 16;
@@ -72,6 +116,8 @@ export interface PaneState {
   };
   /** Classic TA indicator instances active on this pane. */
   classicIndicators: IndicatorInstance[];
+  /** PulseScript editor + render state for this pane. */
+  pulse: PulseState;
 }
 
 interface TerminalStore {
@@ -125,6 +171,13 @@ interface TerminalStore {
   setShowRightRail: (v: boolean) => void;
   setShowBottomPanel: (v: boolean) => void;
   setSyncCrosshair: (v: boolean) => void;
+  /** Latest PulseScript run result per pane id — written by ChartPane, read by the code terminal. */
+  pulseResults: Record<string, PulseResult>;
+  setPulseSource: (id: string, source: string) => void;
+  setPulseEnabled: (id: string, enabled: boolean) => void;
+  setPulseInput: (id: string, inputId: string, value: number | boolean | string) => void;
+  runPulse: (id: string) => void;
+  setPulseResult: (id: string, result: PulseResult) => void;
 }
 
 const SYMBOLS = [
@@ -181,6 +234,7 @@ function defaultPane(id: string, symbol: string): PaneState {
     },
     heatmapSettings: { opacity: 0.85, depth: 20, timeBucketMs: 1000 },
     classicIndicators: [],
+    pulse: { source: SAMPLE_PULSE, enabled: false, inputValues: {}, runToken: 0 },
     stsSettings: {
       maLength: 17,
       atrPeriod: 14,
@@ -219,6 +273,7 @@ function panesForCount(count: number, carryOver?: PaneState[]): PaneState[] {
         overlays: { ...carryOver[i]!.overlays },
         heatmapSettings: { ...carryOver[i]!.heatmapSettings },
         classicIndicators: carryOver[i]!.classicIndicators ?? [],
+        pulse: carryOver[i]!.pulse ?? base.pulse,
       };
     }
     return base;
@@ -332,6 +387,36 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   setShowRightRail: (v) => set({ showRightRail: v }),
   setShowBottomPanel: (v) => set({ showBottomPanel: v }),
   setSyncCrosshair: (v) => set({ syncCrosshair: v }),
+
+  pulseResults: {},
+  setPulseSource: (id, source) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, pulse: { ...p.pulse, source, runToken: p.pulse.runToken + 1 } } : p,
+      ),
+    })),
+  setPulseEnabled: (id, enabled) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, pulse: { ...p.pulse, enabled, runToken: p.pulse.runToken + 1 } } : p,
+      ),
+    })),
+  setPulseInput: (id, inputId, value) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id
+          ? { ...p, pulse: { ...p.pulse, inputValues: { ...p.pulse.inputValues, [inputId]: value }, runToken: p.pulse.runToken + 1 } }
+          : p,
+      ),
+    })),
+  runPulse: (id) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, pulse: { ...p.pulse, runToken: p.pulse.runToken + 1 } } : p,
+      ),
+    })),
+  setPulseResult: (id, result) =>
+    set((state) => ({ pulseResults: { ...state.pulseResults, [id]: result } })),
   crosshairTime: null,
   setCrosshairTime: (t) => set({ crosshairTime: t }),
 

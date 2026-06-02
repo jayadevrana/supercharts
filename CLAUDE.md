@@ -77,7 +77,7 @@ Do the next unchecked task per loop — verify, commit small, tick here.
 - [x] 3. **Interpreter core** — `interpreter.ts` bar-by-bar; `[]` history; let/mut/persist; if/when/both `for`; `fn`; price series; `draw line`/`mark`/`meta`. 10 tests.
 - [x] 4. **Stdlib** — `stdlib.ts`: `math.*` + `ta.*` reusing `@supercharts/indicators` (sma/ema/wma/rma/stdev direct; rsi via Wilder `rma`; atr/vwap/macd/stoch off candles). Bare + `ta.` calls; `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/`lowest`; `nz`/`na`; `draw hist`/`band`. 36 tests.
 - [x] 5. **Inputs** — `collectInputs()` AST pre-pass → `RunResult.inputs` schema (id/kind/default/title/min/max/step/options); `runScript(…, { inputs })` overrides by id; `input.source` → chosen price series. 45 tests.
-- [ ] 6. **Web code terminal** — route/panel, lazy CodeMirror 6 editor, Run, sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` to chart (reuse `IndicatorsLayer` + markers layer). **Browser-verify on /terminal.**
+- [x] 6. **Web code terminal** — `code-terminal-dialog.tsx` (toolbar **Script** button): lazy CodeMirror 6 editor + sample script, Run, "On chart" toggle, console (errors with line/col, or a meta-name + plot/mark/input summary), and a schema-driven inputs panel. The run happens in `ChartPane` over that pane's own candle buffer (so plot values stay index-aligned) and pushes `draw line/band` → a dedicated **`pulse-script` IndicatorsLayer** (id/zIndex now constructor-settable) + `mark buy/sell/note` → colored dots. Store carries per-pane `pulse` state + a `pulseResults` channel. Browser-verified on BTCUSDT 1m: Fast/Slow EMA lines + buy marks render; inputs (Fast/Slow EMA) drive a re-run.
 - [ ] 7. **Persistence** — save/list/load user scripts (API route + table, like layouts).
 - [ ] 8. **Safety** — exec timeout, bar/loop caps, no IO, line-numbered runtime errors. (Pick up the `ta.*` period≤0 → empty-plot guard here.)
 
@@ -106,7 +106,7 @@ Then: Phase 3 · #11.
 
 ## Recent log
 
-- 🧬 **PulseScript 1–5 done** (lexer→parser→interpreter→stdlib→inputs; ~45 tests green, typechecks). Next = **task 6, the CodeMirror web terminal** (UI → browser-verify). A max-effort code-review of tasks 4–5 folded fixes in (input default clamping, positional title, bool coercion, source validation) and surfaced the deferred perf/persist follow-up noted above.
+- 🧬 **PulseScript 1–6 done** — task 6 shipped the **in-app code terminal** (toolbar Script button → CodeMirror editor, Run, inputs panel, console; `draw`/`mark` render on the chart via a dedicated `pulse-script` layer, run in `ChartPane` over the pane's candles so overlays stay aligned). Added `@uiw/react-codemirror` (lazy) + `@supercharts/script-lang` to the web app. Browser-verified on BTCUSDT (EMA lines + buy marks). Next = task 7 (persistence: save/list/load scripts) then task 8 (safety). The flagged perf/persist follow-up landed separately (interpreter `persist` lazy-carry + ta cache hardening — script-lang now 47 tests).
 - 🔭 **Order-flow + futures set shipped:** real footprint pipeline (`apps/ingestion/src/footprint-aggregator.ts` → WS → `FootprintLayer`), Time & Sales tape, DOM ladder, Open Interest (`routes/futures.ts`, Binance USD-M, 30s cache). Plus RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market Profile/TPO (`MarketProfileLayer`).
 - 📸 Alerts ship a rendered crossover PNG to Telegram (`alert-chart.ts`); cold-start false-alert flood fixed (backfill + watermark).
 

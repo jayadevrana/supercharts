@@ -276,6 +276,9 @@ export class ChartCore {
     this.registerLayer(new SignalsTrendScoreLayer());
     this.registerLayer(new SmcLayer());
     this.registerLayer(new IndicatorsLayer());
+    // PulseScript user-script output (draw line/band → lines/bands, mark → dots), above the
+    // classic indicators layer so script overlays sit on top.
+    this.registerLayer(new IndicatorsLayer({ id: 'pulse-script', zIndex: 13 }));
     this.registerLayer(new MaCrossLayer());
     this.registerLayer(new DrawingLayer());
     this.registerLayer(new CrosshairLayer());

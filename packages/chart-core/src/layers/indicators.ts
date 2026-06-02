@@ -43,10 +43,16 @@ export interface IndicatorsLayerOptions {
  * canvas below the main chart, NOT inside this layer.
  */
 export class IndicatorsLayer implements Layer {
-  readonly id = 'indicators';
-  readonly zIndex = 12;
+  readonly id: string;
+  readonly zIndex: number;
   visible = true;
   options: IndicatorsLayerOptions = { lines: [], bands: [], dots: [] };
+
+  /** A second instance (e.g. PulseScript output) registers under a distinct id/zIndex. */
+  constructor(opts?: { id?: string; zIndex?: number }) {
+    this.id = opts?.id ?? 'indicators';
+    this.zIndex = opts?.zIndex ?? 12;
+  }
 
   render(ctx: RenderContext): void {
     if (!this.visible) return;

@@ -41,6 +41,7 @@ import type {
   IndicatorOverlayLine,
 } from '@supercharts/chart-core';
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
+import { runScript, type RunResult } from '@supercharts/script-lang';
 import { SubPaneIndicators } from './sub-pane-indicators';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
@@ -123,6 +124,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const replayMode = useTerminalStore((s) => s.replayMode);
   const replayCursor = useTerminalStore((s) => s.replayCursor);
   const setReplayBounds = useTerminalStore((s) => s.setReplayBounds);
+  const setPulseResult = useTerminalStore((s) => s.setPulseResult);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
@@ -1167,6 +1169,98 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.classicIndicators, candleBufRef.current.length, candleBufRef.current[candleBufRef.current.length - 1]?.close]);
 
+  // PulseScript — run the active script over THIS pane's candles (so plot values align to the
+  // rendered bars) and push draw/mark output to the dedicated 'pulse-script' overlay layer.
+  // Driven by the store (Run / input changes bump runToken); reruns on new bars. Console,
+  // errors, and the input schema are reported back to the store for the code terminal dialog.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const layer = core.getLayer<IndicatorsLayer>('pulse-script');
+    if (!layer) return;
+    const clear = (): void => {
+      layer.visible = false;
+      layer.options = { lines: [], bands: [], dots: [] };
+    };
+    const pulse = pane.pulse;
+    if (pulse.runToken === 0) {
+      // Untouched pane — stay dormant until the user runs a script.
+      clear();
+      return;
+    }
+    const bars = candleBufRef.current;
+    if (!pulse.source.trim() || bars.length === 0) {
+      clear();
+      return;
+    }
+    try {
+      const res: RunResult = runScript(pulse.source, bars, { inputs: pulse.inputValues });
+      const lines: IndicatorOverlayLine[] = [];
+      const bands: IndicatorOverlayBand[] = [];
+      const dots: IndicatorOverlayDots[] = [];
+      const palette = ['#38bdf8', '#f59e0b', '#a78bfa', '#34d399', '#f472b6', '#facc15'];
+      res.plots.forEach((p, idx) => {
+        const color = p.color || palette[idx % palette.length]!;
+        const vals = p.values.map((v) => (v == null ? NaN : v));
+        if (p.kind === 'band' && p.values2) {
+          bands.push({
+            id: 'pulse_' + idx,
+            upper: vals,
+            lower: p.values2.map((v) => (v == null ? NaN : v)),
+            fillColor: pulseFill(color),
+            borderColor: color,
+            borderWidth: 0.8,
+          });
+        } else {
+          lines.push({ id: 'pulse_' + idx, channel: p.title || 'plot' + idx, values: vals, color, lineWidth: 1.6 });
+        }
+      });
+      // marks → colored dots at the mark's bar + price (buy green, sell red, note grey).
+      const markColor: Record<string, string> = { buy: '#22c55e', sell: '#ef4444', note: '#94a3b8' };
+      const byKind = new Map<string, number[]>();
+      for (const m of res.marks) {
+        if (m.bar < 0 || m.bar >= bars.length) continue;
+        let arr = byKind.get(m.kind);
+        if (!arr) {
+          arr = new Array<number>(bars.length).fill(NaN);
+          byKind.set(m.kind, arr);
+        }
+        arr[m.bar] = m.price ?? bars[m.bar]!.close;
+      }
+      for (const [kind, vals] of byKind) {
+        dots.push({ id: 'pulse_mark_' + kind, values: vals, color: markColor[kind] ?? '#94a3b8', radius: 4 });
+      }
+      const hasOutput = lines.length > 0 || bands.length > 0 || dots.length > 0;
+      if (pulse.enabled) {
+        layer.options = { lines, bands, dots };
+        layer.visible = hasOutput;
+      } else {
+        clear();
+      }
+      setPulseResult(pane.id, {
+        ok: true,
+        error: null,
+        meta: res.meta as Record<string, number | boolean | string | null>,
+        inputs: res.inputs,
+        plotCount: res.plots.length,
+        markCount: res.marks.length,
+        ranAt: Date.now(),
+      });
+    } catch (err) {
+      clear();
+      setPulseResult(pane.id, {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        meta: {},
+        inputs: [],
+        plotCount: 0,
+        markCount: 0,
+        ranAt: Date.now(),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.id, pane.pulse.enabled, pane.pulse.source, pane.pulse.runToken, pane.pulse.inputValues, candleBufRef.current.length]);
+
   return (
     <div
       onClick={onClick}
@@ -1442,6 +1536,16 @@ function applyOverlays(core: ChartCore, pane: PaneState): void {
   // fresh chart is truly blank (candles only).
   const volume = core.getLayer('volume');
   if (volume) volume.visible = pane.overlays.volume;
+}
+
+/** Translucent fill for a PulseScript `band` derived from its line color. */
+function pulseFill(color: string): string {
+  if (color.startsWith('#') && (color.length === 7 || color.length === 4)) {
+    const hex = color.length === 4 ? color.slice(1).split('').map((c) => c + c).join('') : color.slice(1);
+    const n = parseInt(hex, 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, 0.12)`;
+  }
+  return 'rgba(56,189,248,0.12)';
 }
 
 function estimateRowSize(symbol: string): number {
