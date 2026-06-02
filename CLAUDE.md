@@ -63,7 +63,7 @@ folded into footprint **absorption**.
 ### Phase 5 — Polish & Scale
 - [ ] 20. Auth.js (credentials + OAuth) · [ ] 21. Stripe billing live · [ ] 22. Persisted per-user layouts/indicators · [ ] 23. Mobile responsive · [ ] 24. PWA + offline snapshot · [ ] 25. WASM indicator pass
 
-### Phase 6 — PulseScript language & code terminal  ← ACTIVE, build via /loop
+### Phase 6 — PulseScript language & code terminal  ← COMPLETE (1–8 done)
 **Goal:** SuperCharts' own chart-scripting language + in-app coding terminal.
 **Spec:** `docs/pulsescript-design.md`. **Package:** `packages/script-lang` (`@supercharts/script-lang`).
 **Hard rule:** ORIGINAL language — never reproduce another product's API/identifiers, keywords, or
@@ -79,7 +79,7 @@ Do the next unchecked task per loop — verify, commit small, tick here.
 - [x] 5. **Inputs** — `collectInputs()` AST pre-pass → `RunResult.inputs` schema (id/kind/default/title/min/max/step/options); `runScript(…, { inputs })` overrides by id; `input.source` → chosen price series. 45 tests.
 - [x] 6. **Web code terminal** — `code-terminal-dialog.tsx` (toolbar **Script** button): lazy CodeMirror 6 editor + sample script, Run, "On chart" toggle, console (errors with line/col, or a meta-name + plot/mark/input summary), and a schema-driven inputs panel. The run happens in `ChartPane` over that pane's own candle buffer (so plot values stay index-aligned) and pushes `draw line/band` → a dedicated **`pulse-script` IndicatorsLayer** (id/zIndex now constructor-settable) + `mark buy/sell/note` → colored dots. Store carries per-pane `pulse` state + a `pulseResults` channel. Browser-verified on BTCUSDT 1m: Fast/Slow EMA lines + buy marks render; inputs (Fast/Slow EMA) drive a re-run.
 - [x] 7. **Persistence** — `user_scripts` table + `routes/scripts.ts` (per-user list/create/get/update/delete, mirrors layouts). Code terminal gained **Open** (saved list → load / delete) + **Save** (name → create, or update / save-as) + a loaded-name badge. Verified: API CRUD round-trip (create→list→get→rename→delete; empty-name→400) and a browser save→list→load on /terminal.
-- [ ] 8. **Safety** — exec timeout, bar/loop caps, no IO, line-numbered runtime errors. (Pick up the `ta.*` period≤0 → empty-plot guard here.)
+- [x] 8. **Safety** — `RunOptions.timeoutMs` (default 2s; checked per-bar + every 4096 loop steps → line-numbered abort) and `maxBars` (default 50k) on top of the existing loop-step cap; scripts can't reach host globals/IO (unknown idents/calls throw — verified for `fetch`/`window`/`process`); `ta.*` periods clamp to ≥1 via `len()`, so `sma(close, 0)` floors to a 1-bar window instead of an empty series. 6 safety cases → **56 script-lang tests green, typechecks**. **← Phase 6 COMPLETE.**
 
 **Hardening follow-up (done — not a roadmap task):** the `ta.*` memo no longer recomputes per bar —
 series:0 studies cache once per (fn, params) and candle-derived series-based calls compute once over
@@ -88,7 +88,7 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 `if`/`when`/`for` now resumes from its last *defined* value instead of going NaN. Plus small cleanups
 (dropped redundant `clean()`, shared `priceFromCandle`). script-lang now 50 tests, typechecks.
 
-Then: Phase 3 · #11.
+**Phase 6 done** → next active is **Phase 3 · #11 (OANDA token onboarding wizard)**.
 
 ## Working agreement (for Claude loop)
 
@@ -109,7 +109,7 @@ Then: Phase 3 · #11.
 
 ## Recent log
 
-- 🧬 **PulseScript 1–7 done** — task 7 added **script persistence**: a `user_scripts` table + `routes/scripts.ts` (per-user CRUD, mirrors layouts), and the code terminal grew **Open** (saved-script list → load/delete) + **Save** (create / update / save-as) + a loaded-name badge. Verified API round-trip + a browser save→list→load. (Task 6 = the code terminal itself: CodeMirror editor, Run, inputs panel, console; `draw`/`mark` → a dedicated `pulse-script` layer, run in `ChartPane` over the pane's candles. Hardening follow-up earlier: interpreter `persist` lazy-carry + ta memoization — script-lang now 50 tests.) **Next = task 8 (safety: exec timeout, bar/loop caps, no IO, line-numbered errors + the `ta.*` period≤0 guard)** — then PulseScript is done and it's on to Phase 3 #11.
+- 🧬 **PulseScript COMPLETE (Phase 6, tasks 1–8).** Task 8 = the safety pass: `RunOptions.timeoutMs` (2s default; per-bar + every-4096-step wall-clock abort) + `maxBars` (50k) on top of the loop-step cap; verified scripts can't reach host globals/IO; `ta.*` periods clamp to ≥1 so `sma(close, 0)` floors to a 1-bar window. 56 script-lang tests green. The full language now spans lexer → parser → interpreter → stdlib (reusing `@supercharts/indicators`) → inputs → in-app CodeMirror terminal (`draw`/`mark` on a dedicated `pulse-script` layer) → save/list/load (`user_scripts` table) → sandbox. **Next active: Phase 3 · #11 — OANDA token onboarding wizard.**
 - 🔭 **Order-flow + futures set shipped:** real footprint pipeline (`apps/ingestion/src/footprint-aggregator.ts` → WS → `FootprintLayer`), Time & Sales tape, DOM ladder, Open Interest (`routes/futures.ts`, Binance USD-M, 30s cache). Plus RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market Profile/TPO (`MarketProfileLayer`).
 - 📸 Alerts ship a rendered crossover PNG to Telegram (`alert-chart.ts`); cold-start false-alert flood fixed (backfill + watermark).
 

@@ -13,6 +13,9 @@ import { sma, ema, wma, rma, stdev, atr, vwap, macd, stochastic } from '@superch
 
 const fin = (v: number | undefined): v is number => v != null && Number.isFinite(v);
 const int = (v: number | undefined, d: number): number => (fin(v) ? Math.trunc(v) : d);
+/** A period / length param — truncated, defaulted, and clamped to ≥ 1 so `ta.sma(close, 0)` (or a
+ *  negative) can never produce an all-empty/garbage series; it floors at a 1-bar window instead. */
+const len = (v: number | undefined, d: number): number => Math.max(1, int(v, d));
 
 /** `math.*` — scalar / variadic numeric helpers. */
 export const MATH: Record<string, (a: number[]) => number> = {
@@ -108,28 +111,28 @@ function seriesTrend(a: number[], n: number, up: boolean): TaOut {
 
 /** `ta.*` (also callable bare: `ema(close, 12)`). */
 export const TA: Record<string, TaFn> = {
-  sma: { series: 1, compute: (s, n) => sma(s[0]!, int(n[0], 14)) },
-  ema: { series: 1, compute: (s, n) => ema(s[0]!, int(n[0], 14)) },
-  wma: { series: 1, compute: (s, n) => wma(s[0]!, int(n[0], 14)) },
-  rma: { series: 1, compute: (s, n) => rma(s[0]!, int(n[0], 14)) },
-  stdev: { series: 1, compute: (s, n) => stdev(s[0]!, int(n[0], 14)) },
-  rsi: { series: 1, compute: (s, n) => rsiSeries(s[0]!, int(n[0], 14)) },
+  sma: { series: 1, compute: (s, n) => sma(s[0]!, len(n[0], 14)) },
+  ema: { series: 1, compute: (s, n) => ema(s[0]!, len(n[0], 14)) },
+  wma: { series: 1, compute: (s, n) => wma(s[0]!, len(n[0], 14)) },
+  rma: { series: 1, compute: (s, n) => rma(s[0]!, len(n[0], 14)) },
+  stdev: { series: 1, compute: (s, n) => stdev(s[0]!, len(n[0], 14)) },
+  rsi: { series: 1, compute: (s, n) => rsiSeries(s[0]!, len(n[0], 14)) },
   change: {
     series: 1,
     compute: (s, n) => {
-      const k = int(n[0], 1);
+      const k = len(n[0], 1);
       const a = s[0]!;
       return a.map((_, i) => (i - k >= 0 && fin(a[i]) && fin(a[i - k]) ? a[i]! - a[i - k]! : null));
     },
   },
-  highest: { series: 1, compute: (s, n) => rollMax(s[0]!, int(n[0], 14)) },
-  lowest: { series: 1, compute: (s, n) => rollMin(s[0]!, int(n[0], 14)) },
-  rising: { series: 1, compute: (s, n) => seriesTrend(s[0]!, int(n[0], 1), true) },
-  falling: { series: 1, compute: (s, n) => seriesTrend(s[0]!, int(n[0], 1), false) },
+  highest: { series: 1, compute: (s, n) => rollMax(s[0]!, len(n[0], 14)) },
+  lowest: { series: 1, compute: (s, n) => rollMin(s[0]!, len(n[0], 14)) },
+  rising: { series: 1, compute: (s, n) => seriesTrend(s[0]!, len(n[0], 1), true) },
+  falling: { series: 1, compute: (s, n) => seriesTrend(s[0]!, len(n[0], 1), false) },
   crossOver: { series: 2, compute: (s) => crossSeries(s[0]!, s[1]!, true) },
   crossUnder: { series: 2, compute: (s) => crossSeries(s[0]!, s[1]!, false) },
-  atr: { series: 0, compute: (_s, n, c) => atr(c, { length: int(n[0], 14) }) },
+  atr: { series: 0, compute: (_s, n, c) => atr(c, { length: len(n[0], 14) }) },
   vwap: { series: 0, compute: (_s, _n, c) => vwap(c) },
-  macd: { series: 0, compute: (_s, n, c) => macd(c, { fast: int(n[0], 12), slow: int(n[1], 26), signal: int(n[2], 9) }).macd },
-  stoch: { series: 0, compute: (_s, n, c) => stochastic(c, { kLength: int(n[0], 14), kSmooth: int(n[1], 3), dSmooth: int(n[2], 3) }).k },
+  macd: { series: 0, compute: (_s, n, c) => macd(c, { fast: len(n[0], 12), slow: len(n[1], 26), signal: len(n[2], 9) }).macd },
+  stoch: { series: 0, compute: (_s, n, c) => stochastic(c, { kLength: len(n[0], 14), kSmooth: len(n[1], 3), dSmooth: len(n[2], 3) }).k },
 };

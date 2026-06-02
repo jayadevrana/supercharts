@@ -100,6 +100,10 @@ const toBoolInput = (v: Value): boolean => v === true || v === 1 || v === 'true'
 export interface RunOptions {
   /** Hard cap on total loop iterations across the run (runaway guard). Default 5,000,000. */
   maxLoopSteps?: number;
+  /** Wall-clock execution budget in ms — the run aborts with a line-numbered error past it. Default 2000. */
+  timeoutMs?: number;
+  /** Reject inputs with more than this many bars (defensive; the chart sends ≤ a few thousand). Default 50,000. */
+  maxBars?: number;
   /** Override values for declared `input.*` controls, keyed by input id. */
   inputs?: Record<string, number | boolean | string>;
 }
@@ -176,6 +180,12 @@ class Interpreter {
   private i = 0; // current bar
   private loopSteps = 0;
   private readonly maxLoopSteps: number;
+  private readonly timeoutMs: number;
+  private readonly maxBars: number;
+  /** Wall-clock abort time (epoch ms), armed when the run starts. */
+  private deadline = Infinity;
+  /** Source position of the statement currently executing — surfaced in timeout/cap errors. */
+  private lastPos: { line: number; col: number } = { line: 1, col: 1 };
   /** Per-call-site cache of a series argument's values, grown bar-by-bar (locals-free calls only). */
   private seriesCache = new Map<Expr, { arr: number[]; upTo: number }>();
   /** Per-call-site cache of a stdlib call's output array, valid for the current top bar (per-bar fallback). */
@@ -199,10 +209,16 @@ class Interpreter {
     opts: RunOptions = {},
   ) {
     this.maxLoopSteps = opts.maxLoopSteps ?? 5_000_000;
+    this.timeoutMs = opts.timeoutMs ?? 2_000;
+    this.maxBars = opts.maxBars ?? 50_000;
     this.inputOverrides = opts.inputs ?? {};
   }
 
   run(): RunResult {
+    if (this.candles.length > this.maxBars) {
+      throw new RuntimeError(`input exceeds the ${this.maxBars}-bar safety limit (${this.candles.length} bars)`, 1, 1);
+    }
+    this.deadline = Date.now() + this.timeoutMs;
     // Pre-register top-level functions so calls can precede definitions.
     for (const s of this.program.body) {
       if (s.type === 'fn') this.funcs.set(s.name, { params: s.params, body: s.body, ret: s.ret });
@@ -215,6 +231,7 @@ class Interpreter {
       }
     }
     for (this.i = 0; this.i < this.candles.length; this.i++) {
+      this.checkDeadline();
       for (const s of this.program.body) this.execStmt(s, null);
     }
     return {
@@ -227,6 +244,7 @@ class Interpreter {
 
   // ---- statements ----
   private execStmt(s: Stmt, locals: Map<string, Value> | null): void {
+    this.lastPos = s.pos; // so a timeout abort can point near where it ran
     switch (s.type) {
       case 'fn':
         return; // pre-registered
@@ -319,6 +337,15 @@ class Interpreter {
     this.loopSteps += 1;
     if (this.loopSteps > this.maxLoopSteps) {
       throw new RuntimeError('loop step limit exceeded', pos.line, pos.col);
+    }
+    // Wall-clock check every 4096 steps — cheap, but bounds a tight loop that isn't step-capped yet.
+    if ((this.loopSteps & 4095) === 0) this.checkDeadline(pos);
+  }
+
+  /** Abort the run if it has blown its wall-clock budget — stops a pathological script hanging the UI. */
+  private checkDeadline(pos: { line: number; col: number } = this.lastPos): void {
+    if (Date.now() > this.deadline) {
+      throw new RuntimeError(`execution timed out (over ${this.timeoutMs}ms)`, pos.line, pos.col);
     }
   }
 
