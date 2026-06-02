@@ -90,6 +90,19 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
+- 🧬 **PulseScript task 5 — inputs (lexer→parser→interpreter→stdlib→inputs done; next is the editor).**
+  `collectInputs()` discovers every `input.num/bool/text/source(...)` in a pre-pass and exposes
+  `RunResult.inputs` as the editor's form schema (id/kind/default/title/min/max/step/options);
+  `runScript(src, candles, { inputs })` feeds overrides back by id, and `input.source` switches the
+  read price series. Ran a **max-effort code-review** on the diff before committing and folded the
+  real findings in: num defaults now clamp to their declared min/max (a sub-min default no longer
+  out-ranks an identical override), positional `title` is honored per the documented signature, bool
+  defaults coerce like overrides, and `input.source` validates against `PRICE_SOURCES` (removed a
+  `{} as Candle` cast). 45 script-lang Vitest cases green, typechecks. **Deferred (not in this
+  task's scope, flagged as a follow-up):** the `ta.*` memo recomputes each indicator's full array
+  every bar — O(n²) per call-site, and the candle-only studies (atr/vwap/macd/stoch) recompute a
+  bar-invariant result n times; worth a "compute-once / incremental" pass. Next: task 6, the
+  CodeMirror code terminal (UI — needs a browser screenshot).
 - 🧬 **PulseScript task 4 — standard library bound (lexer→parser→interpreter→stdlib all done).**
   New `packages/script-lang/src/stdlib.ts`: `math.*` scalar helpers + `ta.*` indicators that **reuse
   `@supercharts/indicators`** so scripts and the chart share one tested math impl (sma/ema/wma/rma/
@@ -243,7 +256,15 @@ Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it
       (memoised, causal — no look-ahead), and `draw` grew `hist`/`band` outputs (a `kind` + second
       edge). 8 new Vitest cases (ema/rsi/atr each match `@supercharts/indicators`) — **36 script-lang
       tests green, package typechecks**.
-- [ ] **5. Inputs** — parse `input.*`, expose an input schema; feed values into a run.
+- [x] **5. Inputs** — `collectInputs()` pre-pass walks the whole AST (`exprChildren`/`stmtExprs`)
+      for `input.num/bool/text/source(...)`, assigns a stable id (decl name → slug(title) → `input_N`)
+      and builds `RunResult.inputs: InputDef[]` (the editor's form schema: id/kind/default/title/
+      min/max/step/options). `runScript(src, candles, { inputs })` overrides by id; `input.source`
+      resolves to the chosen price series per bar (shared `priceOf`). Signature `input.<k>(default,
+      title?, min?, max?)` with named-arg override. **Review fixes folded in** (max-effort code-review):
+      num defaults clamp to their own min/max, positional `title` honored, bool defaults coerce like
+      overrides (`1`/`"true"` → true), source validated against `PRICE_SOURCES` (dropped a `{} as
+      Candle` cast). 9 input Vitest cases — **45 script-lang tests green**, typechecks.
 - [ ] **6. Web code terminal** — route/panel with a lazy-loaded CodeMirror 6 editor, Run button,
       sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` onto
       the chart (reuse `IndicatorsLayer` + a markers layer). Browser-verify a real script on BTCUSDT.

@@ -33,8 +33,22 @@ export interface Mark {
   price: number | null;
   text: string | null;
 }
+export type InputKind = 'num' | 'bool' | 'text' | 'source';
+/** A declared `input.*(...)` — the editor renders these as form controls and feeds overrides back. */
+export interface InputDef {
+  id: string;
+  kind: InputKind;
+  title: string;
+  default: number | boolean | string;
+  min?: number;
+  max?: number;
+  step?: number;
+  /** Allowed price-series names for a `source` input. */
+  options?: string[];
+}
 export interface RunResult {
   meta: Record<string, Value>;
+  inputs: InputDef[];
   plots: Plot[];
   marks: Mark[];
 }
@@ -63,9 +77,101 @@ interface FnDef {
 const isNone = (v: Value): v is null => v === null;
 const num = (v: Value): number => (typeof v === 'number' ? v : typeof v === 'boolean' ? (v ? 1 : 0) : NaN);
 
+/** The price-series names a script (and `input.source`) can read off each candle. */
+export const PRICE_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume'] as const;
+function priceOf(name: string, c: Candle): number | null {
+  switch (name) {
+    case 'close':
+      return c.close;
+    case 'open':
+      return c.open;
+    case 'high':
+      return c.high;
+    case 'low':
+      return c.low;
+    case 'volume':
+      return c.volume;
+    case 'hl2':
+      return (c.high + c.low) / 2;
+    case 'hlc3':
+      return (c.high + c.low + c.close) / 3;
+    case 'ohlc4':
+      return (c.open + c.high + c.low + c.close) / 4;
+    default:
+      return null;
+  }
+}
+const slug = (s: string): string => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+/** Coerce an input default/override to a bool consistently (true / 1 / "true" / "1"). */
+const toBoolInput = (v: Value): boolean => v === true || v === 1 || v === 'true' || v === '1';
+
 export interface RunOptions {
   /** Hard cap on total loop iterations across the run (runaway guard). Default 5,000,000. */
   maxLoopSteps?: number;
+  /** Override values for declared `input.*` controls, keyed by input id. */
+  inputs?: Record<string, number | boolean | string>;
+}
+
+/** Direct sub-expressions of an expression (for AST walks). */
+function exprChildren(e: Expr): Expr[] {
+  switch (e.type) {
+    case 'member':
+      return [e.object];
+    case 'index':
+      return [e.object, e.index];
+    case 'call':
+      return [e.callee, ...e.args.map((a) => a.value)];
+    case 'unary':
+      return [e.operand];
+    case 'binary':
+    case 'logical':
+      return [e.left, e.right];
+    default:
+      return [];
+  }
+}
+
+/** Every expression contained in a statement subtree (including nested blocks). */
+function* stmtExprs(s: Stmt): Generator<Expr> {
+  switch (s.type) {
+    case 'decl':
+    case 'assign':
+      yield s.value;
+      return;
+    case 'if':
+      yield s.cond;
+      for (const t of s.then) yield* stmtExprs(t);
+      if (s.else) for (const t of s.else) yield* stmtExprs(t);
+      return;
+    case 'when':
+      yield s.cond;
+      for (const t of s.body) yield* stmtExprs(t);
+      return;
+    case 'forIn':
+      yield s.iter;
+      for (const t of s.body) yield* stmtExprs(t);
+      return;
+    case 'forRange':
+      yield s.from;
+      yield s.to;
+      for (const t of s.body) yield* stmtExprs(t);
+      return;
+    case 'fn':
+      for (const p of s.params) if (p.default) yield p.default;
+      for (const t of s.body) yield* stmtExprs(t);
+      if (s.ret) yield s.ret;
+      return;
+    case 'draw':
+      yield s.call;
+      return;
+    case 'mark':
+      if (s.at) yield s.at;
+      if (s.text) yield s.text;
+      return;
+    case 'expr':
+      yield s.expr;
+      return;
+  }
 }
 
 class Interpreter {
@@ -82,6 +188,10 @@ class Interpreter {
   private seriesCache = new Map<Expr, { arr: number[]; upTo: number }>();
   /** Per-call-site cache of a stdlib call's output array, valid for the current top bar. */
   private callCache = new Map<Expr, { at: number; out: (number | boolean | null)[] }>();
+  /** Declared inputs (the editor's form schema), discovered in a pre-pass. */
+  private inputDefs: InputDef[] = [];
+  private inputByExpr = new Map<Expr, InputDef>();
+  private readonly inputOverrides: Record<string, number | boolean | string>;
 
   constructor(
     private program: Program,
@@ -89,6 +199,7 @@ class Interpreter {
     opts: RunOptions = {},
   ) {
     this.maxLoopSteps = opts.maxLoopSteps ?? 5_000_000;
+    this.inputOverrides = opts.inputs ?? {};
   }
 
   run(): RunResult {
@@ -96,6 +207,7 @@ class Interpreter {
     for (const s of this.program.body) {
       if (s.type === 'fn') this.funcs.set(s.name, { params: s.params, body: s.body, ret: s.ret });
     }
+    this.collectInputs();
     if (this.program.meta) {
       for (const a of this.program.meta.args) {
         if (a.name) this.meta[a.name] = this.evalExpr(a.value, 0, null);
@@ -106,6 +218,7 @@ class Interpreter {
     }
     return {
       meta: this.meta,
+      inputs: this.inputDefs,
       plots: this.plotOrder.map((t) => this.plots.get(t)!),
       marks: this.marks,
     };
@@ -326,7 +439,7 @@ class Interpreter {
       const fn = e.callee.property;
       if (ns === 'math') return this.callMath(fn, e, bar, locals);
       if (ns === 'ta') return this.callTa(fn, e, bar, locals);
-      if (ns === 'input') throw new RuntimeError(`'input.${fn}(…)' lands in task 5 (inputs)`, e.pos.line, e.pos.col);
+      if (ns === 'input') return this.resolveInput(e, bar);
       throw new RuntimeError(`unknown namespace '${ns}.${fn}'`, e.pos.line, e.pos.col);
     }
     if (e.callee.type !== 'ident') {
@@ -371,7 +484,12 @@ class Interpreter {
     return Number.isFinite(r) ? r : null;
   }
 
-  /** `ta.*` / bare indicators — series args built over bars 0..current, output indexed at `bar`. */
+  /**
+   * `ta.*` / bare indicators — series args built over bars 0..current, output indexed at `bar`.
+   * Scalar params (e.g. period) are read at the current top bar, so a constant or input-driven
+   * period is exact everywhere; a period that *varies per bar* is only correct on the current bar,
+   * not when the call is read through `[n]` history (the cached output uses the current period).
+   */
   private callTa(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     const spec = TA[fn];
     if (!spec) throw new RuntimeError(`unknown indicator '${fn}'`, e.pos.line, e.pos.col);
@@ -427,32 +545,120 @@ class Interpreter {
     if (g) return bar >= 0 && bar < g.history.length ? (g.history[bar] ?? null) : null;
     const c = this.candles[bar];
     if (!c) return null;
-    switch (name) {
-      case 'close':
-        return c.close;
-      case 'open':
-        return c.open;
-      case 'high':
-        return c.high;
-      case 'low':
-        return c.low;
-      case 'volume':
-        return c.volume;
-      case 'time':
-        return c.openTime;
-      case 'barIndex':
-        return bar;
-      case 'hl2':
-        return (c.high + c.low) / 2;
-      case 'hlc3':
-        return (c.high + c.low + c.close) / 3;
-      case 'ohlc4':
-        return (c.open + c.high + c.low + c.close) / 4;
-      case 'none':
-        return null;
-      default:
-        throw new RuntimeError(`undefined name '${name}'`, e.pos.line, e.pos.col);
+    if (name === 'time') return c.openTime;
+    if (name === 'barIndex') return bar;
+    if (name === 'none') return null;
+    const p = priceOf(name, c);
+    if (p !== null) return p;
+    throw new RuntimeError(`undefined name '${name}'`, e.pos.line, e.pos.col);
+  }
+
+  // ---- inputs (task 5) ----
+  private isInputCall(e: Expr): e is Extract<Expr, { type: 'call' }> {
+    return (
+      e.type === 'call' &&
+      e.callee.type === 'member' &&
+      e.callee.object.type === 'ident' &&
+      e.callee.object.name === 'input'
+    );
+  }
+
+  /** Pre-pass: discover every `input.*(...)` call, assign a stable id, build the form schema. */
+  private collectInputs(): void {
+    const declName = new Map<Expr, string>();
+    for (const s of this.program.body) {
+      if (s.type === 'decl' && this.isInputCall(s.value)) declName.set(s.value, s.name);
     }
+    const used = new Set<string>();
+    let auto = 0;
+    const seen = new Set<Expr>();
+    const visit = (e: Expr): void => {
+      if (this.isInputCall(e) && !seen.has(e)) {
+        seen.add(e);
+        const def = this.buildInputDef(e, declName.get(e), () => `input_${auto++}`, used);
+        this.inputDefs.push(def);
+        this.inputByExpr.set(e, def);
+      }
+      for (const c of exprChildren(e)) visit(c);
+    };
+    if (this.program.meta) for (const a of this.program.meta.args) visit(a.value);
+    for (const s of this.program.body) for (const e of stmtExprs(s)) visit(e);
+  }
+
+  private buildInputDef(call: Extract<Expr, { type: 'call' }>, declName: string | undefined, autoId: () => string, used: Set<string>): InputDef {
+    const kind = (call.callee as Extract<Expr, { type: 'member' }>).property as InputKind;
+    if (kind !== 'num' && kind !== 'bool' && kind !== 'text' && kind !== 'source') {
+      throw new RuntimeError(`unknown input kind 'input.${kind}'`, call.pos.line, call.pos.col);
+    }
+    const positional: Expr[] = [];
+    const named = new Map<string, Expr>();
+    for (const a of call.args) {
+      if (a.name === null) positional.push(a.value);
+      else named.set(a.name, a.value);
+    }
+    // Signature: input.<kind>(default, title?, min?, max?). Named args override positional.
+    const constNum = (e: Expr | undefined, d: number): number => {
+      if (!e) return d;
+      const v = this.evalExpr(e, 0, null);
+      return typeof v === 'number' && Number.isFinite(v) ? v : d;
+    };
+    const titleExpr = named.get('title') ?? positional[1];
+    const title = titleExpr ? String(this.evalExpr(titleExpr, 0, null) ?? '') : '';
+
+    let def: InputDef;
+    if (kind === 'source') {
+      const first = positional[0];
+      const src = first && first.type === 'ident' && (PRICE_SOURCES as readonly string[]).includes(first.name) ? first.name : 'close';
+      def = { id: '', kind, title, default: src, options: [...PRICE_SOURCES] };
+    } else if (kind === 'bool') {
+      def = { id: '', kind, title, default: positional[0] ? toBoolInput(this.evalExpr(positional[0], 0, null)) : false };
+    } else if (kind === 'text') {
+      def = { id: '', kind, title, default: positional[0] ? String(this.evalExpr(positional[0], 0, null) ?? '') : '' };
+    } else {
+      const min = named.has('min') ? constNum(named.get('min'), -Infinity) : positional[2] ? constNum(positional[2], -Infinity) : undefined;
+      const max = named.has('max') ? constNum(named.get('max'), Infinity) : positional[3] ? constNum(positional[3], Infinity) : undefined;
+      let dflt = constNum(positional[0], 0);
+      if (min != null) dflt = Math.max(dflt, min); // a default below its own min would otherwise outrank an identical override
+      if (max != null) dflt = Math.min(dflt, max);
+      def = { id: '', kind, title, default: dflt };
+      if (min != null) def.min = min;
+      if (max != null) def.max = max;
+      if (named.has('step')) def.step = constNum(named.get('step'), 1);
+    }
+
+    const base = declName || slug(title) || autoId();
+    let id = base;
+    let n = 2;
+    while (used.has(id)) id = `${base}_${n++}`;
+    used.add(id);
+    def.id = id;
+    if (!def.title) def.title = declName ?? id;
+    return def;
+  }
+
+  /** Resolve an `input.*` call to its override (if any) or default; `source` reads the chosen series. */
+  private resolveInput(e: Extract<Expr, { type: 'call' }>, bar: number): Value {
+    const def = this.inputByExpr.get(e);
+    if (!def) throw new RuntimeError('input.* must be a plain expression (not built dynamically)', e.pos.line, e.pos.col);
+    const has = Object.prototype.hasOwnProperty.call(this.inputOverrides, def.id);
+    if (def.kind === 'source') {
+      const name = has ? String(this.inputOverrides[def.id]) : String(def.default);
+      const c = this.candles[bar];
+      return c ? priceOf(name, c) ?? c.close : null;
+    }
+    return has ? this.coerceInput(def, this.inputOverrides[def.id]!) : def.default;
+  }
+
+  private coerceInput(def: InputDef, v: number | boolean | string): Value {
+    if (def.kind === 'num') {
+      let n = typeof v === 'number' ? v : Number(v);
+      if (!Number.isFinite(n)) return def.default;
+      if (def.min != null) n = Math.max(n, def.min);
+      if (def.max != null) n = Math.min(n, def.max);
+      return n;
+    }
+    if (def.kind === 'bool') return toBoolInput(v);
+    return String(v);
   }
 
   private truthy(v: Value): boolean {
