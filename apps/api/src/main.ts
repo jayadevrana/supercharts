@@ -13,6 +13,7 @@ import { oandaRoutes } from './routes/oanda';
 import { watchlistRoutes } from './routes/watchlists';
 import { newsRoutes } from './routes/news';
 import { calendarRoutes } from './routes/calendar';
+import { customDataRoutes, seedCustomDatasets } from './routes/custom-data';
 import { billingRoutes } from './routes/billing';
 import { alertRoutes } from './routes/alerts';
 import { preferenceRoutes } from './routes/preferences';
@@ -89,6 +90,11 @@ async function start(): Promise<void> {
     ? { ...process.env, OANDA_API_TOKEN: oandaRow.api_token, OANDA_ACCOUNT_ID: oandaRow.account_id, OANDA_ENV: oandaRow.oanda_env }
     : process.env;
   const ingestion = await bootstrapIngestion(ingestionEnv);
+
+  // Re-seed any user-imported CSV datasets (Phase 3 #14) into the live candle store so the
+  // CUSTOM: symbols chart immediately after a restart.
+  const seededDatasets = seedCustomDatasets(db, ingestion);
+  if (seededDatasets > 0) app.log.info(`[custom-data] seeded ${seededDatasets} dataset(s)`);
 
   // Warm popular markets so the first user gets data instantly.
   for (const symbol of ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT', 'BINANCE:SOLUSDT']) {
@@ -213,6 +219,7 @@ async function start(): Promise<void> {
   watchlistRoutes(app, db);
   newsRoutes(app, db, process.env);
   calendarRoutes(app);
+  customDataRoutes(app, db, ingestion);
   billingRoutes(app, db, process.env);
   preferenceRoutes(app, db);
   mt5Routes(app, db, mt5Store, intentRouter);

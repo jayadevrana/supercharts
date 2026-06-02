@@ -362,7 +362,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     })();
 
     const ws = getWSClient();
-    ws.subscribe(pane.symbol, pane.interval, ['candles', 'volume', 'heatmap', 'deepTrades']);
+    // CUSTOM: datasets (CSV imports) are static — there is no live provider to subscribe to.
+    const isCustom = pane.symbol.startsWith('CUSTOM:');
+    if (!isCustom) ws.subscribe(pane.symbol, pane.interval, ['candles', 'volume', 'heatmap', 'deepTrades']);
 
     const off = ws.on((msg: ServerToClientMessage) => {
       switch (msg.type) {

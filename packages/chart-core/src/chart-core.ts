@@ -173,7 +173,6 @@ export class ChartCore {
   setCandles(candles: Candle[]): void {
     this.frame.candles = candles;
     if (candles.length > 0) {
-      this.fitPriceScaleToVisible();
       if (this.autoFollow) {
         const last = candles[candles.length - 1]!;
         const barDur = last.closeTime - last.openTime || this.timeScale.state.barDurationMs;
@@ -191,6 +190,10 @@ export class ChartCore {
         this.timeScale.state.barWidth = Math.max(1, barDur * this.timeScale.state.pxPerMs);
         this.timeScale.state.rightTime = last.closeTime + barDur * 6;
       }
+      // Fit the price scale AFTER the time scale is settled, so we measure the window that's
+      // actually about to be drawn. Fitting first used a stale visible range — invisible on
+      // live symbols (ticks refit it) but sticky for static data like CSV imports.
+      this.fitPriceScaleToVisible();
     }
     this.markDirty();
   }

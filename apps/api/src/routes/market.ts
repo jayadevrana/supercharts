@@ -46,6 +46,15 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
     }
     const { symbol, interval, from, to, limit } = parsed.data;
     const interval_ = interval as Interval;
+
+    // Custom CSV-imported datasets (Phase 3 #14) live only in the cache under a CUSTOM: venue.
+    // Serve every stored row regardless of the requested window so historical uploads chart even
+    // when the client asks for "the last N bars from now".
+    if (symbol.startsWith('CUSTOM:')) {
+      const all = ctx.candleStore.query(symbol, interval_, undefined, undefined, limit ?? 20000);
+      return { candles: all, source: 'custom' };
+    }
+
     const provider = resolveProvider(symbol, ctx);
 
     // 1) Hit hot in-memory store first.

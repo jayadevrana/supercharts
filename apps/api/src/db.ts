@@ -271,6 +271,19 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS custom_datasets (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      symbol_id  TEXT NOT NULL,
+      interval   TEXT NOT NULL,
+      candles    TEXT NOT NULL,
+      row_count  INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE (user_id, symbol_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS news_saved_items (
       id       TEXT PRIMARY KEY,
       user_id  TEXT NOT NULL,

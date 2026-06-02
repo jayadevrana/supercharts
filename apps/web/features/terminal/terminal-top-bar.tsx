@@ -30,6 +30,7 @@ import { useWSStatus } from '@/lib/ws-client';
 import { IndicatorsDialog } from './indicators-dialog';
 import { CodeTerminalDialog } from './code-terminal-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
+import { ImportCsvDialog } from './import-csv-dialog';
 import type { ChartType, Interval } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 
@@ -189,6 +190,7 @@ export function TerminalTopBar() {
       <LayoutPicker />
       <IndicatorsDialog />
       <CodeTerminalDialog />
+      <ImportCsvDialog />
       <div className="ml-auto flex items-center gap-2">
         <OandaConnectDialog />
         <MT5Chip />
