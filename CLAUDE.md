@@ -90,13 +90,21 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 
 ## Last session
 
-- 🧬 **Phase 6 kickoff — PulseScript, our own chart-scripting language + (coming) code terminal.**
-  Original design in `docs/pulsescript-design.md` (own keywords/syntax — NOT a clone of any existing
-  product; reuses `@supercharts/indicators` for the math). New `packages/script-lang` scaffolded;
-  **lexer done** (`tokens.ts` + `lexer.ts`: `#` comments, brace blocks, `[]` history, newline-as-
-  separator with in-bracket suppression, line/col errors) — 8 Vitest cases green, package typechecks.
-  Build roadmap (parser → interpreter → stdlib → inputs → CodeMirror terminal → persistence →
-  safety) is in **Next pick**, intended to be driven by a `/loop`.
+- 🧬 **PulseScript task 4 — standard library bound (lexer→parser→interpreter→stdlib all done).**
+  New `packages/script-lang/src/stdlib.ts`: `math.*` scalar helpers + `ta.*` indicators that **reuse
+  `@supercharts/indicators`** so scripts and the chart share one tested math impl (sma/ema/wma/rma/
+  stdev direct; rsi composed from Wilder `rma`, matching the package bar-for-bar; atr/vwap/macd/stoch
+  off the candles). Indicators are callable **bare** (`ema(close,12)`, like the design example) or
+  namespaced (`ta.ema`); added `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/
+  `lowest` + `nz`/`na`. The interpreter now dispatches namespace & bare calls and builds each series
+  argument over bars 0..i (memoised per call-site, causal — a `ta.sma(close,20)` value at bar i never
+  sees future bars); `draw` gained `hist` + `band` outputs. **36 script-lang Vitest cases green**
+  (8 new stdlib cases cross-check ema/rsi/atr against the indicators package); package typechecks.
+  Next: task 5 (parse `input.*` → input schema) then the CodeMirror code terminal.
+- 🧹 Cleaned ~2.3 GB of video-pipeline cache from `~/sc-video` (screencast frames, raw captures,
+  slideshow clips/slides, the superseded XTTS venv) + `/tmp` test artifacts. Kept the final MP4s,
+  voice chunks, and scripts. The 4.2 GB Voicebox TTS model in `~/.cache/huggingface` was left (reused
+  by the app; deleting forces a re-download).
 - 🔭 **Open Interest — last indicator (the 24-indicator request is now done).** New
   `apps/api/src/routes/futures.ts` proxies + 30s-caches Binance USD-M futures OI
   (`fapi.binance.com`, public, no key) — current OI + a 5-min history series. Browser can't hit
@@ -226,8 +234,15 @@ Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it
       (close/open/high/low/volume/hl2/hlc3/ohlc4/barIndex), `draw line(...)` → plot buffers, `mark` →
       signals, `meta` read-out. `ta.*`/`math.*` deliberately error "lands in task 4". 10 Vitest cases
       incl. a history-built 3-bar mean matching `ta.sma`; package typechecks.
-- [ ] **4. Stdlib binding** — `close/open/...`, `ta.*`/`math.*` → `@supercharts/indicators`,
-      `crossOver`, `draw`/`mark` capture. Tests.
+- [x] **4. Stdlib binding** — `src/stdlib.ts`: `math.*` (abs/sign/min/max/floor/ceil/round/sqrt/
+      pow/exp/log/sum/avg) + `ta.*` reusing `@supercharts/indicators` — sma/ema/wma/rma/stdev bound
+      directly, rsi composed from the tested Wilder `rma` (matches the package bar-for-bar),
+      atr/vwap/macd/stoch read the chart candles. Indicators callable **bare** (`ema(close,12)`) or
+      via `ta.`; plus `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/`lowest` and core
+      `nz`/`na`. Interpreter dispatches namespace + bare calls, builds each series arg over bars 0..i
+      (memoised, causal — no look-ahead), and `draw` grew `hist`/`band` outputs (a `kind` + second
+      edge). 8 new Vitest cases (ema/rsi/atr each match `@supercharts/indicators`) — **36 script-lang
+      tests green, package typechecks**.
 - [ ] **5. Inputs** — parse `input.*`, expose an input schema; feed values into a run.
 - [ ] **6. Web code terminal** — route/panel with a lazy-loaded CodeMirror 6 editor, Run button,
       sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` onto

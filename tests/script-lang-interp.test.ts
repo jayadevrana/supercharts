@@ -58,9 +58,11 @@ describe('PulseScript interpreter', () => {
     expect(() => runScript('let x = 1\nx = 2', series([1, 2]))).toThrow(RuntimeError);
   });
 
-  it('flags ta.* as not-yet-available (task 4 boundary)', () => {
-    expect(() => runScript('draw line(ta.sma(close, 3), title: "x")', series([1, 2, 3]))).toThrow(
-      /not available yet/,
-    );
+  it('ta.sma(close, 3) is live (task 4 stdlib) and matches the indicators sma', () => {
+    const closes = [10, 11, 12, 13, 14, 15, 16];
+    const res = runScript('draw line(ta.sma(close, 3), title: "x")', series(closes));
+    const expected = sma(closes, 3);
+    for (let i = 2; i < closes.length; i++) expect(res.plots[0]!.values[i]).toBeCloseTo(expected[i]!, 9);
+    expect(res.plots[0]!.values[0]).toBeNull();
   });
 });

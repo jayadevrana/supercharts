@@ -1,6 +1,7 @@
 import type { Candle } from '@supercharts/types';
 import type { Arg, Expr, MarkKind, Program, Stmt } from './ast';
 import { parse } from './parser';
+import { MATH, TA } from './stdlib';
 
 /**
  * PulseScript bar-by-bar interpreter (Phase 6 task 3 — core).
@@ -21,7 +22,10 @@ export type Value = number | boolean | string | null;
 export interface Plot {
   title: string;
   color: string | null;
+  kind: 'line' | 'hist' | 'band';
   values: (number | null)[];
+  /** Second edge of a `band(upper, lower, …)` output. */
+  values2?: (number | null)[];
 }
 export interface Mark {
   bar: number;
@@ -74,6 +78,10 @@ class Interpreter {
   private i = 0; // current bar
   private loopSteps = 0;
   private readonly maxLoopSteps: number;
+  /** Per-call-site cache of a series argument's values, grown bar-by-bar (locals-free calls only). */
+  private seriesCache = new Map<Expr, { arr: number[]; upTo: number }>();
+  /** Per-call-site cache of a stdlib call's output array, valid for the current top bar. */
+  private callCache = new Map<Expr, { at: number; out: (number | boolean | null)[] }>();
 
   constructor(
     private program: Program,
@@ -195,30 +203,39 @@ class Interpreter {
     }
   }
 
-  /** `draw line(value, color?, title?)` captures the value into a per-bar plot buffer. */
+  /**
+   * `draw line(value, …)` / `draw hist(value, …)` / `draw band(upper, lower, …)`.
+   * Captures per-bar value(s) into a plot buffer; `title`/`color` are named args.
+   */
   private evalDraw(call: Expr, locals: Map<string, Value> | null): void {
-    if (call.type !== 'call' || call.callee.type !== 'ident' || call.callee.name !== 'line') {
-      throw new RuntimeError("draw expects a 'line(...)' output (more output kinds in task 4)", call.pos.line, call.pos.col);
+    if (call.type !== 'call' || call.callee.type !== 'ident' || !['line', 'hist', 'band'].includes(call.callee.name)) {
+      throw new RuntimeError("draw expects a 'line(...)', 'hist(...)' or 'band(...)' output", call.pos.line, call.pos.col);
     }
+    const kind = call.callee.name as 'line' | 'hist' | 'band';
     let title: string | null = null;
     let color: string | null = null;
-    let valueArg: Arg | null = null;
+    const positional: Arg[] = [];
     for (const a of call.args) {
       if (a.name === 'title') title = String(this.evalExpr(a.value, this.i, locals) ?? '');
       else if (a.name === 'color') color = String(this.evalExpr(a.value, this.i, locals) ?? '');
-      else if (a.name === null && !valueArg) valueArg = a;
+      else if (a.name === null) positional.push(a);
     }
-    if (!valueArg) throw new RuntimeError('draw line(...) needs a value', call.pos.line, call.pos.col);
-    const value = this.toNumOrNull(this.evalExpr(valueArg.value, this.i, locals));
+    const need = kind === 'band' ? 2 : 1;
+    if (positional.length < need) {
+      throw new RuntimeError(`draw ${kind}(...) needs ${need} value${need > 1 ? 's' : ''}`, call.pos.line, call.pos.col);
+    }
     const key = title ?? `plot ${this.plotOrder.length + 1}`;
     let plot = this.plots.get(key);
     if (!plot) {
-      plot = { title: key, color, values: [] };
+      plot = { title: key, color, kind, values: [], ...(kind === 'band' ? { values2: [] } : {}) };
       this.plots.set(key, plot);
       this.plotOrder.push(key);
     }
     if (color && !plot.color) plot.color = color;
-    plot.values[this.i] = value;
+    plot.values[this.i] = this.toNumOrNull(this.evalExpr(positional[0]!.value, this.i, locals));
+    if (kind === 'band') {
+      (plot.values2 ??= [])[this.i] = this.toNumOrNull(this.evalExpr(positional[1]!.value, this.i, locals));
+    }
   }
 
   // ---- expressions ----
@@ -256,7 +273,7 @@ class Interpreter {
         return this.evalCall(e, bar, locals);
       case 'member':
         throw new RuntimeError(
-          `namespace access '.${e.property}' is not available yet (ta.*/math.* land in task 4)`,
+          `namespace member '.${e.property}' must be called, e.g. ta.sma(close, 20)`,
           e.pos.line,
           e.pos.col,
         );
@@ -305,19 +322,30 @@ class Interpreter {
 
   private evalCall(e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     if (e.callee.type === 'member') {
-      const obj = e.callee.object.type === 'ident' ? e.callee.object.name : '?';
-      throw new RuntimeError(
-        `'${obj}.${e.callee.property}(…)' is not available yet (ta.*/math.* land in task 4)`,
-        e.pos.line,
-        e.pos.col,
-      );
+      const ns = e.callee.object.type === 'ident' ? e.callee.object.name : '?';
+      const fn = e.callee.property;
+      if (ns === 'math') return this.callMath(fn, e, bar, locals);
+      if (ns === 'ta') return this.callTa(fn, e, bar, locals);
+      if (ns === 'input') throw new RuntimeError(`'input.${fn}(…)' lands in task 5 (inputs)`, e.pos.line, e.pos.col);
+      throw new RuntimeError(`unknown namespace '${ns}.${fn}'`, e.pos.line, e.pos.col);
     }
     if (e.callee.type !== 'ident') {
-      throw new RuntimeError('only named function calls are supported in the core', e.pos.line, e.pos.col);
+      throw new RuntimeError('only named function calls are supported', e.pos.line, e.pos.col);
     }
     const name = e.callee.name;
-    const fn = this.funcs.get(name);
-    if (!fn) throw new RuntimeError(`unknown function '${name}'`, e.pos.line, e.pos.col);
+    const userFn = this.funcs.get(name);
+    if (userFn) return this.callUserFn(name, userFn, e, bar, locals);
+    if (name === 'nz') {
+      const x = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
+      const d = e.args[1] ? this.evalExpr(e.args[1].value, bar, locals) : 0;
+      return this.isNa(x) ? d : x;
+    }
+    if (name === 'na') return this.isNa(e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null);
+    if (TA[name]) return this.callTa(name, e, bar, locals);
+    throw new RuntimeError(`unknown function '${name}'`, e.pos.line, e.pos.col);
+  }
+
+  private callUserFn(name: string, fn: FnDef, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     const scope = new Map<string, Value>();
     for (let p = 0; p < fn.params.length; p++) {
       const param = fn.params[p]!;
@@ -327,13 +355,70 @@ class Interpreter {
       else throw new RuntimeError(`missing argument '${param.name}' for ${name}()`, e.pos.line, e.pos.col);
     }
     if (fn.ret) return this.evalExpr(fn.ret, bar, scope);
-    // Block body: last expression statement is the return value.
     let result: Value = null;
     for (const st of fn.body) {
       if (st.type === 'expr') result = this.evalExpr(st.expr, bar, scope);
       else this.execStmt(st, scope);
     }
     return result;
+  }
+
+  /** `math.*` — scalar numeric helpers (args evaluated at the requested bar). */
+  private callMath(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
+    const m = MATH[fn];
+    if (!m) throw new RuntimeError(`unknown math function 'math.${fn}'`, e.pos.line, e.pos.col);
+    const r = m(e.args.map((a) => num(this.evalExpr(a.value, bar, locals))));
+    return Number.isFinite(r) ? r : null;
+  }
+
+  /** `ta.*` / bare indicators — series args built over bars 0..current, output indexed at `bar`. */
+  private callTa(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
+    const spec = TA[fn];
+    if (!spec) throw new RuntimeError(`unknown indicator '${fn}'`, e.pos.line, e.pos.col);
+    const useCache = locals === null;
+    let cc = useCache ? this.callCache.get(e) : undefined;
+    if (!cc || cc.at !== this.i) {
+      const sArgs: number[][] = [];
+      for (let k = 0; k < spec.series; k++) {
+        const arg = e.args[k];
+        if (!arg) throw new RuntimeError(`'${fn}' needs a series argument`, e.pos.line, e.pos.col);
+        sArgs.push(this.buildSeries(arg.value, locals));
+      }
+      const nums: number[] = [];
+      for (let k = spec.series; k < e.args.length; k++) nums.push(num(this.evalExpr(e.args[k]!.value, this.i, locals)));
+      cc = { at: this.i, out: spec.compute(sArgs, nums, this.candles) };
+      if (useCache) this.callCache.set(e, cc);
+    }
+    const r = cc.out[bar];
+    if (r == null) return null;
+    if (typeof r === 'boolean') return r;
+    return Number.isFinite(r) ? r : null;
+  }
+
+  /** Build an expression's per-bar number series over bars 0..current (memoised when locals-free). */
+  private buildSeries(expr: Expr, locals: Map<string, Value> | null): number[] {
+    if (locals === null) {
+      let c = this.seriesCache.get(expr);
+      if (!c) {
+        c = { arr: [], upTo: -1 };
+        this.seriesCache.set(expr, c);
+      }
+      while (c.upTo < this.i) {
+        c.upTo += 1;
+        c.arr[c.upTo] = this.toSeriesNum(this.evalExpr(expr, c.upTo, null));
+      }
+      return c.arr;
+    }
+    const arr: number[] = [];
+    for (let b = 0; b <= this.i; b++) arr[b] = this.toSeriesNum(this.evalExpr(expr, b, locals));
+    return arr;
+  }
+
+  private toSeriesNum(v: Value): number {
+    return typeof v === 'number' ? v : typeof v === 'boolean' ? (v ? 1 : 0) : NaN;
+  }
+  private isNa(v: Value): boolean {
+    return v === null || (typeof v === 'number' && !Number.isFinite(v));
   }
 
   private lookup(name: string, bar: number, locals: Map<string, Value> | null, e: Expr): Value {
