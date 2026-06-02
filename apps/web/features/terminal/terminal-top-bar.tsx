@@ -29,6 +29,7 @@ import { Badge } from '@/components/ui/badge';
 import { useWSStatus } from '@/lib/ws-client';
 import { IndicatorsDialog } from './indicators-dialog';
 import { CodeTerminalDialog } from './code-terminal-dialog';
+import { OandaConnectDialog } from './oanda-connect-dialog';
 import type { ChartType, Interval } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 
@@ -189,6 +190,7 @@ export function TerminalTopBar() {
       <IndicatorsDialog />
       <CodeTerminalDialog />
       <div className="ml-auto flex items-center gap-2">
+        <OandaConnectDialog />
         <MT5Chip />
         <StrategyBuilderDialog
           defaultSymbol={active.symbol}

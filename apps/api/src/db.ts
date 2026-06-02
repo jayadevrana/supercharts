@@ -258,6 +258,19 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Per-user OANDA API credentials (Phase 3 #11 onboarding wizard). The token is stored
+    -- server-side only; the client ever sees just the last 4 chars + verified account meta.
+    CREATE TABLE IF NOT EXISTS oanda_credentials (
+      user_id     TEXT PRIMARY KEY,
+      api_token   TEXT NOT NULL,
+      account_id  TEXT NOT NULL,
+      oanda_env   TEXT NOT NULL DEFAULT 'practice',
+      alias       TEXT,
+      currency    TEXT,
+      verified_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS news_saved_items (
       id       TEXT PRIMARY KEY,
       user_id  TEXT NOT NULL,

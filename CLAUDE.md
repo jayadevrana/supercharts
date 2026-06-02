@@ -51,7 +51,7 @@ folded into footprint **absorption**.
 - [x] 10. **Max-drawdown breaker** — `dd-breaker.ts` + `routes/breaker.ts`; halts signal-runner via additive `shouldHalt`, Telegram on trip, UTC auto-reset, Breaker card.
 
 ### Phase 3 — Data & Integrations
-- [ ] 11. OANDA token onboarding wizard (in-app form → user config)
+- [x] 11. **OANDA onboarding wizard** — `oanda_credentials` table + `routes/oanda.ts` (GET status / POST validate-against-real-OANDA-then-store / DELETE; token stays server-side, client sees only last4 + verified account meta). `OandaConnectDialog` (top-bar **OANDA** button → token / account / practice-live form → validate & connect, connected card + disconnect). Saved creds drive the live forex feed at boot (override env → Yahoo fallback). Verified: real OANDA rejects a dummy token with its own error message (nothing stored on failure); browser wizard flow.
 - [ ] 12. News filter per watchlist (CryptoPanic + GDELT keyword scoring)
 - [ ] 13. Economic calendar overlay (events as vertical markers)
 - [ ] 14. CSV import for custom OHLC
@@ -88,7 +88,7 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 `if`/`when`/`for` now resumes from its last *defined* value instead of going NaN. Plus small cleanups
 (dropped redundant `clean()`, shared `priceFromCandle`). script-lang now 50 tests, typechecks.
 
-**Phase 6 done** → next active is **Phase 3 · #11 (OANDA token onboarding wizard)**.
+**Phase 6 done**; Phase 3 · #11 done → next active is **Phase 3 · #12 (news filter per watchlist)**.
 
 ## Working agreement (for Claude loop)
 
@@ -109,6 +109,7 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 
 ## Recent log
 
+- 🔌 **Phase 3 · #11 — OANDA onboarding wizard.** Top-bar **OANDA** button → `OandaConnectDialog`: enter API token + account id + practice/live, "Validate & connect" hits `POST /api/oanda` which checks the creds against the **real** OANDA account-summary endpoint (`oanda_credentials` table; token server-side only, surfaces OANDA's own error on failure, stores nothing unless it 200s). On boot the API reads the saved row and uses it for the live forex feed (overriding env, else Yahoo). Verified: dummy token → real OANDA rejection, browser flow. **Next: Phase 3 · #12 (news filter per watchlist).** Follow-up worth noting: newly-saved creds only take effect on the next server start (boot-time read) — a hot-swap of the running OANDA provider would make it instant.
 - 🧬 **PulseScript COMPLETE (Phase 6, tasks 1–8).** Task 8 = the safety pass: `RunOptions.timeoutMs` (2s default; per-bar + every-4096-step wall-clock abort) + `maxBars` (50k) on top of the loop-step cap; verified scripts can't reach host globals/IO; `ta.*` periods clamp to ≥1 so `sma(close, 0)` floors to a 1-bar window. 56 script-lang tests green. The full language now spans lexer → parser → interpreter → stdlib (reusing `@supercharts/indicators`) → inputs → in-app CodeMirror terminal (`draw`/`mark` on a dedicated `pulse-script` layer) → save/list/load (`user_scripts` table) → sandbox. **Next active: Phase 3 · #11 — OANDA token onboarding wizard.**
 - 🔭 **Order-flow + futures set shipped:** real footprint pipeline (`apps/ingestion/src/footprint-aggregator.ts` → WS → `FootprintLayer`), Time & Sales tape, DOM ladder, Open Interest (`routes/futures.ts`, Binance USD-M, 30s cache). Plus RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market Profile/TPO (`MarketProfileLayer`).
 - 📸 Alerts ship a rendered crossover PNG to Telegram (`alert-chart.ts`); cold-start false-alert flood fixed (backfill + watermark).

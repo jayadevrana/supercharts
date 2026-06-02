@@ -9,6 +9,7 @@ import { marketRoutes } from './routes/market';
 import { drawingRoutes } from './routes/drawings';
 import { layoutRoutes } from './routes/layouts';
 import { scriptRoutes } from './routes/scripts';
+import { oandaRoutes } from './routes/oanda';
 import { watchlistRoutes } from './routes/watchlists';
 import { newsRoutes } from './routes/news';
 import { billingRoutes } from './routes/billing';
@@ -78,7 +79,15 @@ async function start(): Promise<void> {
   registerDemoGuard(app, process.env);
 
   const db = openDB(process.env);
-  const ingestion = await bootstrapIngestion(process.env);
+  // If the user connected OANDA via the in-app wizard, those saved (already-verified) creds
+  // drive the live forex feed — overriding env. Otherwise bootstrap falls back to env → Yahoo.
+  const oandaRow = db.raw
+    .prepare('SELECT api_token, account_id, oanda_env FROM oanda_credentials ORDER BY verified_at DESC LIMIT 1')
+    .get() as { api_token: string; account_id: string; oanda_env: string } | undefined;
+  const ingestionEnv = oandaRow
+    ? { ...process.env, OANDA_API_TOKEN: oandaRow.api_token, OANDA_ACCOUNT_ID: oandaRow.account_id, OANDA_ENV: oandaRow.oanda_env }
+    : process.env;
+  const ingestion = await bootstrapIngestion(ingestionEnv);
 
   // Warm popular markets so the first user gets data instantly.
   for (const symbol of ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT', 'BINANCE:SOLUSDT']) {
@@ -199,6 +208,7 @@ async function start(): Promise<void> {
   drawingRoutes(app, db);
   layoutRoutes(app, db);
   scriptRoutes(app, db);
+  oandaRoutes(app, db);
   watchlistRoutes(app, db);
   newsRoutes(app, db, process.env);
   billingRoutes(app, db, process.env);
