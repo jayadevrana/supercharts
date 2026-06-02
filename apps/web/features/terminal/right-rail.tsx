@@ -18,6 +18,7 @@ import {
   CATEGORY_LABEL,
   CATEGORY_ORDER,
   SYMBOL_CATALOG,
+  getCatalogSymbol,
   type SymbolCategory,
 } from '@supercharts/types';
 
@@ -187,17 +188,49 @@ function WatchlistTab({ active, onPick }: { active: string; onPick: (s: string) 
   );
 }
 
+interface NewsWatchlist {
+  id: string;
+  name: string;
+  symbols: string[];
+}
+type NewsScope = { kind: 'symbol' } | { kind: 'watchlist'; id: string; name: string };
+
 function NewsTab({ symbol }: { symbol: string }) {
+  const [scope, setScope] = useState<NewsScope>({ kind: 'symbol' });
+  const [watchlists, setWatchlists] = useState<NewsWatchlist[]>([]);
   const [items, setItems] = useState<NewsItem[] | null>(null);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Load the user's watchlists once so they can scope news to a whole list.
+  useEffect(() => {
+    let cancelled = false;
+    api<{ items: NewsWatchlist[] }>('/watchlists')
+      .then((r) => !cancelled && setWatchlists(r.items))
+      .catch(() => !cancelled && setWatchlists([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // If the selected watchlist is deleted elsewhere, fall back to symbol scope.
+  useEffect(() => {
+    if (scope.kind === 'watchlist' && watchlists.length > 0 && !watchlists.some((w) => w.id === scope.id)) {
+      setScope({ kind: 'symbol' });
+    }
+  }, [watchlists, scope]);
+
+  const isWatchlist = scope.kind === 'watchlist';
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api<{ items: NewsItem[]; fetchedAt?: number }>('/news/latest', {
-        searchParams: { symbols: symbol, limit: 40 },
-      });
+      const r =
+        scope.kind === 'watchlist'
+          ? await api<{ items: NewsItem[]; fetchedAt?: number }>(`/news/watchlist/${scope.id}`)
+          : await api<{ items: NewsItem[]; fetchedAt?: number }>('/news/latest', {
+              searchParams: { symbols: symbol, limit: 40 },
+            });
       setItems(r.items);
       setFetchedAt(r.fetchedAt ?? Date.now());
     } catch {
@@ -206,89 +239,143 @@ function NewsTab({ symbol }: { symbol: string }) {
     } finally {
       setLoading(false);
     }
-  }, [symbol]);
+  }, [scope, symbol]);
 
   useEffect(() => {
-    let cancelled = false;
     setItems(null);
     void load();
-    return () => {
-      cancelled = true;
-      void cancelled;
-    };
   }, [load]);
 
-  if (!items) {
+  const chipCls = (active: boolean): string =>
+    `inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] transition-colors ${
+      active
+        ? 'border-accent/60 bg-accent/15 text-foreground'
+        : 'border-border bg-surface-raised text-muted-foreground hover:text-foreground'
+    }`;
+
+  const scopeBar = (
+    <div className="flex flex-wrap items-center gap-1 border-b border-border/60 px-2 py-2">
+      <button onClick={() => setScope({ kind: 'symbol' })} className={chipCls(scope.kind === 'symbol')}>
+        {formatSymbolLabel(symbol)}
+      </button>
+      {watchlists.map((w) => (
+        <button
+          key={w.id}
+          onClick={() => setScope({ kind: 'watchlist', id: w.id, name: w.name })}
+          className={chipCls(scope.kind === 'watchlist' && scope.id === w.id)}
+          title={`Headlines scored for ${w.name} (${w.symbols.length} symbols)`}
+        >
+          <Star className="h-2.5 w-2.5" /> {w.name}
+        </button>
+      ))}
+    </div>
+  );
+
+  const body = (() => {
+    if (!items) {
+      return (
+        <div className="space-y-3 p-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-14" />
+          ))}
+        </div>
+      );
+    }
+
+    if (items.length === 0) {
+      return (
+        <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+          <Newspaper className="h-6 w-6 text-muted-foreground/50" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            {isWatchlist
+              ? `No headlines match ${scope.name} right now. Items are scored against each symbol's keywords as they publish.`
+              : 'No live news for this symbol right now. GDELT and CryptoPanic adapters surface headlines as they publish.'}
+          </p>
+          {fetchedAt ? (
+            <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
+              Last checked {formatRelativeTime(fetchedAt)}
+            </p>
+          ) : null}
+          <button
+            onClick={() => void load()}
+            disabled={loading}
+            className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs text-foreground hover:border-accent/60 disabled:opacity-60"
+          >
+            {loading ? (
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-r-transparent" />
+            ) : (
+              <RefreshCw className="h-3 w-3" />
+            )}
+            Refresh
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <div className="space-y-3 p-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-14" />
+      <div className="divide-y divide-border/60">
+        {items.map((n) => (
+          <a
+            key={n.id}
+            href={n.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block px-3 py-3 transition-colors hover:bg-surface-raised"
+          >
+            <div className="flex items-start gap-2">
+              <span
+                className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
+                  n.sentiment == null
+                    ? 'bg-muted-foreground'
+                    : n.sentiment >= 0.2
+                      ? 'bg-bull'
+                      : n.sentiment <= -0.2
+                        ? 'bg-bear'
+                        : 'bg-warn'
+                }`}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">{n.title}</div>
+                <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  <span>{n.source}</span>
+                  <span>·</span>
+                  <span>{formatRelativeTime(n.publishedAt)}</span>
+                </div>
+                {isWatchlist ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1 w-14 overflow-hidden rounded-full bg-border">
+                        <span
+                          className="block h-full rounded-full bg-accent"
+                          style={{ width: `${Math.max(6, Math.round(n.relevance * 100))}%` }}
+                        />
+                      </span>
+                      <span className="text-[9px] tabular-nums text-muted-foreground">
+                        {Math.round(n.relevance * 100)}% match
+                      </span>
+                    </span>
+                    {n.symbols.slice(0, 3).map((s) => (
+                      <Badge key={s} tone="muted" className="text-[9px]">
+                        {getCatalogSymbol(s)?.label ?? formatSymbolLabel(s)}
+                      </Badge>
+                    ))}
+                    {n.symbols.length > 3 ? (
+                      <span className="text-[9px] text-muted-foreground">+{n.symbols.length - 3}</span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </a>
         ))}
       </div>
     );
-  }
-
-  if (items.length === 0) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center px-6 py-12 text-center">
-        <Newspaper className="h-6 w-6 text-muted-foreground/50" />
-        <p className="mt-3 text-sm text-muted-foreground">
-          No live news for this symbol right now. GDELT and CryptoPanic adapters surface headlines as they publish.
-        </p>
-        {fetchedAt ? (
-          <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/70">
-            Last checked {formatRelativeTime(fetchedAt)}
-          </p>
-        ) : null}
-        <button
-          onClick={() => void load()}
-          disabled={loading}
-          className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-raised px-3 py-1.5 text-xs text-foreground hover:border-accent/60 disabled:opacity-60"
-        >
-          {loading ? (
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-r-transparent" />
-          ) : (
-            <RefreshCw className="h-3 w-3" />
-          )}
-          Refresh
-        </button>
-      </div>
-    );
-  }
+  })();
 
   return (
-    <div className="divide-y divide-border/60">
-      {items.map((n) => (
-        <a
-          key={n.id}
-          href={n.url}
-          target="_blank"
-          rel="noreferrer"
-          className="block px-3 py-3 transition-colors hover:bg-surface-raised"
-        >
-          <div className="flex items-start gap-2">
-            <span
-              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                n.sentiment == null
-                  ? 'bg-muted-foreground'
-                  : n.sentiment >= 0.2
-                    ? 'bg-bull'
-                    : n.sentiment <= -0.2
-                      ? 'bg-bear'
-                      : 'bg-warn'
-              }`}
-            />
-            <div className="min-w-0">
-              <div className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">{n.title}</div>
-              <div className="mt-1 flex items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                <span>{n.source}</span>
-                <span>·</span>
-                <span>{formatRelativeTime(n.publishedAt)}</span>
-              </div>
-            </div>
-          </div>
-        </a>
-      ))}
+    <div className="flex h-full flex-col">
+      {scopeBar}
+      <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">{body}</div>
     </div>
   );
 }

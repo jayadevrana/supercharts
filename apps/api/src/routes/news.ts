@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import type { AppDB } from '../db';
 import { getUser } from '../auth';
 import type { NewsItem, NewsResult, NewsSource, NewsTopic } from '@supercharts/types';
+import { buildKeywordIndex, scoreItem, buildGdeltQuery, cryptoCurrenciesFor } from '../news-relevance';
 
 /**
  * News adapters.
@@ -79,6 +80,57 @@ export function newsRoutes(fastify: FastifyInstance, db: AppDB, env: NodeJS.Proc
   fastify.get('/api/news/macro', async () => {
     const items = await fetchAggregated(env, [], ['macro', 'central_bank', 'inflation', 'rates', 'geopolitical'], undefined, 50);
     return { items, source: 'aggregated', status: 'ok' };
+  });
+
+  // Per-watchlist news (Phase 3 #12). Build a keyword index from the watchlist's symbols, bias
+  // the keyless GDELT + CryptoPanic fetch toward them, then re-rank everything by genuine
+  // keyword relevance — attaching the matched symbols and dropping zero-score noise. Relevance
+  // and matches are computed locally; no upstream "relevance" field is trusted.
+  fastify.get('/api/news/watchlist/:id', async (req, reply) => {
+    const user = getUser(req, db);
+    const id = (req.params as { id: string }).id;
+    const wl = db.raw.prepare('SELECT id FROM watchlists WHERE id = ? AND user_id = ?').get(id, user.id);
+    if (!wl) {
+      reply.code(404);
+      return { error: 'not_found', message: 'Watchlist not found.' };
+    }
+    const symbols = (
+      db.raw
+        .prepare('SELECT symbol_id FROM watchlist_symbols WHERE watchlist_id = ? ORDER BY sort_order ASC')
+        .all(id) as Array<{ symbol_id: string }>
+    ).map((r) => r.symbol_id);
+    if (symbols.length === 0) {
+      const empty: NewsResult = {
+        items: [],
+        fetchedAt: Date.now(),
+        source: 'aggregated',
+        status: 'ok',
+        message: 'This watchlist has no symbols yet.',
+      };
+      return empty;
+    }
+
+    const index = buildKeywordIndex(symbols);
+    const tasks: Array<Promise<NewsItem[]>> = [fetchGdelt(buildGdeltQuery(symbols), ['macro', 'forex', 'crypto'])];
+    // CryptoPanic only adds signal when the watchlist actually holds crypto.
+    if (cryptoCurrenciesFor(symbols).length > 0) tasks.push(fetchCryptoPanic(env, symbols));
+
+    const raw = (await Promise.allSettled(tasks)).flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+    const scored = raw
+      .map((item) => {
+        const { relevance, matchedSymbols } = scoreItem(item, index);
+        return { ...item, relevance, symbols: matchedSymbols };
+      })
+      .filter((item) => item.relevance > 0)
+      .sort((a, b) => b.relevance - a.relevance || b.publishedAt - a.publishedAt);
+
+    const result: NewsResult = {
+      items: dedupeNews(scored).slice(0, 40),
+      fetchedAt: Date.now(),
+      source: 'aggregated',
+      status: 'ok',
+    };
+    return result;
   });
 
   fastify.post('/api/news/save', async (req, reply) => {
