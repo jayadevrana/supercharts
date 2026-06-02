@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { runScript } from '../packages/script-lang/src/interpreter';
-import { ema } from '../packages/indicators/src/ma';
+import { sma, ema } from '../packages/indicators/src/ma';
 import { rsi } from '../packages/indicators/src/oscillators';
 import { atr } from '../packages/indicators/src/volatility';
 import { series } from './_helpers';
@@ -74,6 +74,32 @@ describe('PulseScript stdlib (task 4)', () => {
     expect(hi.plots[0]!.values).toEqual([null, null, 13, 17, 17]);
     const lo = runScript('draw line(lowest(close, 3), title: "l")', series(closes));
     expect(lo.plots[0]!.values).toEqual([null, null, 10, 11, 11]);
+  });
+
+  it('nested ta (ema of sma) is cached per call site and matches composing the indicators directly', () => {
+    const closes = [10, 12, 11, 13, 15, 14, 16, 18, 17, 19, 21, 20];
+    const res = runScript('draw line(ta.ema(ta.sma(close, 3), 2), title: "x")', series(closes));
+    const expected = ema(sma(closes, 3), 2);
+    for (let i = 0; i < closes.length; i++) {
+      if (Number.isNaN(expected[i]!)) expect(res.plots[0]!.values[i]).toBeNull();
+      else expect(res.plots[0]!.values[i]).toBeCloseTo(expected[i]!, 9);
+    }
+  });
+
+  it('a ta over a persist-accumulated series stays correct (per-bar fallback, never wrongly precomputed)', () => {
+    // `acc` is execution-built state, so ta.sma(acc, 2) must NOT be hoisted to a run-wide cache
+    // (that would read holes for not-yet-run bars). acc = [2, 5, 10, 17]; sma(acc, 2) = [_, 3.5, 7.5, 13.5].
+    const res = runScript('persist acc = 0\nacc = acc + close\ndraw line(ta.sma(acc, 2), title: "s")', series([2, 3, 5, 7]));
+    expect(res.plots[0]!.values).toEqual([null, 3.5, 7.5, 13.5]);
+  });
+
+  it('a ta value read through [n] history indexes the same cached output (causal)', () => {
+    const closes = [10, 11, 12, 13, 14, 15, 16, 17];
+    const res = runScript('draw line(ta.sma(close, 3), title: "now")\ndraw line(ta.sma(close, 3)[1], title: "prev")', series(closes));
+    const now = res.plots.find((p) => p.title === 'now')!;
+    const prev = res.plots.find((p) => p.title === 'prev')!;
+    expect(prev.values[0]).toBeNull(); // no prior bar
+    for (let i = 1; i < closes.length; i++) expect(prev.values[i]).toBe(now.values[i - 1]);
   });
 
   it('draw hist and draw band capture their kind + edges', () => {

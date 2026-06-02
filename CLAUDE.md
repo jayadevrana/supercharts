@@ -81,9 +81,12 @@ Do the next unchecked task per loop — verify, commit small, tick here.
 - [ ] 7. **Persistence** — save/list/load user scripts (API route + table, like layouts).
 - [ ] 8. **Safety** — exec timeout, bar/loop caps, no IO, line-numbered runtime errors. (Pick up the `ta.*` period≤0 → empty-plot guard here.)
 
-**Deferred follow-up (flagged, not a roadmap task):** `ta.*` memo recomputes each indicator's full
-array every bar (O(n²); candle-only studies recompute a bar-invariant result n times) + a
-pre-existing `persist`-declared-inside-a-conditional carry bug — batch into one hardening commit.
+**Hardening follow-up (done — not a roadmap task):** the `ta.*` memo no longer recomputes per bar —
+series:0 studies cache once per (fn, params) and candle-derived series-based calls compute once over
+the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallback kept for
+`persist`/`mut`-driven series or varying params; and a `persist` declared inside a skipped
+`if`/`when`/`for` now resumes from its last *defined* value instead of going NaN. Plus small cleanups
+(dropped redundant `clean()`, shared `priceFromCandle`). script-lang now 50 tests, typechecks.
 
 Then: Phase 3 · #11.
 

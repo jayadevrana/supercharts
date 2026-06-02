@@ -1,7 +1,8 @@
 import type { Candle } from '@supercharts/types';
+import { priceFromCandle, type PriceSource } from '@supercharts/indicators';
 import type { Arg, Expr, MarkKind, Program, Stmt } from './ast';
 import { parse } from './parser';
-import { MATH, TA } from './stdlib';
+import { MATH, TA, type TaFn, type TaOut } from './stdlib';
 
 /**
  * PulseScript bar-by-bar interpreter (Phase 6 task 3 — core).
@@ -67,6 +68,12 @@ export class RuntimeError extends Error {
 interface Binding {
   kind: 'let' | 'mut' | 'persist';
   history: Value[];
+  /**
+   * Last bar whose history slot was actually written. Lets a `persist` carry its last
+   * *defined* value across bars where its (conditional) declaration was skipped — bar `i-1`
+   * can be a hole when the decl lives inside an `if`/`when`/`for` that didn't run last bar.
+   */
+  lastSet?: number;
 }
 interface FnDef {
   params: { name: string; default: Expr | null }[];
@@ -79,28 +86,13 @@ const num = (v: Value): number => (typeof v === 'number' ? v : typeof v === 'boo
 
 /** The price-series names a script (and `input.source`) can read off each candle. */
 export const PRICE_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume'] as const;
+/** Read a named price series off a candle: the indicators package's price math, plus `volume`. */
 function priceOf(name: string, c: Candle): number | null {
-  switch (name) {
-    case 'close':
-      return c.close;
-    case 'open':
-      return c.open;
-    case 'high':
-      return c.high;
-    case 'low':
-      return c.low;
-    case 'volume':
-      return c.volume;
-    case 'hl2':
-      return (c.high + c.low) / 2;
-    case 'hlc3':
-      return (c.high + c.low + c.close) / 3;
-    case 'ohlc4':
-      return (c.open + c.high + c.low + c.close) / 4;
-    default:
-      return null;
-  }
+  if (name === 'volume') return c.volume;
+  return (PRICE_SOURCES as readonly string[]).includes(name) ? priceFromCandle(c, name as PriceSource) : null;
 }
+/** Identifiers whose value at a given bar is fixed by the candle alone (no execution-built state). */
+const STABLE_PRICE_NAMES = new Set<string>([...PRICE_SOURCES, 'barIndex', 'time', 'none']);
 const slug = (s: string): string => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 /** Coerce an input default/override to a bool consistently (true / 1 / "true" / "1"). */
 const toBoolInput = (v: Value): boolean => v === true || v === 1 || v === 'true' || v === '1';
@@ -186,8 +178,16 @@ class Interpreter {
   private readonly maxLoopSteps: number;
   /** Per-call-site cache of a series argument's values, grown bar-by-bar (locals-free calls only). */
   private seriesCache = new Map<Expr, { arr: number[]; upTo: number }>();
-  /** Per-call-site cache of a stdlib call's output array, valid for the current top bar. */
-  private callCache = new Map<Expr, { at: number; out: (number | boolean | null)[] }>();
+  /** Per-call-site cache of a stdlib call's output array, valid for the current top bar (per-bar fallback). */
+  private callCache = new Map<Expr, { at: number; out: TaOut }>();
+  /** series:0 studies (atr/vwap/macd/stoch) depend only on candles + params → one result per (fn, params) for the whole run. */
+  private taParamCache = new Map<string, TaOut>();
+  /** Per-call-site cache for a bar-invariant series-based call → computed once over the full range, then just indexed. */
+  private taRunCache = new Map<Expr, TaOut>();
+  /** Memoised "is this ta call bar-invariant (cache-safe)?" decision, per call site. */
+  private taStable = new Map<Expr, boolean>();
+  /** Every name the script binds (decls / fn names+params / loop vars) — a reference to one of these is not a pure candle read. */
+  private declaredNames = new Set<string>();
   /** Declared inputs (the editor's form schema), discovered in a pre-pass. */
   private inputDefs: InputDef[] = [];
   private inputByExpr = new Map<Expr, InputDef>();
@@ -207,6 +207,7 @@ class Interpreter {
     for (const s of this.program.body) {
       if (s.type === 'fn') this.funcs.set(s.name, { params: s.params, body: s.body, ret: s.ret });
     }
+    this.collectDeclaredNames(); // before any evalExpr (meta/inputs) can reach the ta cache
     this.collectInputs();
     if (this.program.meta) {
       for (const a of this.program.meta.args) {
@@ -236,7 +237,10 @@ class Interpreter {
         }
         let b = this.globals.get(s.name);
         if (s.kind === 'persist' && b) {
-          b.history[this.i] = this.i > 0 ? b.history[this.i - 1]! : this.evalExpr(s.value, this.i, null);
+          // Carry the last *defined* value (not bar i-1, which is a hole when this decl
+          // was skipped last bar); seed lazily the very first time the decl runs.
+          b.history[this.i] = b.lastSet != null ? (b.history[b.lastSet] ?? null) : this.evalExpr(s.value, this.i, null);
+          b.lastSet = this.i;
           return;
         }
         if (!b) {
@@ -244,6 +248,7 @@ class Interpreter {
           this.globals.set(s.name, b);
         }
         b.history[this.i] = this.evalExpr(s.value, this.i, locals);
+        b.lastSet = this.i;
         return;
       }
       case 'assign': {
@@ -255,6 +260,7 @@ class Interpreter {
         if (!b) throw new RuntimeError(`assignment to undeclared '${s.name}'`, s.pos.line, s.pos.col);
         if (b.kind === 'let') throw new RuntimeError(`cannot reassign 'let ${s.name}' (use mut/persist)`, s.pos.line, s.pos.col);
         b.history[this.i] = this.evalExpr(s.value, this.i, locals);
+        b.lastSet = this.i;
         return;
       }
       case 'if': {
@@ -480,8 +486,12 @@ class Interpreter {
   private callMath(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     const m = MATH[fn];
     if (!m) throw new RuntimeError(`unknown math function 'math.${fn}'`, e.pos.line, e.pos.col);
-    const r = m(e.args.map((a) => num(this.evalExpr(a.value, bar, locals))));
-    return Number.isFinite(r) ? r : null;
+    return this.finiteOrNull(m(e.args.map((a) => num(this.evalExpr(a.value, bar, locals)))));
+  }
+
+  /** A computed number passes through when finite; NaN/±Infinity collapse to none. */
+  private finiteOrNull(n: number): number | null {
+    return Number.isFinite(n) ? n : null;
   }
 
   /**
@@ -493,42 +503,165 @@ class Interpreter {
   private callTa(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     const spec = TA[fn];
     if (!spec) throw new RuntimeError(`unknown indicator '${fn}'`, e.pos.line, e.pos.col);
-    const useCache = locals === null;
-    let cc = useCache ? this.callCache.get(e) : undefined;
-    if (!cc || cc.at !== this.i) {
-      const sArgs: number[][] = [];
-      for (let k = 0; k < spec.series; k++) {
-        const arg = e.args[k];
-        if (!arg) throw new RuntimeError(`'${fn}' needs a series argument`, e.pos.line, e.pos.col);
-        sArgs.push(this.buildSeries(arg.value, locals));
-      }
-      const nums: number[] = [];
-      for (let k = spec.series; k < e.args.length; k++) nums.push(num(this.evalExpr(e.args[k]!.value, this.i, locals)));
-      cc = { at: this.i, out: spec.compute(sArgs, nums, this.candles) };
-      if (useCache) this.callCache.set(e, cc);
-    }
-    const r = cc.out[bar];
+    const r = this.taOutput(fn, spec, e, locals)[bar];
     if (r == null) return null;
-    if (typeof r === 'boolean') return r;
-    return Number.isFinite(r) ? r : null;
+    return typeof r === 'boolean' ? r : this.finiteOrNull(r);
   }
 
-  /** Build an expression's per-bar number series over bars 0..current (memoised when locals-free). */
-  private buildSeries(expr: Expr, locals: Map<string, Value> | null): number[] {
+  /**
+   * Resolve a ta call's full output array, memoised so each call site computes once over a run
+   * instead of once per bar (the old behaviour was O(n²) per call site):
+   *  - series:0 studies (atr/vwap/macd/stoch) depend only on the candles + scalar params, so the
+   *    whole run shares one result keyed by (fn, params) — independent of the current bar;
+   *  - a series-based call whose arguments are all candle-derived with constant params is likewise
+   *    bar-invariant → computed once over the full range, then just indexed;
+   *  - anything that can vary per bar (params off `close`, a series off `persist`/`mut` state) keeps
+   *    the per-top-bar recompute, reused within the bar.
+   * The indicators are causal, so indexing `out[bar]` never reads a future bar in any path.
+   */
+  private taOutput(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): TaOut {
+    if (locals !== null) return this.computeTa(fn, spec, e, locals, this.i); // inside a fn — no cross-call memo
+
+    if (spec.series === 0) {
+      const nums = this.taParams(spec, e, null);
+      const key = `${fn}|${nums.join(',')}`;
+      let out = this.taParamCache.get(key);
+      if (!out) {
+        out = spec.compute([], nums, this.candles);
+        this.taParamCache.set(key, out);
+      }
+      return out;
+    }
+
+    let stable = this.taStable.get(e);
+    if (stable === undefined) {
+      stable = this.taArgsStable(spec, e);
+      this.taStable.set(e, stable);
+    }
+    if (stable) {
+      let out = this.taRunCache.get(e);
+      if (!out) {
+        out = this.computeTa(fn, spec, e, null, this.candles.length - 1);
+        this.taRunCache.set(e, out);
+      }
+      return out;
+    }
+
+    let cc = this.callCache.get(e);
+    if (!cc || cc.at !== this.i) {
+      cc = { at: this.i, out: this.computeTa(fn, spec, e, null, this.i) };
+      this.callCache.set(e, cc);
+    }
+    return cc.out;
+  }
+
+  /** A ta call's scalar params, read at the current top bar. */
+  private taParams(spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): number[] {
+    const nums: number[] = [];
+    for (let k = spec.series; k < e.args.length; k++) nums.push(num(this.evalExpr(e.args[k]!.value, this.i, locals)));
+    return nums;
+  }
+
+  /** Build a ta call's series args (over bars 0..upTo) and params, then run the indicator. */
+  private computeTa(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null, upTo: number): TaOut {
+    const sArgs: number[][] = [];
+    for (let k = 0; k < spec.series; k++) {
+      const arg = e.args[k];
+      if (!arg) throw new RuntimeError(`'${fn}' needs a series argument`, e.pos.line, e.pos.col);
+      sArgs.push(this.buildSeries(arg.value, locals, upTo));
+    }
+    return spec.compute(sArgs, this.taParams(spec, e, locals), this.candles);
+  }
+
+  /** A ta call is cache-safe when every series arg is a stable candle read and every scalar param is constant. */
+  private taArgsStable(spec: TaFn, e: Extract<Expr, { type: 'call' }>): boolean {
+    for (let k = 0; k < e.args.length; k++) {
+      const ok = k < spec.series ? this.isStableSeries(e.args[k]!.value) : this.isConst(e.args[k]!.value);
+      if (!ok) return false;
+    }
+    return true;
+  }
+
+  /** A series expr whose per-bar value is fixed by the candles alone (no `persist`/`mut`/local state). */
+  private isStableSeries(e: Expr): boolean {
+    switch (e.type) {
+      case 'num':
+      case 'str':
+      case 'bool':
+      case 'none':
+        return true;
+      case 'ident':
+        return STABLE_PRICE_NAMES.has(e.name) && !this.declaredNames.has(e.name);
+      case 'unary':
+        return this.isStableSeries(e.operand);
+      case 'binary':
+      case 'logical':
+        return this.isStableSeries(e.left) && this.isStableSeries(e.right);
+      case 'index':
+        return this.isStableSeries(e.object) && this.isConst(e.index);
+      case 'call':
+        return this.isStableCall(e, false);
+      case 'member':
+        return false;
+    }
+  }
+
+  /** An expr that evaluates to the same scalar on every bar — required of a param before it can seed a run-wide cache. */
+  private isConst(e: Expr): boolean {
+    switch (e.type) {
+      case 'num':
+      case 'str':
+      case 'bool':
+      case 'none':
+        return true;
+      case 'unary':
+        return this.isConst(e.operand);
+      case 'binary':
+      case 'logical':
+        return this.isConst(e.left) && this.isConst(e.right);
+      case 'call':
+        return this.isStableCall(e, true);
+      case 'ident': // price sources / barIndex / globals all vary per bar
+      case 'index':
+      case 'member':
+        return false;
+    }
+  }
+
+  /** `input.*` is constant per run; `math.*` mirrors its args; `ta.*` needs stable series + const params. `constOnly` forbids per-bar reads. */
+  private isStableCall(e: Extract<Expr, { type: 'call' }>, constOnly: boolean): boolean {
+    const stableArgs = (): boolean => e.args.every((a) => (constOnly ? this.isConst(a.value) : this.isStableSeries(a.value)));
+    if (e.callee.type === 'member' && e.callee.object.type === 'ident') {
+      const ns = e.callee.object.name;
+      if (ns === 'input') return true;
+      if (ns === 'math') return stableArgs();
+      if (ns === 'ta') return !constOnly && TA[e.callee.property] !== undefined && this.taArgsStable(TA[e.callee.property]!, e);
+      return false;
+    }
+    if (e.callee.type === 'ident' && !this.funcs.has(e.callee.name)) {
+      const name = e.callee.name;
+      if (TA[name]) return !constOnly && this.taArgsStable(TA[name]!, e);
+      if (name === 'nz' || name === 'na') return stableArgs();
+    }
+    return false; // user fns aren't analysed → treated as per-bar
+  }
+
+  /** Build an expression's per-bar number series over bars 0..upTo (memoised when locals-free). */
+  private buildSeries(expr: Expr, locals: Map<string, Value> | null, upTo: number = this.i): number[] {
     if (locals === null) {
       let c = this.seriesCache.get(expr);
       if (!c) {
         c = { arr: [], upTo: -1 };
         this.seriesCache.set(expr, c);
       }
-      while (c.upTo < this.i) {
+      while (c.upTo < upTo) {
         c.upTo += 1;
         c.arr[c.upTo] = this.toSeriesNum(this.evalExpr(expr, c.upTo, null));
       }
       return c.arr;
     }
     const arr: number[] = [];
-    for (let b = 0; b <= this.i; b++) arr[b] = this.toSeriesNum(this.evalExpr(expr, b, locals));
+    for (let b = 0; b <= upTo; b++) arr[b] = this.toSeriesNum(this.evalExpr(expr, b, locals));
     return arr;
   }
 
@@ -537,6 +670,37 @@ class Interpreter {
   }
   private isNa(v: Value): boolean {
     return v === null || (typeof v === 'number' && !Number.isFinite(v));
+  }
+
+  /** Pre-pass: record every name the script binds, so the ta cache can tell a candle read from script state. */
+  private collectDeclaredNames(): void {
+    const walk = (stmts: Stmt[]): void => {
+      for (const s of stmts) {
+        switch (s.type) {
+          case 'decl':
+            this.declaredNames.add(s.name);
+            break;
+          case 'fn':
+            this.declaredNames.add(s.name);
+            for (const p of s.params) this.declaredNames.add(p.name);
+            walk(s.body);
+            break;
+          case 'if':
+            walk(s.then);
+            if (s.else) walk(s.else);
+            break;
+          case 'when':
+            walk(s.body);
+            break;
+          case 'forRange':
+          case 'forIn':
+            this.declaredNames.add(s.varName);
+            walk(s.body);
+            break;
+        }
+      }
+    };
+    walk(this.program.body);
   }
 
   private lookup(name: string, bar: number, locals: Map<string, Value> | null, e: Expr): Value {

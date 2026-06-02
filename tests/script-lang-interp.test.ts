@@ -26,6 +26,38 @@ describe('PulseScript interpreter', () => {
     expect(res.plots[0]!.values).toEqual([2, 5, 10]);
   });
 
+  it('persist declared inside a conditional carries its last value across skipped bars', () => {
+    // up, up, down, up, down, up — the `when` (and so the persist decl) skips the down bars.
+    const candles = [
+      k(0, 10, 12, 9, 11), // up
+      k(60_000, 11, 13, 10, 12), // up
+      k(120_000, 12, 13, 10, 11), // down — block skipped
+      k(180_000, 11, 13, 10, 12), // up
+      k(240_000, 12, 13, 10, 11), // down — block skipped
+      k(300_000, 11, 13, 10, 12), // up
+    ];
+    const res = runScript('when close > open {\n  persist streak = 0\n  streak = streak + 1\n  draw line(streak, title: "s")\n}', candles);
+    const p = res.plots.find((pl) => pl.title === 's')!;
+    // A monotonic up-bar counter that resumes (not resets to none/NaN) after each skipped bar.
+    expect(p.values[0]).toBe(1);
+    expect(p.values[1]).toBe(2);
+    expect(p.values[3]).toBe(3); // carries 2 across skipped bar 2
+    expect(p.values[5]).toBe(4); // carries 3 across skipped bar 4
+  });
+
+  it('persist declared inside a block initialises lazily on the first bar the block runs', () => {
+    const candles = [
+      k(0, 11, 13, 10, 10), // down — block never runs yet
+      k(60_000, 10, 13, 9, 12), // up — first run: init then +1
+      k(120_000, 12, 13, 10, 11), // down — skipped
+      k(180_000, 10, 13, 9, 12), // up — resumes
+    ];
+    const res = runScript('when close > open {\n  persist hits = 0\n  hits = hits + 1\n  draw line(hits, title: "h")\n}', candles);
+    const p = res.plots.find((pl) => pl.title === 'h')!;
+    expect(p.values[1]).toBe(1); // seeded from init on first run (bar 1, not bar 0)
+    expect(p.values[3]).toBe(2); // carries across skipped bar 2
+  });
+
   it('if / else selects per bar', () => {
     const candles = [k(0, 10, 11, 9, 11), k(60_000, 11, 11, 9, 10)]; // up bar, then down bar
     const res = runScript('if close > open {\n  draw line(1, title: "dir")\n} else {\n  draw line(-1, title: "dir")\n}', candles);

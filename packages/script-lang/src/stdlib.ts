@@ -11,7 +11,6 @@ import { sma, ema, wma, rma, stdev, atr, vwap, macd, stochastic } from '@superch
  * indexes the bar it needs (causal — no look-ahead leaks into the current bar).
  */
 
-const clean = (arr: readonly number[]): number[] => arr.map((v) => (Number.isFinite(v) ? v : NaN));
 const fin = (v: number | undefined): v is number => v != null && Number.isFinite(v);
 const int = (v: number | undefined, d: number): number => (fin(v) ? Math.trunc(v) : d);
 
@@ -109,12 +108,12 @@ function seriesTrend(a: number[], n: number, up: boolean): TaOut {
 
 /** `ta.*` (also callable bare: `ema(close, 12)`). */
 export const TA: Record<string, TaFn> = {
-  sma: { series: 1, compute: (s, n) => sma(clean(s[0]!), int(n[0], 14)) },
-  ema: { series: 1, compute: (s, n) => ema(clean(s[0]!), int(n[0], 14)) },
-  wma: { series: 1, compute: (s, n) => wma(clean(s[0]!), int(n[0], 14)) },
-  rma: { series: 1, compute: (s, n) => rma(clean(s[0]!), int(n[0], 14)) },
-  stdev: { series: 1, compute: (s, n) => stdev(clean(s[0]!), int(n[0], 14)) },
-  rsi: { series: 1, compute: (s, n) => rsiSeries(clean(s[0]!), int(n[0], 14)) },
+  sma: { series: 1, compute: (s, n) => sma(s[0]!, int(n[0], 14)) },
+  ema: { series: 1, compute: (s, n) => ema(s[0]!, int(n[0], 14)) },
+  wma: { series: 1, compute: (s, n) => wma(s[0]!, int(n[0], 14)) },
+  rma: { series: 1, compute: (s, n) => rma(s[0]!, int(n[0], 14)) },
+  stdev: { series: 1, compute: (s, n) => stdev(s[0]!, int(n[0], 14)) },
+  rsi: { series: 1, compute: (s, n) => rsiSeries(s[0]!, int(n[0], 14)) },
   change: {
     series: 1,
     compute: (s, n) => {
