@@ -2,82 +2,90 @@
 
 > Institutional-grade browser charting terminal for crypto & forex traders.
 > Live tick data, multi-window grid, drawing tools, advanced indicators (SMC / footprint /
-> heatmap / deep trades), MA-crossover alerts (Telegram + web), MT5 automation bridge,
+> heatmap / order flow), MA-crossover alerts (Telegram + web), MT5 automation bridge,
 > Stripe-ready billing. Pricing: $400 / 6mo, $600 / 12mo.
 
 Repo: `/Volumes/PortableSSD/new start/supercharts` (pnpm monorepo).
 
 ## Stack
 
-- **Web**: Next.js 15 App Router · React 19 RC · Tailwind · Radix · Zustand
-- **API**: Fastify 5 · @fastify/websocket · `node:sqlite` (Node 26) · zod
-- **Indicators / chart engine**: Canvas 2D, layered `Layer` interface in `packages/chart-core`
-- **Market data**: Binance public WS (no key) · OANDA (token via env) · **Yahoo Finance (free, no key — FX/metals/indices fallback when no OANDA token)** · MockProvider for dev
-- **MT5**: Custom TCP bridge on :7878 + intent router + signal-runner
-- **Telegram**: HTTP bot API, token stored server-side (last 4 chars to client)
+- **Web**: Next.js 15 App Router · React 19 RC · Tailwind · Radix · Zustand (`:3000`)
+- **API**: Fastify 5 · @fastify/websocket · `node:sqlite` (Node 26) · zod (`:4000`)
+- **Chart engine**: Canvas 2D, layered `Layer` interface in `packages/chart-core`
+- **Indicators**: `packages/indicators` (pure, tested) — the one TA/math impl scripts share
+- **Market data**: Binance public WS (no key) · OANDA (env token) · Yahoo (free FX/metals/indices fallback) · Mock (dev). Order-flow/futures are **Binance-only**; other venues show "no data", never faked.
+- **MT5**: TCP bridge on `:7878` + intent router + signal-runner
+- **Telegram**: HTTP bot API, token server-side (last 4 to client)
 
-## Build state (as of init)
+## Build state
 
-Monorepo is feature-complete on **chart terminal + alerts + bulk MT5 automation**. 54 tasks shipped:
+Feature-complete on **terminal + alerts + bulk MT5 automation** (54 tasks). Multi-pane grid
+(1/4/8/9/16 + TV-style layouts); all chart types; persisted drawings; 48-symbol catalog;
+liquidity heatmap / volume profile / footprint / deep-trade bubbles; 11 SMC indicators;
+Signals & Trend Score + MTF; 1y backfill + pan-loads-more; MA-cross alert engine (single +
+dual MA); Telegram delivery (chat-ID auto-detect, chart-snapshot PNG); watchlists + bulk
+subscribe; bulk MT5 automation; logs tab.
 
-- Multi-pane terminal (1/4/8/9/16 + TradingView-style layouts)
-- All chart types (candles / heikin-ashi / renko / range / kagi / line-break / point-and-figure)
-- Drawing system persisted to API + drag/resize/delete
-- 48-symbol catalog: 10 crypto, 7 FX major, 8 FX minor, 10 FX cross, 3 metals, 10 indices
-- Liquidity heatmap · volume profile · footprint · deep-trade bubbles
-- 11 SMC indicators (FVG / Order Blocks / Liquidity / BOS/CHoCH / Premium-Discount / AVWAP / CVD / Sessions / HVN-LVN / Regime)
-- Signals & Trend Score (Pine port) + MTF dashboard + bottom strip
-- Backfill 1y history per watchlist symbol + pan-loads-more
-- **MA cross alert engine**: single-MA price-cross + dual-MA (e.g. EMA 5×10)
-- **Telegram delivery**: bot validation, auto-detect chat ID via getUpdates
-- **Watchlists**: CRUD + bulk-subscribe alerts from a list
-- **Bulk MT5 automation**: arm signal-recipes for every symbol×side from a watchlist
-- **Logs tab**: 8s auto-refresh, single + clear-all delete
+**⚠️ Live config — DO NOT BREAK:** 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram on.
+Bot `@dipaloMA_bot` (chat `6386490802`) saved.
 
-Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram on. Bot
-`@dipaloMA_bot` (chat `6386490802`) saved. **Do not break this.**
+**24-indicator request — COMPLETE:** RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market
+Profile/TPO, real footprint pipeline (per-cell bid/ask + imbalance/stacked/absorption from the
+live trade stream), Time & Sales tape, DOM ladder, whale/block highlight, Open Interest. Iceberg
+folded into footprint **absorption**.
 
 ## Roadmap
 
-### Phase 1 — Strategy & Backtesting
+### Phase 1 — Strategy & Backtesting (done)
+- [x] 1. **Strategy Builder GUI** — `StrategyBuilderDialog` (Active/New/Templates), 4 presets, block conditions → `/api/signals` w/ `indicatorSpecs`.
+- [x] 2. **Backtester** — `runMaCrossBacktest` + `POST /api/alerts/:id/backtest`; trades/win%/return/maxDD/Sharpe/PF (v1: no SL/TP/fees).
+- [x] 3. **Param optimizer** — `runOptimizer` + `/optimize`; grid sweep MA/RSI, ranked by Sharpe − 0.02·maxDD; Apply overwrites config.
+- [x] 4. **Walk-forward** — `runWalkForward` + `/walk-forward`; 250/60 train/test, OOS robustness; 8-stat modal.
+- [x] 5. **Paper-trading** — per-alert `delivery.paper`; virtual position opens/flips on cross; `paper_trades` + routes; ClipboardList modal.
 
-- [x] **1. Strategy Builder GUI v1** — `StrategyBuilderDialog` with Active / New / Templates tabs. 4 one-click presets (MA cross, RSI oversold, bullish engulfing, London session breakout). Block-based condition rows + open-position action with sizing/SL/TP/cooldown. Reuses `/api/signals` with `indicatorSpecs` thread so MA params actually take effect.
-- [x] **2. Backtester v1** — `runMaCrossBacktest` engine + `POST /api/alerts/:id/backtest` route + result modal in Active tab. Pulls up to 1000 bars from candleStore (fetches from provider when sparse). Per-trade: enter on cross (RSI-gated when set), exit on reverse cross. Stats: trades, win rate, total return %, max DD %, Sharpe, profit factor, avg win/loss, avg bars. v1 model — no SL/TP/fees/slippage (Phase 1 #3 picks those up).
-- [x] **3. Param optimizer v1** — `runOptimizer` engine + `POST /api/alerts/:id/optimize`. Grid sweeps fast/slow MA lengths (and RSI thresholds when filter set), reuses backtester per combo, ranks by composite score (Sharpe − 0.02 × Max-DD). UI: Sliders icon per alert row → results table with Apply button to overwrite alert config.
-- [x] **4. Walk-forward analysis v1** — `runWalkForward` engine + `POST /api/alerts/:id/walk-forward`. Rolling 250-bar train / 60-bar test windows. Optimizer picks per train slice, OOS backtest on test slice. Aggregates OOS equity + computes robustness (OOS Sharpe / mean train Sharpe). UI: Shuffle icon → modal with 8 stat cards (Generalises ≥0.7 / Marginal 0.3-0.7 / Curve-fit <0.3) + per-window picks table.
-- [x] **5. Paper-trading mode v1** — per-alert `delivery.paper` flag. Engine opens a virtual position on every cross fire, closes + flips on opposite fire. Persisted in `paper_trades`. New routes: GET `/api/alerts/:id/paper-trades`, GET `/api/alerts/paper/summary`, POST `/api/alerts/:id/paper/reset` (close-open or wipe). UI: ClipboardList icon per alert row → modal with toggle, 4 stat cards (Closed / Win rate / Total return / W-L), live open-position card, closed-trades table, Close-open + Wipe-history actions.
-
-### Phase 2 — Risk & Portfolio
-
-- [x] **6. Position sizer v1** — `apps/api/src/position-sizer.ts` with pure helpers for fixed_lots / risk_percent / cash_risk / kelly (fractional 0.25) / atr_scaled. Route `POST /api/alerts/:id/sizer-preview` backtests the alert to derive Kelly inputs (winRate, avg win/loss) + reads latest ATR, returns lot suggestions across all 5 modes. UI: Calculator icon per alert row → modal with 6 inputs (balance/risk%/risk$/SL pips/$pip/fixed lots), 4 backtest stat cards, side-by-side results table with formula breakdown.
-- [x] **7. Portfolio heat v1** — `apps/api/src/portfolio-heat.ts` (pure) + `GET /api/portfolio/heat`. Pearson correlation of log returns across open paper positions (or a `?symbols=` basket). Day-bucketed alignment so cross-provider daily bars (gold futures vs spot FX vs crypto, which open at different session times) line up by UTC day. Folds position SIDE into the correlation → a *directional* concentration score (two longs on a +0.9 pair = stacked risk; long+short = hedged). Asset-class buckets + net currency exposure (EUR_USD long → +EUR / −USD; the "5 EUR longs" check). UI: **Heat tab** in the alerts dialog — concentration headline + avg|corr| + stacked-pair count, amber stacked-risk warnings (clustered via union-find), N×N correlation heatmap (red = move together, blue = offset), asset-class + net-currency bars. "Analyse active alerts" maps the watched basket; empty state when <2 open positions. Exposure is equal-weight (paper_trades carry no lot size) — stated, not faked.
-- [x] **8. Per-strategy P&L attribution v1** — `apps/api/src/pnl-attribution.ts` (pure) + `GET /api/portfolio/attribution`. Rolls the paper book up three ways: per alert (strategy *instance*), per strategy *signature* (the MA/RSI recipe across every symbol it runs on), and per asset class. Realised = Σ closed `pnl_percent`; open = mark-to-market unrealized (reuses `markRow`). Per-instance: trades, win%, realised/open/total %, avg win/loss, profit factor, best/worst. UI: **P&L tab** in the alerts dialog — 4 headline cards (total/realised/open, win rate, strategy count, best/worst), per-instance table with diverging contribution bars, and by-recipe + by-asset-class rollups. 5s auto-refresh. Return attribution (equal-weight per trade) — stated, not faked. **Also fixed a latent Phase 1 #5 bug**: the zod `delivery` schema was missing `paper`, so the paper-trade toggle was silently stripped on save and no positions were ever booked — restored `paper: z.boolean().optional()`.
-- [x] **9. Daily / weekly stat report v1** — `apps/api/src/stat-report.ts` (pure) + `GET /api/portfolio/report?period=daily|weekly` + `POST /api/portfolio/report/send`. Windows alert fires (`fired_at`) + closed paper trades (`exit_time`); rolls up signals (total/buy/sell + top symbols), paper P&L (realised/open/total, win rate, avg), best/worst strategy lines, active-alert count. `formatReportTelegram()` renders an HTML digest sent via the user's first enabled bot. UI: **Summary report card** atop the P&L tab — daily/weekly toggle + 4 stat cards + best/worst + a "Telegram" send button. Verified: weekly = 39 fires (22 buy/17 sell); send button delivered the digest (toast confirmed). Scheduler is external for now (cron → POST the send route); documented as a follow-up.
-- [x] **10. Max-drawdown breaker v1** — `apps/api/src/dd-breaker.ts` (createDrawdownBreaker) + `routes/breaker.ts` (`GET/POST /api/portfolio/breaker`, `POST /resume`). Watches the day's P&L (injected `computeDailyPnlPct` — today the paper book: realised closed-today % + open unrealized %); when it drops ≤ −limit it HALTS the signal-runner (new addative `shouldHalt` gate — recipes evaluate but never dispatch; never deletes), fires a Telegram alert (onTrip), and auto-resets at the UTC day boundary. Manual resume holds for the day; configurable enable + limit. 60s poll in `main.ts`. UI: **Breaker card** atop the P&L tab — enable switch, today's P&L, halt-at-% input, Armed/Paused/Off status, red HALTED banner + Resume. Default `DD_LIMIT_PCT=5`, `DD_BREAKER_ENABLED` (on). Verified: isolated logic test (trip / no-double-trip / manual-resume-holds / day-rollover re-arm / disable) + live route (status + configure). **Phase 2 complete.**
+### Phase 2 — Risk & Portfolio (done)
+- [x] 6. **Position sizer** — `position-sizer.ts` (fixed/risk%/cash/kelly/atr) + `/sizer-preview`; Calculator modal.
+- [x] 7. **Portfolio heat** — `portfolio-heat.ts` + `/portfolio/heat`; directional correlation, asset-class + net-currency exposure, Heat tab.
+- [x] 8. **P&L attribution** — `pnl-attribution.ts` + `/portfolio/attribution`; per instance/recipe/asset-class, P&L tab. (Fixed zod `delivery.paper` strip bug.)
+- [x] 9. **Stat report** — `stat-report.ts` + `/portfolio/report` + `/send`; daily/weekly Telegram digest, Summary card. (Scheduler external.)
+- [x] 10. **Max-drawdown breaker** — `dd-breaker.ts` + `routes/breaker.ts`; halts signal-runner via additive `shouldHalt`, Telegram on trip, UTC auto-reset, Breaker card.
 
 ### Phase 3 — Data & Integrations
-
-- [ ] 11. OANDA token onboarding wizard (in-app form → write to user config)
+- [ ] 11. OANDA token onboarding wizard (in-app form → user config)
 - [ ] 12. News filter per watchlist (CryptoPanic + GDELT keyword scoring)
-- [ ] 13. Economic calendar overlay on chart (events as vertical markers)
-- [ ] 14. CSV import for custom OHLC data
-- [ ] 15. Tradingview webhook receiver (alerts in via HTTP)
+- [ ] 13. Economic calendar overlay (events as vertical markers)
+- [ ] 14. CSV import for custom OHLC
+- [ ] 15. TradingView webhook receiver (alerts in via HTTP)
 
 ### Phase 4 — Collaboration & Sharing
-
-- [ ] 16. Public strategy share links (read-only)
-- [ ] 17. Telegram broadcast channel (1 admin → many subscribers)
-- [ ] 18. Embedded charts (iframe widget for blogs)
-- [ ] 19. Multi-user workspaces (team accounts)
+- [ ] 16. Public strategy share links · [ ] 17. Telegram broadcast channel · [ ] 18. Embedded iframe charts · [ ] 19. Multi-user workspaces
 
 ### Phase 5 — Polish & Scale
+- [ ] 20. Auth.js (credentials + OAuth) · [ ] 21. Stripe billing live · [ ] 22. Persisted per-user layouts/indicators · [ ] 23. Mobile responsive · [ ] 24. PWA + offline snapshot · [ ] 25. WASM indicator pass
 
-- [ ] 20. Auth.js (credentials + OAuth) replacing demo user
-- [ ] 21. Stripe billing live (already scaffolded)
-- [ ] 22. Persisted per-user layouts + indicators per pane
-- [ ] 23. Mobile responsive terminal
-- [ ] 24. PWA install + offline last-known snapshot
-- [ ] 25. WASM-accelerated indicator pass
+### Phase 6 — PulseScript language & code terminal  ← ACTIVE, build via /loop
+**Goal:** SuperCharts' own chart-scripting language + in-app coding terminal.
+**Spec:** `docs/pulsescript-design.md`. **Package:** `packages/script-lang` (`@supercharts/script-lang`).
+**Hard rule:** ORIGINAL language — never reproduce another product's API/identifiers, keywords, or
+syntax. Reuse `@supercharts/indicators` for TA/math so scripts and chart indicators share one
+tested implementation. Universal domain terms (`sma`, `close`) are fine; structure/declaration
+keywords are ours (`meta`/`let`/`mut`/`persist`/`when`/`draw`/`mark`/`fn`, `#` comments, `{ }` blocks).
+
+Do the next unchecked task per loop — verify, commit small, tick here.
+- [x] 1. **Lexer** — `lexer.ts`+`tokens.ts` (# comments, brace blocks, `[]`, newline-sep). 8 tests.
+- [x] 2. **AST + parser** — `ast.ts`+`parser.ts` (recursive-descent/precedence; `ParseError` line/col). 10 tests.
+- [x] 3. **Interpreter core** — `interpreter.ts` bar-by-bar; `[]` history; let/mut/persist; if/when/both `for`; `fn`; price series; `draw line`/`mark`/`meta`. 10 tests.
+- [x] 4. **Stdlib** — `stdlib.ts`: `math.*` + `ta.*` reusing `@supercharts/indicators` (sma/ema/wma/rma/stdev direct; rsi via Wilder `rma`; atr/vwap/macd/stoch off candles). Bare + `ta.` calls; `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/`lowest`; `nz`/`na`; `draw hist`/`band`. 36 tests.
+- [x] 5. **Inputs** — `collectInputs()` AST pre-pass → `RunResult.inputs` schema (id/kind/default/title/min/max/step/options); `runScript(…, { inputs })` overrides by id; `input.source` → chosen price series. 45 tests.
+- [ ] 6. **Web code terminal** — route/panel, lazy CodeMirror 6 editor, Run, sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` to chart (reuse `IndicatorsLayer` + markers layer). **Browser-verify on /terminal.**
+- [ ] 7. **Persistence** — save/list/load user scripts (API route + table, like layouts).
+- [ ] 8. **Safety** — exec timeout, bar/loop caps, no IO, line-numbered runtime errors. (Pick up the `ta.*` period≤0 → empty-plot guard here.)
+
+**Deferred follow-up (flagged, not a roadmap task):** `ta.*` memo recomputes each indicator's full
+array every bar (O(n²); candle-only studies recompute a bar-invariant result n times) + a
+pre-existing `persist`-declared-inside-a-conditional carry bug — batch into one hardening commit.
+
+Then: Phase 3 · #11.
 
 ## Working agreement (for Claude loop)
 
@@ -85,193 +93,22 @@ Current live config: 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram
 - Never break the live alerts or Telegram config that's already wired.
 - Verify every feature with a browser screenshot before commit.
 - Commit small. One feature → one commit.
-- Update the **Last session** / **Next pick** footer before each commit.
+- Update the **Recent log** / **Next pick** footer before each commit.
 - If blocked, append to **Questions for owner** + skip to next item.
 
-## Last session
+## Ops / gotchas
 
-- 🧬 **PulseScript task 5 — inputs (lexer→parser→interpreter→stdlib→inputs done; next is the editor).**
-  `collectInputs()` discovers every `input.num/bool/text/source(...)` in a pre-pass and exposes
-  `RunResult.inputs` as the editor's form schema (id/kind/default/title/min/max/step/options);
-  `runScript(src, candles, { inputs })` feeds overrides back by id, and `input.source` switches the
-  read price series. Ran a **max-effort code-review** on the diff before committing and folded the
-  real findings in: num defaults now clamp to their declared min/max (a sub-min default no longer
-  out-ranks an identical override), positional `title` is honored per the documented signature, bool
-  defaults coerce like overrides, and `input.source` validates against `PRICE_SOURCES` (removed a
-  `{} as Candle` cast). 45 script-lang Vitest cases green, typechecks. **Deferred (not in this
-  task's scope, flagged as a follow-up):** the `ta.*` memo recomputes each indicator's full array
-  every bar — O(n²) per call-site, and the candle-only studies (atr/vwap/macd/stoch) recompute a
-  bar-invariant result n times; worth a "compute-once / incremental" pass. Next: task 6, the
-  CodeMirror code terminal (UI — needs a browser screenshot).
-- 🧬 **PulseScript task 4 — standard library bound (lexer→parser→interpreter→stdlib all done).**
-  New `packages/script-lang/src/stdlib.ts`: `math.*` scalar helpers + `ta.*` indicators that **reuse
-  `@supercharts/indicators`** so scripts and the chart share one tested math impl (sma/ema/wma/rma/
-  stdev direct; rsi composed from Wilder `rma`, matching the package bar-for-bar; atr/vwap/macd/stoch
-  off the candles). Indicators are callable **bare** (`ema(close,12)`, like the design example) or
-  namespaced (`ta.ema`); added `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/
-  `lowest` + `nz`/`na`. The interpreter now dispatches namespace & bare calls and builds each series
-  argument over bars 0..i (memoised per call-site, causal — a `ta.sma(close,20)` value at bar i never
-  sees future bars); `draw` gained `hist` + `band` outputs. **36 script-lang Vitest cases green**
-  (8 new stdlib cases cross-check ema/rsi/atr against the indicators package); package typechecks.
-  Next: task 5 (parse `input.*` → input schema) then the CodeMirror code terminal.
-- 🧹 Cleaned ~2.3 GB of video-pipeline cache from `~/sc-video` (screencast frames, raw captures,
-  slideshow clips/slides, the superseded XTTS venv) + `/tmp` test artifacts. Kept the final MP4s,
-  voice chunks, and scripts. The 4.2 GB Voicebox TTS model in `~/.cache/huggingface` was left (reused
-  by the app; deleting forces a re-download).
-- 🔭 **Open Interest — last indicator (the 24-indicator request is now done).** New
-  `apps/api/src/routes/futures.ts` proxies + 30s-caches Binance USD-M futures OI
-  (`fapi.binance.com`, public, no key) — current OI + a 5-min history series. Browser can't hit
-  fapi directly (CORS), so it goes through our API. `open-interest-panel.tsx` is a bottom-left
-  panel: current OI, % change over the window, and a sparkline; `pane.overlays.openInterest` flag,
-  REST-polled every 30s while on. Symbols with no USD-M perp (FX/metals) return `available:false`
-  → "no futures market" note, never faked. Verified on BTCUSDT: panel shows **106.66K ▲1.38%** with
-  the trend sparkline; EURUSD correctly shows no data. (This is the app's first futures data source.)
-- 📒 **DOM Ladder — live depth-of-market.** New `dom-ladder-panel.tsx` top-left corner panel:
-  asks above the spread (red), bids below (green), per-row depth bars sized by volume, fed by the
-  Binance `orderbook_delta` top-20 snapshot stream (same ref+flush pattern as the tape, with the
-  `domOnRef` stale-closure guard). Verified on BTCUSDT: real book renders — best ask carried an
-  11.35 BTC wall, spread + bid/ask split correct, console clean. Bumped both panels' price format to
-  2 decimals so adjacent BTC levels (0.01 tick) don't collapse to the same row.
-- 🩹 **Time & Sales — live trade tape.** New `time-sales-panel.tsx` corner panel fed by the
-  `trade_tick` stream (newest-first, green = buyer-lifted-ask / red = seller, crypto-only with a
-  "Binance only" note on FX). The WS handler fills a ring buffer; a 400 ms timer flushes it to
-  state (trades arrive too fast to setState per print). **Two real bugs found + fixed in browser:**
-  (1) the WS handler effect is pinned to `[symbol, interval]`, so the `trade_tick` guard read a
-  *stale* `timeAndSales=false` and dropped every print — fixed with a `tapeOnRef` the handler reads
-  live; (2) the stream re-delivers prints, colliding on the React key (~thousands of console errors)
-  — fixed by deduping the buffer by trade id on insert. Verified on BTCUSDT 1m: tape fills with real
-  prints, console clean after the fix.
-- 🐋 **Whale / block highlighting in the tape** (the non-duplicate take on "whale tracker" — Delta
-  Bubbles already plots big trades on the chart). Prints ≥ $50k notional get a dot + bold + tinted
-  row in the Time & Sales tape. Real (uses the trade's `notional`); typecheck-clean, builds on the
-  live-verified tape — the highlight itself is data-dependent (shows when a block prints).
-- 📊 **Real footprint data pipeline (was stubbed `footprint_pending_phase_11`).** New
-  `apps/ingestion/src/footprint-aggregator.ts` buckets the live Binance trade stream into
-  per-candle, per-price-row **bid/ask** cells (buyer-aggressed → ask, seller → bid; `unknown`
-  split by the uptick rule — nothing fabricated). `finalizeFootprintBar` computes POC, totals,
-  and the per-cell **imbalance / stacked-imbalance / absorption** flags (3 of the order-flow
-  indicators, now real). Wired through: subscription-manager (`track` on candle-sub, `ingest`
-  on trade) → ingestion context → WS (`market_snapshot.footprint` + real `request_footprint`
-  → `footprint_update`) → `ChartFrame.footprint` + `core.setFootprint` → `FootprintLayer` renders
-  real cells (numbers + imbalance outlines + gold absorption), falling back to the candle-split
-  approximation only where there's no trade feed (Yahoo FX/metals). Web requests footprint on a
-  2.5 s timer while the overlay is on. 3 Vitest cases for the flag logic. **Verified end-to-end on
-  BTCUSDT 1m**: a WS probe returned 16 real bars (sample cell bid 0.599 / ask 0.368, POC 73520);
-  the overlay renders the cells; console clean; typecheck green across all 6 packages.
-- 🧪 **Quality pass (normal mode, caveman off): test suite + working lint + first new indicators.**
-  - **Vitest suite** (`tests/`, `vitest.config.ts`): 26 tests across profile-builder, ma-cross,
-    indicators runner, dd-breaker, portfolio-heat, pnl-attribution, and the new volume indicators —
-    all green. Import pure modules by relative source path to stay out of package tsconfigs.
-  - **ESLint flat config** (`eslint.config.mjs`): `eslint .` now works monorepo-wide (0 errors,
-    22 advisory warnings = pre-existing dead imports + 4 react-hooks/exhaustive-deps). Fixed 3 real
-    `no-useless-assignment` errors (backtester / mt5 bridge / ws-gateway).
-  - **5 new institutional indicators** (real on every symbol & timeframe, never faked):
-    **Relative Volume (RVOL)** — bar volume ÷ prior-N average, sub-pane; **VWAP Bands (σ)** —
-    session/cumulative VWAP with ±σ volume-weighted std-dev bands, overlay; **Initial Balance** —
-    first-hour session high/low as flat per-day reference levels, overlay; **Naked/Virgin POC** —
-    each completed session's volume POC (OHLCV-approx, same as VPVR) drawn forward until price
-    trades back through it, untouched ones extending to now, overlay; **Market Profile / TPO** —
-    per-session time-at-price histogram (POC + value area) as a translucent backdrop behind candles.
-    First four are registry indicators wired into the blank-default dialog + `chart-pane` overlay
-    cases. Market Profile is the first that needed a **new chart-core layer** (`MarketProfileLayer`
-    + `buildMarketProfiles`, a `pane.overlays.marketProfile` flag, self-memoised). 37 tests green.
-    Verified in-browser on BTCUSDT 1m + 1h: all render, recompute on interval change, console clean.
-    (RVOL/VWAP-bands show from 1m; IB / Naked POC / Market Profile need complete sessions → 1h up.)
-    (7 more of the requested 24 to go: the Binance-only order-flow set — bid/ask & stacked imbalance,
-    absorption, DOM ladder, iceberg, whale, Time & Sales — and Open Interest. These need live L2/trade
-    streams or a futures feed, not just candles — a separate lift from the candle-derived set above.)
-  - ⚠️ **Machine-sleep killed the dev servers twice** (laptop idle → USB SSD drops on sleep; on wake
-    the API died and the web server followed it down on `unhandledRejection` from proxy ECONNREFUSED).
-    Recovery each time: remount is automatic, then restart api+web (alert engine reloads on boot).
-    Code + commits were never at risk. If running unattended, disable sleep / keep the SSD powered.
-- 🛑 **Phase 2 #10 — Max-drawdown breaker (Phase 2 COMPLETE).** `dd-breaker.ts` +
-  `routes/breaker.ts`. Watches the day's paper P&L; ≤ −limit → HALTS the signal-runner via
-  an additive `shouldHalt` gate (recipes evaluate, never dispatch — never deleted), Telegram
-  alert on trip, auto-reset at UTC midnight, manual resume holds for the day. Breaker card
-  atop the P&L tab (enable / today P&L / halt-at-% / Resume). Verified: deterministic logic
-  test (trip/no-double-trip/resume-holds/rollover-rearm/disable) + live GET+configure routes.
-  (Browser card shot deferred — chrome-MCP screenshot transport was glitching.)
-- 📈 **Phase 2 #9 — Daily / weekly stat report.** `apps/api/src/stat-report.ts` (pure) +
-  GET `/api/portfolio/report?period=daily|weekly` + POST `/api/portfolio/report/send`.
-  Windows alert fires (`fired_at`) + closed paper trades (`exit_time`) → signals
-  (total/buy/sell + top symbols), paper P&L (realised/open/total, win rate), best/worst
-  strategy lines, active-alert count. `formatReportTelegram()` HTML digest sent via the
-  first enabled bot. UI: **Summary report card** atop the P&L tab (daily/weekly toggle +
-  Telegram button). Verified: weekly = 39 fires (22 buy/17 sell); the send button delivered
-  the digest (toast confirmed). External cron → POST the send route for scheduling.
-- 🌐 **Read-only DEMO mode** (`DEMO_MODE=1` guard, `demo-guard.ts`) + a live **raw** 1-hour
-  demo via two cloudflared quick tunnels (web + API, WS wired through). `DEMO.md` has the
-  run/tunnel/FreeDomain steps. Note: quick tunnels are flaky — the edge connection dropped
-  mid-session (auto-retries; hostname can change). 60-min auto-takedown watchdog armed.
-- 🔌 **WS self-heal**: reconnect on tab-focus/`online`; top-bar live/reconnecting/offline badge.
-- 📊 **Phase 2 #8 — P&L attribution** (`pnl-attribution.ts`) + fixed a latent Phase 1 #5 bug:
-  the zod `delivery` schema was missing `paper`, so the paper-toggle was silently stripped.
+- **Laptop sleep drops the USB SSD → kills dev servers.** Recover: `lsof -ti tcp:4000 | xargs kill -9; lsof -ti tcp:3000 | xargs kill -9` then `pnpm -F @supercharts/api dev &; pnpm -F @supercharts/web dev &` (the tsx watcher's child holds the port; pkill alone leaves it). Code/commits are never at risk; the alert engine reloads on boot.
+- **WS handler effects pin stale overlay flags** (effect dep `[symbol,interval]`) → read the flag from a live ref (the `tapeOnRef`/`domOnRef` pattern), and dedup re-delivered stream rows by id.
+- **Price format ≥ 2 decimals** for ≥1000 prices so adjacent BTC levels don't collapse to one row.
+- Vitest suite in `tests/` (import pure modules by relative source path); ESLint flat config (`eslint.config.mjs`).
+- Feature-video assets live in `~/sc-video/` (final MP4s, Voicebox voice chunks, capture scripts) — **not** in the repo.
 
-## Earlier
+## Recent log
 
-- 🔥 **Phase 2 #7 — Portfolio heat**: correlation matrix + directional concentration +
-  net-currency / asset-class exposure across open positions (or a basket). `portfolio-heat.ts`
-  + `GET /api/portfolio/heat`, day-bucketed cross-provider alignment, Heat tab UI. Verified
-  on a 12-symbol basket (crypto block 0.80–0.95 correlated, net −10 USDT).
-- 📸 **Alert chart photos to Telegram** — every BUY/SELL alert ships a rendered crossover PNG
-  (`alert-chart.ts` via `@napi-rs/canvas`); verified by a live engine fire.
-- 🔴→🟢 Fixed the **cold-start false-alert flood** (`initSubscription()` backfill + watermark).
-- Cleared 108 GB of dev caches off the SSD; reinstalled + rebuilt to bring services back.
-
-## Next pick
-
-**24-indicator request — COMPLETE** (RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market
-Profile/TPO, footprint pipeline + imbalance/stacked/absorption, Time & Sales, DOM ladder, whale,
-Open Interest). Iceberg intentionally folded into the footprint **absorption** flag (a standalone
-detector would be speculative).
-
-### Phase 6 — PulseScript language & code terminal  ← active, build via /loop
-
-**Goal:** SuperCharts' own chart-scripting language + an in-app coding terminal to write & run it.
-**Spec:** `docs/pulsescript-design.md`. **Package:** `packages/script-lang` (`@supercharts/script-lang`).
-**Hard rule:** ORIGINAL language — never reproduce another product's API/identifiers, keywords, or
-syntax. Reuse `@supercharts/indicators` for the TA/math so scripts and chart indicators share one
-tested implementation. Universal domain terms (`sma`, `close`) are fine; structure/declaration
-keywords are ours (`meta`/`let`/`mut`/`persist`/`when`/`draw`/`mark`/`fn`, `#` comments, `{ }` blocks).
-
-Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it here):
-- [x] **1. Lexer** — `src/lexer.ts` + `tokens.ts`. 8 Vitest cases green, package typechecks.
-- [x] **2. AST + parser** — `ast.ts` (typed nodes, every node carries `pos`) + `parser.ts`
-      (recursive-descent + precedence-climbing: meta, let/mut/persist, assign, if/else, when, both
-      `for` forms, `fn` expr+block bodies, draw, mark, member/index/call, named args; `ParseError`
-      with line/col). 10 Vitest cases green, package typechecks.
-- [x] **3. Interpreter core** — `interpreter.ts`: runs the body once per bar; `[]` history via
-      re-evaluating the operand at bar `i-n` against per-bar binding history; let/mut/persist scoping
-      (persist inits once + carries), if/else/when, both `for` forms (with a loop-step cap), user
-      `fn` (expr + block bodies, default params), short-circuit and/or, price series
-      (close/open/high/low/volume/hl2/hlc3/ohlc4/barIndex), `draw line(...)` → plot buffers, `mark` →
-      signals, `meta` read-out. `ta.*`/`math.*` deliberately error "lands in task 4". 10 Vitest cases
-      incl. a history-built 3-bar mean matching `ta.sma`; package typechecks.
-- [x] **4. Stdlib binding** — `src/stdlib.ts`: `math.*` (abs/sign/min/max/floor/ceil/round/sqrt/
-      pow/exp/log/sum/avg) + `ta.*` reusing `@supercharts/indicators` — sma/ema/wma/rma/stdev bound
-      directly, rsi composed from the tested Wilder `rma` (matches the package bar-for-bar),
-      atr/vwap/macd/stoch read the chart candles. Indicators callable **bare** (`ema(close,12)`) or
-      via `ta.`; plus `crossOver`/`crossUnder`/`rising`/`falling`/`change`/`highest`/`lowest` and core
-      `nz`/`na`. Interpreter dispatches namespace + bare calls, builds each series arg over bars 0..i
-      (memoised, causal — no look-ahead), and `draw` grew `hist`/`band` outputs (a `kind` + second
-      edge). 8 new Vitest cases (ema/rsi/atr each match `@supercharts/indicators`) — **36 script-lang
-      tests green, package typechecks**.
-- [x] **5. Inputs** — `collectInputs()` pre-pass walks the whole AST (`exprChildren`/`stmtExprs`)
-      for `input.num/bool/text/source(...)`, assigns a stable id (decl name → slug(title) → `input_N`)
-      and builds `RunResult.inputs: InputDef[]` (the editor's form schema: id/kind/default/title/
-      min/max/step/options). `runScript(src, candles, { inputs })` overrides by id; `input.source`
-      resolves to the chosen price series per bar (shared `priceOf`). Signature `input.<k>(default,
-      title?, min?, max?)` with named-arg override. **Review fixes folded in** (max-effort code-review):
-      num defaults clamp to their own min/max, positional `title` honored, bool defaults coerce like
-      overrides (`1`/`"true"` → true), source validated against `PRICE_SOURCES` (dropped a `{} as
-      Candle` cast). 9 input Vitest cases — **45 script-lang tests green**, typechecks.
-- [ ] **6. Web code terminal** — route/panel with a lazy-loaded CodeMirror 6 editor, Run button,
-      sample script, errors/console pane, inputs panel; run → interpreter → push `draw`/`mark` onto
-      the chart (reuse `IndicatorsLayer` + a markers layer). Browser-verify a real script on BTCUSDT.
-- [ ] **7. Persistence** — save/list/load user scripts (API route + table, like layouts).
-- [ ] **8. Safety** — execution timeout, bar/loop caps, no IO from scripts, line-numbered runtime errors.
-
-Then: Phase 3 · #11 — OANDA token onboarding wizard.
+- 🧬 **PulseScript 1–5 done** (lexer→parser→interpreter→stdlib→inputs; ~45 tests green, typechecks). Next = **task 6, the CodeMirror web terminal** (UI → browser-verify). A max-effort code-review of tasks 4–5 folded fixes in (input default clamping, positional title, bool coercion, source validation) and surfaced the deferred perf/persist follow-up noted above.
+- 🔭 **Order-flow + futures set shipped:** real footprint pipeline (`apps/ingestion/src/footprint-aggregator.ts` → WS → `FootprintLayer`), Time & Sales tape, DOM ladder, Open Interest (`routes/futures.ts`, Binance USD-M, 30s cache). Plus RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market Profile/TPO (`MarketProfileLayer`).
+- 📸 Alerts ship a rendered crossover PNG to Telegram (`alert-chart.ts`); cold-start false-alert flood fixed (backfill + watermark).
 
 ## Questions for owner
 
