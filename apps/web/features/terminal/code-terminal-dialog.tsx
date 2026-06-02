@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2 } from 'lucide-react';
+import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -10,14 +10,25 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { api } from '@/lib/api';
+import { toast } from '@/components/use-toast';
 import { formatSymbolLabel } from '@/lib/format';
 import { useTerminalStore, SAMPLE_PULSE, type PulseResult } from './terminal-store';
 import type { InputDef } from '@supercharts/script-lang';
+
+/** A saved PulseScript row (the list endpoint returns source too). */
+interface SavedScript {
+  id: string;
+  name: string;
+  source: string;
+  updatedAt: number;
+}
 
 // CodeMirror 6 is heavy + browser-only — lazy-load it so it never enters the SSR/initial bundle.
 const CodeMirror = dynamic(() => import('@uiw/react-codemirror').then((m) => m.default), {
@@ -53,6 +64,66 @@ export function CodeTerminalDialog() {
     if (!pane.pulse.enabled) setPulseEnabled(pane.id, true);
   };
 
+  // ── persistence (save / list / load / delete) ──
+  const [saved, setSaved] = useState<SavedScript[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [currentName, setCurrentName] = useState('');
+  const [savePop, setSavePop] = useState(false);
+  const [listPop, setListPop] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+
+  const loadList = useCallback(async (): Promise<void> => {
+    try {
+      const r = await api<{ items: SavedScript[] }>('/scripts');
+      setSaved(r.items);
+    } catch {
+      /* offline — keep quiet */
+    }
+  }, []);
+  useEffect(() => {
+    if (open) void loadList();
+  }, [open, loadList]);
+
+  const doSave = async (): Promise<void> => {
+    const name = nameDraft.trim();
+    if (!name) return;
+    try {
+      if (currentId && name === currentName) {
+        await api(`/scripts/${currentId}`, { method: 'PUT', body: JSON.stringify({ name, source: draft }) });
+      } else {
+        const r = await api<{ id: string }>('/scripts', { method: 'POST', body: JSON.stringify({ name, source: draft }) });
+        setCurrentId(r.id);
+        setCurrentName(name);
+      }
+      setSavePop(false);
+      toast({ title: 'Script saved', description: name, tone: 'success' });
+      void loadList();
+    } catch (err) {
+      toast({ title: 'Could not save script', description: err instanceof Error ? err.message : String(err), tone: 'error' });
+    }
+  };
+
+  const doLoad = (s: SavedScript): void => {
+    setDraft(s.source);
+    setCurrentId(s.id);
+    setCurrentName(s.name);
+    setListPop(false);
+    setPulseSource(pane.id, s.source); // run immediately so console/inputs reflect the loaded script
+  };
+
+  const doDelete = async (id: string): Promise<void> => {
+    try {
+      await api(`/scripts/${id}`, { method: 'DELETE' });
+      if (id === currentId) {
+        setCurrentId(null);
+        setCurrentName('');
+      }
+      void loadList();
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -62,12 +133,69 @@ export function CodeTerminalDialog() {
       </DialogTrigger>
       <DialogContent className="flex max-h-[88vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="flex flex-row items-center justify-between gap-3 border-b border-border px-4 py-2.5">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Code2 className="h-4 w-4 text-accent" />
             <DialogTitle className="text-sm">PulseScript</DialogTitle>
             <Badge tone="muted" className="text-[9px]">{formatSymbolLabel(pane.symbol)} · {pane.interval}</Badge>
+            {currentName ? <Badge tone="accent" className="max-w-[160px] truncate text-[9px]">{currentName}</Badge> : null}
           </div>
-          <div className="flex items-center gap-2 pr-6">
+          <div className="flex items-center gap-1.5 pr-6">
+            <Popover open={listPop} onOpenChange={setListPop}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" title="Open a saved script">
+                  <FolderOpen className="h-3.5 w-3.5" /> Open
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-72 p-1.5">
+                <div className="px-1.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Saved scripts</div>
+                {saved.length === 0 ? (
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">No saved scripts yet.</div>
+                ) : (
+                  <div className="max-h-72 overflow-auto scroll-thin">
+                    {saved.map((s) => (
+                      <div key={s.id} className="group flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
+                        <button className="flex min-w-0 flex-1 flex-col text-left" onClick={() => doLoad(s)}>
+                          <span className="truncate text-foreground">{s.name}</span>
+                          <span className="text-[10px] text-muted-foreground">{new Date(s.updatedAt).toLocaleString()}</span>
+                        </button>
+                        <button
+                          className="rounded p-1 text-muted-foreground opacity-0 transition hover:text-bear group-hover:opacity-100"
+                          title="Delete"
+                          onClick={() => void doDelete(s.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+
+            <Popover open={savePop} onOpenChange={(o) => { setSavePop(o); if (o) setNameDraft(currentName || ''); }}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" title="Save this script">
+                  <Save className="h-3.5 w-3.5" /> Save
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 p-2">
+                <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  {currentId ? 'Update / save as' : 'Save script'}
+                </div>
+                <Input
+                  autoFocus
+                  value={nameDraft}
+                  placeholder="Script name"
+                  className="h-8 text-xs"
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void doSave(); }}
+                />
+                <Button size="sm" className="mt-2 w-full" onClick={() => void doSave()} disabled={!nameDraft.trim()}>
+                  {currentId && nameDraft.trim() === currentName ? 'Update' : 'Save'}
+                </Button>
+              </PopoverContent>
+            </Popover>
+
             <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground" onClick={() => setDraft(SAMPLE_PULSE)} title="Reset to the sample script">
               <RotateCcw className="h-3.5 w-3.5" /> Sample
             </Button>

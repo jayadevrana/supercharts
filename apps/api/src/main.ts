@@ -8,6 +8,7 @@ import { openDB } from './db';
 import { marketRoutes } from './routes/market';
 import { drawingRoutes } from './routes/drawings';
 import { layoutRoutes } from './routes/layouts';
+import { scriptRoutes } from './routes/scripts';
 import { watchlistRoutes } from './routes/watchlists';
 import { newsRoutes } from './routes/news';
 import { billingRoutes } from './routes/billing';
@@ -197,6 +198,7 @@ async function start(): Promise<void> {
   marketRoutes(app, ingestion);
   drawingRoutes(app, db);
   layoutRoutes(app, db);
+  scriptRoutes(app, db);
   watchlistRoutes(app, db);
   newsRoutes(app, db, process.env);
   billingRoutes(app, db, process.env);

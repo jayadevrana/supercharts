@@ -140,6 +140,18 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Saved PulseScript user scripts (Phase 6 task 7).
+    CREATE TABLE IF NOT EXISTS user_scripts (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      source     TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_scripts_user ON user_scripts(user_id, updated_at);
+
     CREATE TABLE IF NOT EXISTS drawing_objects (
       id         TEXT PRIMARY KEY,
       user_id    TEXT NOT NULL,
