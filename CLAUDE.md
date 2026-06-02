@@ -219,9 +219,13 @@ Ordered tasks (do the next unchecked one per loop, verify, commit small, tick it
       (recursive-descent + precedence-climbing: meta, let/mut/persist, assign, if/else, when, both
       `for` forms, `fn` expr+block bodies, draw, mark, member/index/call, named args; `ParseError`
       with line/col). 10 Vitest cases green, package typechecks.
-- [ ] **3. Interpreter core** — bar-by-bar evaluator over `Candle[]`: `Series` + `[]` history,
-      let/mut/persist scoping, arithmetic/logic/if/for, `fn` calls; per-bar output buffers. Test: a
-      script computing SMA matches `ta.sma`.
+- [x] **3. Interpreter core** — `interpreter.ts`: runs the body once per bar; `[]` history via
+      re-evaluating the operand at bar `i-n` against per-bar binding history; let/mut/persist scoping
+      (persist inits once + carries), if/else/when, both `for` forms (with a loop-step cap), user
+      `fn` (expr + block bodies, default params), short-circuit and/or, price series
+      (close/open/high/low/volume/hl2/hlc3/ohlc4/barIndex), `draw line(...)` → plot buffers, `mark` →
+      signals, `meta` read-out. `ta.*`/`math.*` deliberately error "lands in task 4". 10 Vitest cases
+      incl. a history-built 3-bar mean matching `ta.sma`; package typechecks.
 - [ ] **4. Stdlib binding** — `close/open/...`, `ta.*`/`math.*` → `@supercharts/indicators`,
       `crossOver`, `draw`/`mark` capture. Tests.
 - [ ] **5. Inputs** — parse `input.*`, expose an input schema; feed values into a run.
