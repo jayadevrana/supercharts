@@ -284,6 +284,27 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS webhook_endpoints (
+      user_id          TEXT PRIMARY KEY,
+      token            TEXT NOT NULL UNIQUE,
+      forward_telegram INTEGER NOT NULL DEFAULT 0,
+      created_at       INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS webhook_events (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL,
+      received_at INTEGER NOT NULL,
+      symbol      TEXT,
+      action      TEXT,
+      price       REAL,
+      note        TEXT,
+      raw         TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_webhook_events_user ON webhook_events(user_id, received_at);
+
     CREATE TABLE IF NOT EXISTS news_saved_items (
       id       TEXT PRIMARY KEY,
       user_id  TEXT NOT NULL,

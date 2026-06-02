@@ -14,6 +14,7 @@ import { watchlistRoutes } from './routes/watchlists';
 import { newsRoutes } from './routes/news';
 import { calendarRoutes } from './routes/calendar';
 import { customDataRoutes, seedCustomDatasets } from './routes/custom-data';
+import { webhookRoutes } from './routes/webhooks';
 import { billingRoutes } from './routes/billing';
 import { alertRoutes } from './routes/alerts';
 import { preferenceRoutes } from './routes/preferences';
@@ -220,6 +221,7 @@ async function start(): Promise<void> {
   newsRoutes(app, db, process.env);
   calendarRoutes(app);
   customDataRoutes(app, db, ingestion);
+  webhookRoutes(app, db);
   billingRoutes(app, db, process.env);
   preferenceRoutes(app, db);
   mt5Routes(app, db, mt5Store, intentRouter);
