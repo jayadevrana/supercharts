@@ -14,6 +14,7 @@ import {
   SmcLayer,
   IndicatorsLayer,
   MaCrossLayer,
+  EconomicEventsLayer,
   computeMaCross,
   buildVisibleRangeProfile,
   computeSignalsTrendScore,
@@ -39,6 +40,7 @@ import type {
   IndicatorOverlayBand,
   IndicatorOverlayDots,
   IndicatorOverlayLine,
+  EconomicEventMarker,
 } from '@supercharts/chart-core';
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { runScript, type RunResult } from '@supercharts/script-lang';
@@ -762,6 +764,38 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     candleBufRef.current.length,
     candleBufRef.current[candleBufRef.current.length - 1]?.close,
   ]);
+
+  // Economic calendar overlay — push real macro events into the dedicated layer when toggled.
+  // Events are global (not per-symbol) so they're fetched once and shared across panes.
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return;
+    const layer = core.getLayer<EconomicEventsLayer>('economic-events');
+    if (!layer) return;
+    if (!pane.overlays.economicEvents) {
+      if (layer.visible) {
+        layer.visible = false;
+        core.invalidate();
+      }
+      return;
+    }
+    let cancelled = false;
+    layer.visible = true;
+    core.invalidate();
+    void loadEconomicEvents().then((events) => {
+      if (cancelled) return;
+      const live = chartRef.current?.getLayer<EconomicEventsLayer>('economic-events');
+      if (!live) return;
+      live.options = { events, minImpact: 'medium' };
+      live.visible = true;
+      chartRef.current?.invalidate();
+    });
+    return () => {
+      cancelled = true;
+    };
+    // symbol/interval are deps because the ChartCore (and all its layers) is rebuilt on those
+    // changes — without re-running, the overlay would silently drop after a timeframe switch.
+  }, [pane.overlays.economicEvents, pane.symbol, pane.interval]);
 
   // Subscribe to alert_fired so we toast and refresh.
   useEffect(() => {
@@ -1539,6 +1573,19 @@ function applyOverlays(core: ChartCore, pane: PaneState): void {
 }
 
 /** Translucent fill for a PulseScript `band` derived from its line color. */
+// The macro calendar is global (not per-symbol), so fetch it once per page load and share
+// the promise across every pane. Failures resolve to [] — the overlay simply shows nothing,
+// never fabricated events.
+let economicEventsMemo: Promise<EconomicEventMarker[]> | null = null;
+function loadEconomicEvents(): Promise<EconomicEventMarker[]> {
+  if (!economicEventsMemo) {
+    economicEventsMemo = api<{ events: EconomicEventMarker[] }>('/calendar/economic')
+      .then((r) => r.events ?? [])
+      .catch(() => []);
+  }
+  return economicEventsMemo;
+}
+
 function pulseFill(color: string): string {
   if (color.startsWith('#') && (color.length === 7 || color.length === 4)) {
     const hex = color.length === 4 ? color.slice(1).split('').map((c) => c + c).join('') : color.slice(1);

@@ -19,6 +19,7 @@ import { SignalsTrendScoreLayer } from './layers/signals-trend-score';
 import { SmcLayer } from './layers/smc';
 import { IndicatorsLayer } from './layers/indicators';
 import { MaCrossLayer } from './layers/ma-cross';
+import { EconomicEventsLayer } from './layers/economic-events';
 
 export interface ChartCoreOptions {
   canvas: HTMLCanvasElement;
@@ -142,6 +143,15 @@ export class ChartCore {
 
   setTheme(theme: ChartTheme): void {
     this.theme = theme;
+    this.markDirty();
+  }
+
+  /**
+   * Request a repaint on the next animation frame. Callers that mutate a layer's `options`
+   * or `visible` flag directly (e.g. toggling an overlay) call this so the change shows
+   * immediately, rather than waiting for the next live tick to dirty the canvas.
+   */
+  invalidate(): void {
     this.markDirty();
   }
 
@@ -280,6 +290,7 @@ export class ChartCore {
     // classic indicators layer so script overlays sit on top.
     this.registerLayer(new IndicatorsLayer({ id: 'pulse-script', zIndex: 13 }));
     this.registerLayer(new MaCrossLayer());
+    this.registerLayer(new EconomicEventsLayer());
     this.registerLayer(new DrawingLayer());
     this.registerLayer(new CrosshairLayer());
     this.registerLayer(new TooltipLayer());

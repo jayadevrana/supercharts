@@ -12,6 +12,7 @@ import { scriptRoutes } from './routes/scripts';
 import { oandaRoutes } from './routes/oanda';
 import { watchlistRoutes } from './routes/watchlists';
 import { newsRoutes } from './routes/news';
+import { calendarRoutes } from './routes/calendar';
 import { billingRoutes } from './routes/billing';
 import { alertRoutes } from './routes/alerts';
 import { preferenceRoutes } from './routes/preferences';
@@ -211,6 +212,7 @@ async function start(): Promise<void> {
   oandaRoutes(app, db);
   watchlistRoutes(app, db);
   newsRoutes(app, db, process.env);
+  calendarRoutes(app);
   billingRoutes(app, db, process.env);
   preferenceRoutes(app, db);
   mt5Routes(app, db, mt5Store, intentRouter);

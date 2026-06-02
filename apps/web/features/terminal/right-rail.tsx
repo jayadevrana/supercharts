@@ -487,6 +487,12 @@ function OverlaysTab({ pane }: { pane: PaneState }) {
           checked={pane.overlays.signalsTrendScore}
           onChange={() => onToggle('signalsTrendScore')}
         />
+        <OverlayRow
+          label="Economic calendar"
+          description="High/medium-impact macro events as vertical markers"
+          checked={pane.overlays.economicEvents}
+          onChange={() => onToggle('economicEvents')}
+        />
       </div>
       <Separator />
       <StsSettingsBlock pane={pane} />

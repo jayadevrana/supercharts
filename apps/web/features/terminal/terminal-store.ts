@@ -72,6 +72,8 @@ export interface PaneState {
     openInterest: boolean;
     /** "Signals & Trend Score" indicator: MA cloud + ATR trail + Buy/Sell + MTF dashboards. */
     signalsTrendScore: boolean;
+    /** Economic calendar: high/medium-impact macro events as vertical markers. */
+    economicEvents: boolean;
   };
   /** SMC / order-flow indicator toggles. Each maps 1:1 to a SmcLayer flag. */
   smc: {
@@ -218,6 +220,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       domLadder: false,
       openInterest: false,
       signalsTrendScore: false,
+      economicEvents: false,
     },
     smc: {
       fvg: false,

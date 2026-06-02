@@ -9,3 +9,4 @@ export * from './mt5';
 export * from './trading';
 export * from './symbol-catalog';
 export * from './alerts';
+export * from './calendar';

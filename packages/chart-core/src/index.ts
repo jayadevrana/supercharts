@@ -28,3 +28,4 @@ export * from './layers/signals-trend-score';
 export * from './layers/smc';
 export * from './layers/indicators';
 export * from './layers/ma-cross';
+export * from './layers/economic-events';
