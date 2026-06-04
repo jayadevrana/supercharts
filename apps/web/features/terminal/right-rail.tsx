@@ -38,9 +38,10 @@ export function RightRail() {
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/85">
       <Tabs value={rightRailTab} onValueChange={setRightRailTab} className="flex h-full flex-col">
-        <TabsList className="mx-2 mt-3 grid w-auto grid-cols-6 self-stretch text-[10px]">
+        <TabsList className="mx-2 mt-3 grid w-auto grid-cols-7 self-stretch text-[10px]">
           <TabsTrigger value="trade">Trade</TabsTrigger>
           <TabsTrigger value="ind">Ind</TabsTrigger>
+          <TabsTrigger value="data">Data</TabsTrigger>
           <TabsTrigger value="watch">Watch</TabsTrigger>
           <TabsTrigger value="news">News</TabsTrigger>
           <TabsTrigger value="scanner">Scan</TabsTrigger>
@@ -52,6 +53,9 @@ export function RightRail() {
           </TabsContent>
           <TabsContent value="ind" className="h-full overflow-y-auto scroll-thin">
             <IndicatorPanel pane={activePane} />
+          </TabsContent>
+          <TabsContent value="data" className="h-full overflow-y-auto scroll-thin">
+            <DataWindowPanel />
           </TabsContent>
           <TabsContent value="watch" className="h-full overflow-y-auto scroll-thin">
             <WatchlistTab onPick={(s) => setPaneSymbol(activePane.id, s)} active={activePane.symbol} />
@@ -69,6 +73,72 @@ export function RightRail() {
         <DataHealthFooter />
       </Tabs>
     </aside>
+  );
+}
+
+function DataWindowPanel() {
+  const dataWindow = useTerminalStore((s) => s.dataWindow);
+  const activePaneId = useTerminalStore((s) => s.activePaneId);
+  const snap = dataWindow && dataWindow.paneId === activePaneId ? dataWindow : null;
+
+  if (!snap || !snap.ohlcv) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center px-6 py-12 text-center text-sm text-muted-foreground">
+        Hover the chart to read OHLCV and every indicator&apos;s value at that candle. Add indicators from the
+        Indicators dialog and they appear here.
+      </div>
+    );
+  }
+  const o = snap.ohlcv;
+  const sign = o.up ? 'text-bull' : 'text-bear';
+  const time = snap.time
+    ? new Date(snap.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—';
+  const Row = ({ label, value, cls }: { label: string; value: string; cls?: string }) => (
+    <div className="flex items-center justify-between px-3 py-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`tabular-nums ${cls ?? 'text-foreground'}`}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="divide-y divide-border/60">
+      <div className="flex items-center justify-between px-3 py-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        <span>{time}</span>
+        <Badge tone={snap.atCrosshair ? 'accent' : 'muted'} className="text-[9px]">
+          {snap.atCrosshair ? 'crosshair' : 'latest'}
+        </Badge>
+      </div>
+      <div className="py-1">
+        <Row label="Open" value={o.open} />
+        <Row label="High" value={o.high} />
+        <Row label="Low" value={o.low} />
+        <Row label="Close" value={o.close} cls={sign} />
+        <Row label="Change" value={o.change} cls={sign} />
+        <Row label="Change %" value={o.changePct} cls={sign} />
+        <Row label="Volume" value={o.volume} />
+      </div>
+      {snap.indicators.length > 0 ? (
+        <div className="py-1">
+          {snap.indicators.map((ind) => (
+            <div key={ind.id} className="px-3 py-1.5">
+              <div className="mb-0.5 flex items-center gap-1.5">
+                <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ backgroundColor: ind.color }} />
+                <span className="truncate text-[11px] font-medium text-foreground">{ind.name}</span>
+              </div>
+              <div className="space-y-0.5 pl-3.5">
+                {ind.channels.map((ch) => (
+                  <div key={ch.label} className="flex items-center justify-between text-[11px]">
+                    <span className="capitalize text-muted-foreground">{ch.label}</span>
+                    <span className="tabular-nums text-foreground/90">{ch.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

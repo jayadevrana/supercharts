@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import type { ChartType, IndicatorInstance, Interval } from '@supercharts/types';
 import type { InputDef } from '@supercharts/script-lang';
 import { DEFAULT_LAYOUT_ID, getLayout, type PaneLayout } from './layouts';
+import type { DataWindowSnapshot } from './data-window-util';
 
 /** Default PulseScript shown in a fresh code terminal — exercises inputs, ta.*, draw, and marks. */
 export const SAMPLE_PULSE = `# EMA cross study — PulseScript
@@ -180,6 +181,9 @@ interface TerminalStore {
   indicatorSettingsTarget: string | null;
   requestIndicatorSettings: (id: string) => void;
   clearIndicatorSettingsTarget: () => void;
+  /** Data Window snapshot published by the active pane (crosshair candle OHLCV + indicator values). */
+  dataWindow: DataWindowSnapshot | null;
+  setDataWindow: (s: DataWindowSnapshot | null) => void;
   /** Latest PulseScript run result per pane id — written by ChartPane, read by the code terminal. */
   pulseResults: Record<string, PulseResult>;
   setPulseSource: (id: string, source: string) => void;
@@ -402,6 +406,8 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   indicatorSettingsTarget: null,
   requestIndicatorSettings: (id) => set({ rightRailTab: 'ind', indicatorSettingsTarget: id }),
   clearIndicatorSettingsTarget: () => set({ indicatorSettingsTarget: null }),
+  dataWindow: null,
+  setDataWindow: (s) => set({ dataWindow: s }),
 
   pulseResults: {},
   setPulseSource: (id, source) =>

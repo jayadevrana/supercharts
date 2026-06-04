@@ -47,6 +47,7 @@ import { runScript, type RunResult } from '@supercharts/script-lang';
 import { SubPaneIndicators } from './sub-pane-indicators';
 import { IndicatorLegend } from './indicator-legend';
 import { buildLegendRows } from './indicator-legend-util';
+import { buildDataWindow } from './data-window-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
 import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
@@ -132,6 +133,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const updateIndicator = useTerminalStore((s) => s.updateIndicator);
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
   const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
+  const setDataWindow = useTerminalStore((s) => s.setDataWindow);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
@@ -1360,6 +1362,24 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [pane.classicIndicators, legendHoverIdx, legendTick],
   );
+
+  // Data Window (M3): the ACTIVE pane publishes a compact snapshot (crosshair candle OHLCV +
+  // every visible indicator's channel values) to the store; the right-rail Data tab renders it.
+  useEffect(() => {
+    if (!active) return;
+    setDataWindow(
+      buildDataWindow(
+        pane.id,
+        candleBufRef.current,
+        legendHoverIdx,
+        hoverTime != null,
+        pane.classicIndicators,
+        (t) => INDICATOR_LOOKUP[t],
+        indChannelsRef.current,
+      ),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, legendHoverIdx, legendTick, pane.classicIndicators, hoverTime, pane.id, setDataWindow]);
 
   return (
     <div
