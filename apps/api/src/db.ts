@@ -284,6 +284,16 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS strategy_shares (
+      token      TEXT PRIMARY KEY,
+      recipe_id  TEXT NOT NULL,
+      user_id    TEXT NOT NULL,
+      snapshot   TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE (recipe_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS webhook_endpoints (
       user_id          TEXT PRIMARY KEY,
       token            TEXT NOT NULL UNIQUE,

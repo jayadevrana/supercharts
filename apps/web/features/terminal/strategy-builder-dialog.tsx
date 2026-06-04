@@ -8,6 +8,7 @@ import {
   Power,
   Copy,
   Pencil,
+  Share2,
   Layers as LayersIcon,
   Loader2,
 } from 'lucide-react';
@@ -239,6 +240,21 @@ function ActiveList({ onEdit }: { onEdit: (id: string) => void }) {
     }
   };
 
+  const share = async (r: SignalRecipe) => {
+    try {
+      const res = await api<{ path: string }>(`/signals/${r.id}/share`, { method: 'POST' });
+      const url = `${window.location.origin}${res.path}`;
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        /* clipboard may be blocked; the URL is still shown in the toast */
+      }
+      toast({ title: 'Public link copied', description: url, tone: 'success' });
+    } catch (err) {
+      toast({ title: 'Share failed', description: String(err), tone: 'error' });
+    }
+  };
+
   const remove = async (r: SignalRecipe) => {
     if (!window.confirm(`Delete strategy "${r.name}"?`)) return;
     try {
@@ -322,6 +338,15 @@ function ActiveList({ onEdit }: { onEdit: (id: string) => void }) {
             className="px-2"
           >
             <Copy className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void share(r)}
+            title="Copy public share link"
+            className="px-2"
+          >
+            <Share2 className="h-3.5 w-3.5" />
           </Button>
           <Button
             size="sm"
