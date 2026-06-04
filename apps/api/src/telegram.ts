@@ -124,6 +124,36 @@ export async function getTelegramBotInfo(botToken: string): Promise<{ username: 
   };
 }
 
+/**
+ * Read-only `getChat` lookup — used to validate a broadcast channel without sending anything.
+ * Succeeds only if the bot can see the chat (i.e. it's a member/admin of the channel). Throws
+ * with Telegram's own description on failure so the caller can surface a useful message.
+ */
+export async function getTelegramChat(
+  botToken: string,
+  chatId: string,
+): Promise<{ id: number; type: string; title: string; username?: string }> {
+  const res = await fetch(
+    `${TELEGRAM_API}/bot${botToken}/getChat?chat_id=${encodeURIComponent(chatId)}`,
+    { signal: AbortSignal.timeout(SEND_TIMEOUT_MS) },
+  );
+  const parsed = (await res.json().catch(() => ({}))) as {
+    ok?: boolean;
+    description?: string;
+    result?: { id?: number; type?: string; title?: string; username?: string; first_name?: string };
+  };
+  if (!res.ok || !parsed.ok || !parsed.result) {
+    throw new Error(parsed.description ?? `telegram_${res.status}`);
+  }
+  const r = parsed.result;
+  return {
+    id: r.id ?? 0,
+    type: r.type ?? '',
+    title: r.title ?? r.username ?? r.first_name ?? chatId,
+    username: r.username,
+  };
+}
+
 export interface DiscoveredChat {
   chatId: string;
   /** "private" | "group" | "supergroup" | "channel" — useful so the UI can warn when

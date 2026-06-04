@@ -32,6 +32,7 @@ import { CodeTerminalDialog } from './code-terminal-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
 import { ImportCsvDialog } from './import-csv-dialog';
 import { WebhooksDialog } from './webhooks-dialog';
+import { BroadcastDialog } from './broadcast-dialog';
 import type { ChartType, Interval } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 
@@ -193,6 +194,7 @@ export function TerminalTopBar() {
       <CodeTerminalDialog />
       <ImportCsvDialog />
       <div className="ml-auto flex items-center gap-2">
+        <BroadcastDialog />
         <WebhooksDialog />
         <OandaConnectDialog />
         <MT5Chip />

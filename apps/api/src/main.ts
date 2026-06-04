@@ -16,6 +16,7 @@ import { calendarRoutes } from './routes/calendar';
 import { customDataRoutes, seedCustomDatasets } from './routes/custom-data';
 import { webhookRoutes } from './routes/webhooks';
 import { shareRoutes } from './routes/share';
+import { broadcastRoutes } from './routes/broadcast';
 import { billingRoutes } from './routes/billing';
 import { alertRoutes } from './routes/alerts';
 import { preferenceRoutes } from './routes/preferences';
@@ -224,6 +225,7 @@ async function start(): Promise<void> {
   customDataRoutes(app, db, ingestion);
   webhookRoutes(app, db);
   shareRoutes(app, db);
+  broadcastRoutes(app, db);
   billingRoutes(app, db, process.env);
   preferenceRoutes(app, db);
   mt5Routes(app, db, mt5Store, intentRouter);

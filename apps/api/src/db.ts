@@ -284,6 +284,30 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS telegram_channels (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL,
+      bot_id      TEXT NOT NULL,
+      channel_id  TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      verified_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (bot_id) REFERENCES telegram_bots(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_broadcasts (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      text       TEXT NOT NULL,
+      sent_at    INTEGER NOT NULL,
+      ok         INTEGER NOT NULL,
+      error      TEXT,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_tg_broadcasts_chan ON telegram_broadcasts(channel_id, sent_at);
+
     CREATE TABLE IF NOT EXISTS strategy_shares (
       token      TEXT PRIMARY KEY,
       recipe_id  TEXT NOT NULL,
