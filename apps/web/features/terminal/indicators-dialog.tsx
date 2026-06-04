@@ -1,7 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { LineChart, Search } from 'lucide-react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import { LineChart, Search, Star } from 'lucide-react';
 import { INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
 import type { IndicatorInstance } from '@supercharts/types';
 import {
@@ -17,6 +23,17 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { nanoid } from './nanoid';
+import {
+  EMPTY_PREFS,
+  readPrefs,
+  writePrefs,
+  toggleFavorite,
+  pushRecent,
+  isFavorite,
+  type IndicatorPrefs,
+} from './indicator-prefs';
+
+const entryId = (e: Entry): string => (e.kind === 'classic' ? e.type : e.key);
 
 /**
  * Unified "Indicators" dialog (TradingView-style). A fresh chart is blank; the trader
@@ -154,6 +171,9 @@ export function IndicatorsDialog() {
   // readOnly for a beat after open — Chrome won't autofill a readOnly field, and the
   // auto-focus lands during that window. Becomes editable right after.
   const [searchReady, setSearchReady] = useState(false);
+  const [prefs, setPrefs] = useState<IndicatorPrefs>(EMPTY_PREFS);
+  const [focusIdx, setFocusIdx] = useState(0);
+
   const onOpenChange = (v: boolean) => {
     setOpen(v);
     if (!v) setQ('');
@@ -163,9 +183,22 @@ export function IndicatorsDialog() {
       setSearchReady(false);
       return;
     }
+    setPrefs(readPrefs());
+    setFocusIdx(0);
     const t = setTimeout(() => setSearchReady(true), 450);
     return () => clearTimeout(t);
   }, [open]);
+
+  // Functional updater so rapid successive toggles (e.g. starring several rows quickly) compose
+  // off the latest state instead of a stale render closure. Persist the freshly-derived value.
+  const persist = (update: (p: IndicatorPrefs) => IndicatorPrefs): void => {
+    setPrefs((prev) => {
+      const next = update(prev);
+      writePrefs(next);
+      return next;
+    });
+  };
+
   const activePaneId = useTerminalStore((s) => s.activePaneId);
   const pane = useTerminalStore((s) => s.panes.find((p) => p.id === activePaneId) ?? s.panes[0]!);
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
@@ -182,22 +215,27 @@ export function IndicatorsDialog() {
   };
 
   const toggle = (e: Entry): void => {
+    const willActivate = !isActive(e);
     if (e.kind === 'overlay') {
       togglePaneOverlay(pane.id, e.key);
-      return;
-    }
-    if (e.kind === 'smc') {
+    } else if (e.kind === 'smc') {
       toggleSmcOverlay(pane.id, e.key);
-      return;
-    }
-    // classic: one-instance-per-type toggle (advanced multi-instance lives in the Ind rail)
-    const existing = pane.classicIndicators.filter((i) => i.type === e.type);
-    if (existing.length > 0) {
-      existing.forEach((i) => removeIndicator(pane.id, i.id));
     } else {
-      const spec = INDICATOR_LOOKUP[e.type];
-      if (spec) addIndicator(pane.id, buildInstance(spec));
+      // classic: one-instance-per-type toggle (advanced multi-instance lives in the Ind rail)
+      const existing = pane.classicIndicators.filter((i) => i.type === e.type);
+      if (existing.length > 0) existing.forEach((i) => removeIndicator(pane.id, i.id));
+      else {
+        const spec = INDICATOR_LOOKUP[e.type];
+        if (spec) addIndicator(pane.id, buildInstance(spec));
+      }
     }
+    // Track in "recently used" the moment an indicator is switched on.
+    if (willActivate) persist((p) => pushRecent(p, entryId(e)));
+  };
+
+  const star = (e: Entry, ev: ReactMouseEvent): void => {
+    ev.stopPropagation();
+    persist((p) => toggleFavorite(p, entryId(e)));
   };
 
   const activeCount = useMemo(() => {
@@ -207,16 +245,70 @@ export function IndicatorsDialog() {
   }, [pane]);
 
   const lower = q.trim().toLowerCase();
-  const groups = useMemo(
-    () =>
-      CATALOG.map((g) => ({
-        group: g.group,
-        items: g.items.filter(
-          (e) => !lower || e.label.toLowerCase().includes(lower) || e.desc.toLowerCase().includes(lower) || g.group.toLowerCase().includes(lower),
-        ),
-      })).filter((g) => g.items.length > 0),
-    [lower],
-  );
+  const byId = useMemo(() => {
+    const m = new Map<string, Entry>();
+    for (const g of CATALOG) for (const e of g.items) m.set(entryId(e), e);
+    return m;
+  }, []);
+
+  const matches = (e: Entry, group: string): boolean =>
+    !lower ||
+    e.label.toLowerCase().includes(lower) ||
+    e.desc.toLowerCase().includes(lower) ||
+    group.toLowerCase().includes(lower);
+
+  // Sections in render + keyboard-focus order. Favorites and Recently-used lead, but only when
+  // not searching (a search should reveal the full filtered catalog, not a partial pinned view).
+  const sections = useMemo(() => {
+    const out: { id: string; title: string; rows: { key: string; entry: Entry }[] }[] = [];
+    if (!lower) {
+      const fav = prefs.favorites
+        .map((id) => byId.get(id))
+        .filter((e): e is Entry => Boolean(e))
+        .map((e) => ({ key: `fav:${entryId(e)}`, entry: e }));
+      if (fav.length) out.push({ id: 'fav', title: '★ Favorites', rows: fav });
+      const recent = prefs.recent
+        .map((id) => byId.get(id))
+        .filter((e): e is Entry => Boolean(e))
+        .map((e) => ({ key: `recent:${entryId(e)}`, entry: e }));
+      if (recent.length) out.push({ id: 'recent', title: 'Recently used', rows: recent });
+    }
+    for (const g of CATALOG) {
+      const rows = g.items
+        .filter((e) => matches(e, g.group))
+        .map((e) => ({ key: `grp:${g.group}:${entryId(e)}`, entry: e }));
+      if (rows.length) out.push({ id: `grp:${g.group}`, title: g.group, rows });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lower, prefs, byId]);
+
+  const flatRows = useMemo(() => sections.flatMap((s) => s.rows), [sections]);
+  useEffect(() => {
+    setFocusIdx((i) => Math.min(Math.max(0, i), Math.max(0, flatRows.length - 1)));
+  }, [flatRows.length]);
+  // Keep the keyboard-focused row scrolled into view.
+  useEffect(() => {
+    const r = flatRows[focusIdx];
+    if (!r || typeof document === 'undefined') return;
+    document.querySelector(`[data-rowkey="${CSS.escape(r.key)}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [focusIdx, flatRows]);
+
+  const onSearchKeyDown = (ev: ReactKeyboardEvent): void => {
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      setFocusIdx((i) => Math.min(i + 1, flatRows.length - 1));
+    } else if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      setFocusIdx((i) => Math.max(i - 1, 0));
+    } else if (ev.key === 'Enter') {
+      ev.preventDefault();
+      const r = flatRows[focusIdx];
+      if (r) toggle(r.entry);
+    }
+  };
+
+  const focusedKey = flatRows[focusIdx]?.key;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -237,8 +329,9 @@ export function IndicatorsDialog() {
             <span className="text-xs font-normal text-muted-foreground">· {pane.symbol.split(':')[1] ?? pane.symbol} · {pane.interval}</span>
           </DialogTitle>
           <p className="text-xs text-muted-foreground">
-            Toggle any indicator on the active chart. Order-flow tools (heatmap, footprint, delta, CVD)
-            need live trade data — Binance crypto only; on FX/metals they show no data rather than fake it.
+            Toggle any indicator on the active chart. <span className="text-foreground">↑ ↓</span> to navigate ·{' '}
+            <span className="text-foreground">Enter</span> to add · <span className="text-foreground">★</span> to favorite.
+            Order-flow tools need live trade data — Binance crypto only.
           </p>
         </DialogHeader>
 
@@ -255,28 +348,35 @@ export function IndicatorsDialog() {
               readOnly={!searchReady}
               placeholder="Search indicators…"
               value={q}
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => {
+                setQ(e.target.value);
+                setFocusIdx(0);
+              }}
+              onKeyDown={onSearchKeyDown}
               className="h-9 pl-8"
             />
           </div>
         </div>
 
         <div className="max-h-[56vh] space-y-4 overflow-y-auto scroll-thin px-4 pb-2 pt-3">
-          {groups.length === 0 ? (
+          {sections.length === 0 ? (
             <div className="py-8 text-center text-sm text-muted-foreground">No indicators match “{q}”.</div>
           ) : (
-            groups.map((g) => (
-              <div key={g.group}>
+            sections.map((s) => (
+              <div key={s.id}>
                 <div className="mb-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                  {g.group}
+                  {s.title}
                 </div>
                 <div className="space-y-1">
-                  {g.items.map((e) => {
+                  {s.rows.map(({ key, entry: e }) => {
                     const active = isActive(e);
                     const needsData = 'orderflow' in e && e.orderflow && !isCrypto;
+                    const fav = isFavorite(prefs, entryId(e));
+                    const focused = key === focusedKey;
                     return (
                       <div
-                        key={e.kind === 'classic' ? e.type : e.key}
+                        key={key}
+                        data-rowkey={key}
                         role="button"
                         tabIndex={0}
                         onClick={() => toggle(e)}
@@ -286,9 +386,9 @@ export function IndicatorsDialog() {
                             toggle(e);
                           }
                         }}
-                        className={`flex w-full cursor-pointer items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
-                          active ? 'border-accent/50 bg-accent/10' : 'border-border/60 bg-card/40 hover:border-border'
-                        }`}
+                        className={`flex w-full cursor-pointer items-center justify-between gap-2 rounded-md border px-3 py-2 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                          focused ? 'ring-1 ring-accent' : ''
+                        } ${active ? 'border-accent/50 bg-accent/10' : 'border-border/60 bg-card/40 hover:border-border'}`}
                       >
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5">
@@ -303,8 +403,19 @@ export function IndicatorsDialog() {
                             {needsData ? 'No live order-flow on this feed (Binance crypto only).' : e.desc}
                           </div>
                         </div>
-                        {/* Display-only — the row owns the toggle (avoids double-fire + button-in-button). */}
-                        <Switch checked={active} className="pointer-events-none shrink-0" />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            title={fav ? 'Remove from favorites' : 'Add to favorites'}
+                            aria-label={fav ? 'Remove from favorites' : 'Add to favorites'}
+                            onClick={(ev) => star(e, ev)}
+                            className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            <Star className={`h-3.5 w-3.5 ${fav ? 'fill-current text-warn' : ''}`} />
+                          </button>
+                          {/* Display-only — the row owns the toggle (avoids double-fire + button-in-button). */}
+                          <Switch checked={active} className="pointer-events-none" />
+                        </div>
                       </div>
                     );
                   })}
