@@ -36,13 +36,17 @@ export function ema(values: readonly number[], length: number): number[] {
   const out = new Array<number>(values.length).fill(NaN);
   if (length <= 0 || values.length === 0) return out;
   const k = 2 / (length + 1);
-  // Seed with the first SMA so the warm-up phase converges cleanly.
+  // Skip a leading NaN warm-up prefix so an EMA *of a derived series* (e.g. the MACD line, whose
+  // first `slow-1` bars are NaN) seeds from real data instead of propagating NaN forever. With no
+  // prefix (a plain price series) `start` is 0 and this is identical to seeding on the first SMA.
+  let start = 0;
+  while (start < values.length && !Number.isFinite(values[start]!)) start += 1;
+  if (values.length - start < length) return out;
   let seed = 0;
-  for (let i = 0; i < Math.min(length, values.length); i++) seed += values[i]!;
-  if (values.length < length) return out;
+  for (let i = start; i < start + length; i++) seed += values[i]!;
   let prev = seed / length;
-  out[length - 1] = prev;
-  for (let i = length; i < values.length; i++) {
+  out[start + length - 1] = prev;
+  for (let i = start + length; i < values.length; i++) {
     prev = values[i]! * k + prev * (1 - k);
     out[i] = prev;
   }
