@@ -90,7 +90,18 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 `if`/`when`/`for` now resumes from its last *defined* value instead of going NaN. Plus small cleanups
 (dropped redundant `clean()`, shared `priceFromCandle`). script-lang now 50 tests, typechecks.
 
-**Phase 6 done**; **Phase 3 COMPLETE**; Phase 4 · #16–#17 done → next active is **Phase 4 · #18 (embedded iframe charts)**.
+### MISSION — TradingView-style indicator system (ACTIVE)
+**Goal:** extend the EXISTING indicator system to a TradingView-grade add/configure/view experience — not a rebuild.
+**Already exists (DO NOT REBUILD, only extend):** registry of 38 indicators (`@supercharts/indicators` `registry.ts` + `computeAll` runner, unit-tested) · indicator browser (`indicators-dialog.tsx`) · right-rail panel (`indicator-panel.tsx`: list/add/settings/hide/delete) · canvas overlays (`IndicatorsLayer` — lines/bands/dots) + sub-pane oscillators (`sub-pane-indicators.tsx` — lines/histograms/reference bands) · crosshair OHLCV tooltip (`layers/tooltip.ts`, `ChartCore.onCrosshair`) · per-pane `classicIndicators[]` store + `indicator_layouts` persistence (`routes/indicators.ts`) · **PulseScript** (`@supercharts/script-lang`, complete original Pine-like language + CodeMirror editor + `user_scripts`) · alerts (MA-cross engine + `SignalCondition` union: indicator_compare/price_crosses/session/time_window/pattern).
+**Rules:** ADD only — never remove/break a working feature; reuse `@supercharts/indicators`; never fabricate market data; never break the live alerts/Telegram config. One increment → verify (typecheck touched packages + relevant Vitest + browser screenshot on /terminal) → commit small → tick here.
+- [x] M1. **Browser favorites + recently-used + keyboard nav** — star/persist (localStorage `indicator-prefs.ts`, 6 tests), Recently-used (cap 12), ↑/↓/Enter focus nav. Browser-verified incl. persistence across reload. (commit `2b4c537`)
+- [ ] M2. On-chart **indicator legend / status line** (top-left per pane): each visible indicator → name + input summary + colour swatch + live value at the crosshair candle (latest when no crosshair) + eye(visibility)/gear(settings)/× controls.
+- [ ] M3. **Data Window** panel — OHLCV (+ change/%) and every visible indicator's plot values at the crosshair candle; latest when crosshair off; "—" for warmup/NaN.
+- [ ] M4. Indicator **settings as a tabbed modal** (Inputs / Style / Visibility / Scale / About) + **multi-instance** (EMA, EMA 2, EMA 3…) + **duplicate** + **reorder** (up/down + keyboard) in the right-rail manager.
+- [ ] M5. **Create alert from an indicator** — wire `indicator_compare` / `price_crosses` (a plot crossing a level or another plot) into an alert, launched from the legend/settings; reuse the alert engine, don't break MA-cross.
+- [ ] M6. **Drag-and-drop** — drag from browser → chart (overlay vs new pane drop zones), drag legend rows to reorder / move pane, drag the pane separator to resize; keyboard/menu fallbacks for all.
+
+**Phase 6 done**; **Phase 3 COMPLETE**; Phase 4 · #16–#17 done. **Active focus: the indicator-system MISSION above** (roadmap Phase 4 · #18 is deferred).
 
 ## Working agreement (for Claude loop)
 
