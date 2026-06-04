@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Settings2, Trash2, Eye, EyeOff, LineChart } from 'lucide-react';
 import { INDICATOR_REGISTRY, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
 import type { IndicatorInstance } from '@supercharts/types';
@@ -21,10 +21,21 @@ export function IndicatorPanel({ pane }: Props) {
   const addIndicator = useTerminalStore((s) => s.addIndicator);
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
   const updateIndicator = useTerminalStore((s) => s.updateIndicator);
+  const settingsTarget = useTerminalStore((s) => s.indicatorSettingsTarget);
+  const clearSettingsTarget = useTerminalStore((s) => s.clearIndicatorSettingsTarget);
 
   const active = pane.classicIndicators;
   const editingInst = active.find((i) => i.id === editing) ?? null;
   const editingSpec = editingInst ? INDICATOR_LOOKUP[editingInst.type] ?? null : null;
+
+  // The on-chart legend gear (or anything else) can request an instance's settings: open its
+  // editor here and consume the request so it doesn't re-fire.
+  useEffect(() => {
+    if (settingsTarget && active.some((i) => i.id === settingsTarget)) {
+      setEditing(settingsTarget);
+      clearSettingsTarget();
+    }
+  }, [settingsTarget, active, clearSettingsTarget]);
 
   return (
     <div className="space-y-3 p-3 text-xs">

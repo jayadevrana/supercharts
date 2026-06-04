@@ -31,11 +31,13 @@ interface TopMover {
 
 export function RightRail() {
   const { panes, activePaneId, setPaneSymbol } = useTerminalStore();
+  const rightRailTab = useTerminalStore((s) => s.rightRailTab);
+  const setRightRailTab = useTerminalStore((s) => s.setRightRailTab);
   const activePane = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
 
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/85">
-      <Tabs defaultValue="trade" className="flex h-full flex-col">
+      <Tabs value={rightRailTab} onValueChange={setRightRailTab} className="flex h-full flex-col">
         <TabsList className="mx-2 mt-3 grid w-auto grid-cols-6 self-stretch text-[10px]">
           <TabsTrigger value="trade">Trade</TabsTrigger>
           <TabsTrigger value="ind">Ind</TabsTrigger>

@@ -45,6 +45,8 @@ import type {
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { runScript, type RunResult } from '@supercharts/script-lang';
 import { SubPaneIndicators } from './sub-pane-indicators';
+import { IndicatorLegend } from './indicator-legend';
+import { buildLegendRows } from './indicator-legend-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
 import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
@@ -127,12 +129,21 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const replayCursor = useTerminalStore((s) => s.replayCursor);
   const setReplayBounds = useTerminalStore((s) => s.setReplayBounds);
   const setPulseResult = useTerminalStore((s) => s.setPulseResult);
+  const updateIndicator = useTerminalStore((s) => s.updateIndicator);
+  const removeIndicator = useTerminalStore((s) => s.removeIndicator);
+  const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
   const activeRef = useRef<boolean>(active);
   drawToolRef.current = drawTool;
   activeRef.current = active;
+  // On-chart indicator legend (M2): per-instance computed channels live in a ref (large arrays
+  // stay out of React state); `legendTick` bumps a re-render when they recompute, and `hoverTime`
+  // tracks the crosshair candle so the legend shows that bar's values (latest when off-chart).
+  const indChannelsRef = useRef<Map<string, Record<string, number[]>>>(new Map());
+  const [legendTick, setLegendTick] = useState(0);
+  const [hoverTime, setHoverTime] = useState<number | null>(null);
 
   // Initial mount: create chart, load historical, subscribe.
   useEffect(() => {
@@ -526,6 +537,35 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     }
     return undefined;
   }, [syncCrosshair, active, setCrosshairTime]);
+
+  // Legend (M2): always-on crosshair subscription so the on-chart legend can show the hovered
+  // bar's indicator values. Re-subscribes when the ChartCore is rebuilt (symbol/interval change).
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return undefined;
+    return core.onCrosshair((s) => setHoverTime(s.time));
+  }, [pane.symbol, pane.interval]);
+
+  // Legend (M2): recompute each visible classic indicator's channels into a ref whenever the
+  // indicator set or candles change. Cheap (reuses @supercharts/indicators); kept out of state.
+  useEffect(() => {
+    const bars = candleBufRef.current;
+    const next = new Map<string, Record<string, number[]>>();
+    for (const inst of pane.classicIndicators) {
+      if (!inst.visible) continue;
+      const spec = INDICATOR_LOOKUP[inst.type];
+      if (!spec) continue;
+      const inputs = Object.fromEntries(spec.inputs.map((i) => [i.key, inst.inputs[i.key] ?? i.default]));
+      try {
+        next.set(inst.id, Object.fromEntries(computeAll(inst.type, bars, inputs).entries()));
+      } catch {
+        /* a single indicator failing must not break the legend */
+      }
+    }
+    indChannelsRef.current = next;
+    setLegendTick((t) => t + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.classicIndicators, candleBufRef.current.length, candleBufRef.current[candleBufRef.current.length - 1]?.close]);
 
   useEffect(() => {
     const core = chartRef.current;
@@ -1297,6 +1337,30 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.id, pane.pulse.enabled, pane.pulse.source, pane.pulse.runToken, pane.pulse.inputValues, candleBufRef.current.length]);
 
+  // Legend (M2): candle index under the crosshair (latest when off-chart), then the rows.
+  const legendHoverIdx = useMemo(() => {
+    const bars = candleBufRef.current;
+    if (bars.length === 0) return -1;
+    if (hoverTime == null) return bars.length - 1;
+    let lo = 0;
+    let hi = bars.length - 1;
+    let ans = bars.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid]!.openTime <= hoverTime) {
+        ans = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return ans;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverTime, legendTick, candleBufRef.current.length]);
+  const legendRows = useMemo(
+    () => buildLegendRows(pane.classicIndicators, (t) => INDICATOR_LOOKUP[t], indChannelsRef.current, legendHoverIdx),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pane.classicIndicators, legendHoverIdx, legendTick],
+  );
+
   return (
     <div
       onClick={onClick}
@@ -1327,6 +1391,16 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           data-testid="chart-canvas"
           ref={canvasRef}
           className="absolute inset-0 h-full w-full"
+        />
+        <IndicatorLegend
+          rows={legendRows}
+          atCrosshair={hoverTime != null}
+          onToggleVisible={(id) => {
+            const inst = pane.classicIndicators.find((i) => i.id === id);
+            if (inst) updateIndicator(pane.id, id, { visible: !inst.visible });
+          }}
+          onSettings={(id) => requestIndicatorSettings(id)}
+          onRemove={(id) => removeIndicator(pane.id, id)}
         />
         {loading && !loadError ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-[2px]">

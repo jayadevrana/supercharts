@@ -173,6 +173,13 @@ interface TerminalStore {
   setShowRightRail: (v: boolean) => void;
   setShowBottomPanel: (v: boolean) => void;
   setSyncCrosshair: (v: boolean) => void;
+  /** Controlled right-rail tab so other UI can switch to it (e.g. the on-chart legend gear → Ind). */
+  rightRailTab: string;
+  setRightRailTab: (tab: string) => void;
+  /** When set, the Ind panel auto-opens that instance's settings editor, then clears this. */
+  indicatorSettingsTarget: string | null;
+  requestIndicatorSettings: (id: string) => void;
+  clearIndicatorSettingsTarget: () => void;
   /** Latest PulseScript run result per pane id — written by ChartPane, read by the code terminal. */
   pulseResults: Record<string, PulseResult>;
   setPulseSource: (id: string, source: string) => void;
@@ -390,6 +397,11 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   setShowRightRail: (v) => set({ showRightRail: v }),
   setShowBottomPanel: (v) => set({ showBottomPanel: v }),
   setSyncCrosshair: (v) => set({ syncCrosshair: v }),
+  rightRailTab: 'trade',
+  setRightRailTab: (tab) => set({ rightRailTab: tab }),
+  indicatorSettingsTarget: null,
+  requestIndicatorSettings: (id) => set({ rightRailTab: 'ind', indicatorSettingsTarget: id }),
+  clearIndicatorSettingsTarget: () => set({ indicatorSettingsTarget: null }),
 
   pulseResults: {},
   setPulseSource: (id, source) =>
