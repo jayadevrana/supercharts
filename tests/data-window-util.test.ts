@@ -55,6 +55,12 @@ describe('buildDataWindow', () => {
     ]);
   });
 
+  it('marks a down bar bearish with a negative change + percent', () => {
+    const down = [candle({ openTime: 1, close: 110 }), candle({ openTime: 2, open: 110, close: 102 })];
+    const snap = buildDataWindow('p0', down, 1, true, [], specOf, new Map());
+    expect(snap.ohlcv).toMatchObject({ close: '102', change: '-8', changePct: '-7.27%', up: false });
+  });
+
   it('falls back to open when there is no previous bar', () => {
     const snap = buildDataWindow('p0', bars, 0, false, [], specOf, new Map());
     expect(snap.ohlcv?.change).toBe('+0'); // close 100 vs open 100

@@ -22,6 +22,21 @@ describe('ema over a NaN-prefixed series (regression)', () => {
     expect(out[1]).toBeNaN();
     expect(out[2]).toBeCloseTo(2, 6); // SMA seed of [1,2,3]
   });
+  it('returns all-NaN for all-NaN or too-short input', () => {
+    expect(ema([NaN, NaN, NaN], 2).every((v) => Number.isNaN(v))).toBe(true);
+    expect(ema([1, 2], 5).every((v) => Number.isNaN(v))).toBe(true);
+  });
+  it('holds the last value through a post-warmup gap instead of blanking the tail', () => {
+    const g = ema([10, 11, 12, NaN, 14, 15], 2);
+    expect(Number.isFinite(g[3]!)).toBe(true); // gap holds prev
+    expect(Number.isFinite(g[5]!)).toBe(true); // tail stays finite
+  });
+  it('seeds on the next clean window when a gap falls inside the first one', () => {
+    const w = ema([10, NaN, 12, 13, 14, 15], 2);
+    expect(w[2]).toBeNaN(); // window [0,2) had a NaN → skipped
+    expect(Number.isFinite(w[3]!)).toBe(true); // seeded on [2,4)
+    expect(Number.isFinite(w[5]!)).toBe(true);
+  });
 });
 
 describe('computeAll macd', () => {

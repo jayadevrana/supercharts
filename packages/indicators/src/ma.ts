@@ -36,19 +36,32 @@ export function ema(values: readonly number[], length: number): number[] {
   const out = new Array<number>(values.length).fill(NaN);
   if (length <= 0 || values.length === 0) return out;
   const k = 2 / (length + 1);
-  // Skip a leading NaN warm-up prefix so an EMA *of a derived series* (e.g. the MACD line, whose
-  // first `slow-1` bars are NaN) seeds from real data instead of propagating NaN forever. With no
-  // prefix (a plain price series) `start` is 0 and this is identical to seeding on the first SMA.
+  // Seed on the first window of `length` consecutive finite values, so an EMA *of a derived
+  // series* (e.g. the MACD line, whose first `slow-1` bars are NaN) seeds on real data instead of
+  // propagating NaN. With a plain finite series the window is [0,length) — identical to the usual
+  // first-SMA seed at index length-1. After seeding, a stray NaN holds the last EMA rather than
+  // poisoning the rest of the series, so a mid-series data gap doesn't blank the tail.
   let start = 0;
-  while (start < values.length && !Number.isFinite(values[start]!)) start += 1;
-  if (values.length - start < length) return out;
-  let seed = 0;
-  for (let i = start; i < start + length; i++) seed += values[i]!;
-  let prev = seed / length;
-  out[start + length - 1] = prev;
-  for (let i = start + length; i < values.length; i++) {
-    prev = values[i]! * k + prev * (1 - k);
-    out[i] = prev;
+  while (start <= values.length - length) {
+    let sum = 0;
+    let clean = true;
+    for (let j = start; j < start + length; j += 1) {
+      if (!Number.isFinite(values[j]!)) {
+        start = j + 1;
+        clean = false;
+        break;
+      }
+      sum += values[j]!;
+    }
+    if (!clean) continue;
+    let prev = sum / length;
+    out[start + length - 1] = prev;
+    for (let i = start + length; i < values.length; i += 1) {
+      const v = values[i]!;
+      if (Number.isFinite(v)) prev = v * k + prev * (1 - k);
+      out[i] = prev;
+    }
+    return out;
   }
   return out;
 }

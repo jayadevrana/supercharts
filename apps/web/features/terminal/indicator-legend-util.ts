@@ -31,6 +31,9 @@ export function legendColor(spec: IndicatorSpec, inst: IndicatorInstance): strin
     'conversionColor',
     'kColor',
     'adxColor',
+    'baseColor',
+    'signalColor',
+    'bandColor',
     'lineColor',
   ];
   for (const k of keys) {
@@ -40,12 +43,16 @@ export function legendColor(spec: IndicatorSpec, inst: IndicatorInstance): strin
   return '#9aa4b2';
 }
 
-/** Adaptive numeric formatting for legend / data-window values. Non-finite → an em dash. */
+/**
+ * Adaptive numeric formatting for legend / data-window values. Non-finite → an em dash.
+ * Pinned to en-US so display (and tests) are deterministic regardless of the runtime locale —
+ * a charting terminal wants consistent `1,234.56` formatting, not the OS locale's separators.
+ */
 export function formatIndicatorValue(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return '—';
   const abs = Math.abs(v);
   const decimals = abs >= 100 ? 2 : abs >= 1 ? 3 : abs >= 0.01 ? 5 : 8;
-  return v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimals });
+  return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: decimals });
 }
 
 export interface LegendRow {

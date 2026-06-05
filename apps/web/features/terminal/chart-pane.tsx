@@ -134,6 +134,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
   const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
   const setDataWindow = useTerminalStore((s) => s.setDataWindow);
+  const rightRailTab = useTerminalStore((s) => s.rightRailTab);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
@@ -1365,8 +1366,10 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
 
   // Data Window (M3): the ACTIVE pane publishes a compact snapshot (crosshair candle OHLCV +
   // every visible indicator's channel values) to the store; the right-rail Data tab renders it.
+  // Only published while the Data tab is open — no point writing the store on every tick otherwise
+  // (switching to the tab re-runs this via the rightRailTab dep, so it populates immediately).
   useEffect(() => {
-    if (!active) return;
+    if (!active || rightRailTab !== 'data') return;
     setDataWindow(
       buildDataWindow(
         pane.id,
@@ -1379,7 +1382,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       ),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, legendHoverIdx, legendTick, pane.classicIndicators, hoverTime, pane.id, setDataWindow]);
+  }, [active, rightRailTab, legendHoverIdx, legendTick, pane.classicIndicators, hoverTime, pane.id, setDataWindow]);
 
   return (
     <div
