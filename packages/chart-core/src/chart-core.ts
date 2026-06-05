@@ -255,6 +255,33 @@ export class ChartCore {
   }
 
   /**
+   * The exact time→x projection the canvas is drawing with, so React-rendered panes below the
+   * chart (e.g. oscillator sub-panes) can map a candle to the SAME x pixel:
+   *   x = plotWidth - (rightTime - t) * pxPerMs   (== TimeScale.timeToX)
+   * `plotWidth` is the candle plotting area (excludes the right price-axis gutter); `totalWidth`
+   * is the full canvas width, so a sibling SVG can reserve the same gutter and stay aligned.
+   */
+  getTimeProjection(): {
+    fromTime: number;
+    toTime: number;
+    rightTime: number;
+    pxPerMs: number;
+    plotWidth: number;
+    totalWidth: number;
+  } {
+    const s = this.timeScale.state;
+    const { fromTime, toTime } = this.timeScale.visibleRange();
+    return {
+      fromTime,
+      toTime,
+      rightTime: s.rightTime,
+      pxPerMs: s.pxPerMs,
+      plotWidth: this.geometry.pricePane.width,
+      totalWidth: this.geometry.width,
+    };
+  }
+
+  /**
    * Sync a crosshair time from an external pane. The chart draws a soft vertical line
    * at this time as long as there is no local crosshair.
    */

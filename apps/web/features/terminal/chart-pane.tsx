@@ -44,7 +44,7 @@ import type {
 } from '@supercharts/chart-core';
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { runScript, type RunResult } from '@supercharts/script-lang';
-import { SubPaneIndicators } from './sub-pane-indicators';
+import { SubPaneIndicators, type SubPaneView } from './sub-pane-indicators';
 import { IndicatorLegend } from './indicator-legend';
 import { buildLegendRows } from './indicator-legend-util';
 import { buildDataWindow } from './data-window-util';
@@ -147,6 +147,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const indChannelsRef = useRef<Map<string, Record<string, number[]>>>(new Map());
   const [legendTick, setLegendTick] = useState(0);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+  // Bumped (debounced via the chart's range-change callback) when the visible range pans/zooms,
+  // so the React-rendered oscillator sub-panes re-read the chart's time projection and stay aligned.
+  const [subTick, setSubTick] = useState(0);
 
   // Initial mount: create chart, load historical, subscribe.
   useEffect(() => {
@@ -167,6 +170,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         return Boolean(t && t !== 'cursor' && t !== 'crosshair' && activeRef.current);
       },
       onVisibleRangeChange: ({ fromTime, toTime }) => {
+        // Re-align the oscillator sub-panes to the new pan/zoom window (this callback is already
+        // debounced ~120ms in ChartCore, so this is a cheap, throttled re-render trigger).
+        setSubTick((t) => t + 1);
         // Trigger progressive history load if the user has panned near or past the oldest
         // candle we've fetched so far. This pulls another window of equal duration from
         // the API and prepends it to the buffer.
@@ -1364,6 +1370,16 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     [pane.classicIndicators, legendHoverIdx, legendTick],
   );
 
+  // Live time→x projection mirrored from the chart so the oscillator sub-panes share its axis.
+  // Recomputes on pan/zoom (subTick), crosshair move (hoverTime), data load (loading) and new
+  // bars (legendTick / buffer length). Reading the ref here is safe — it's set on mount and these
+  // deps cover every change that moves the projection.
+  const subView = useMemo<SubPaneView | null>(
+    () => chartRef.current?.getTimeProjection() ?? null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [subTick, hoverTime, legendTick, loading, pane.symbol, pane.interval, candleBufRef.current.length],
+  );
+
   // Data Window (M3): the ACTIVE pane publishes a compact snapshot (crosshair candle OHLCV +
   // every visible indicator's channel values) to the store; the right-rail Data tab renders it.
   // Only published while the Data tab is open — no point writing the store on every tick otherwise
@@ -1479,7 +1495,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       <SubPaneIndicators
         candles={candleBufRef.current}
         indicators={pane.classicIndicators}
-        width={360}
+        view={subView}
+        hoverTime={hoverTime}
       />
     </div>
   );
