@@ -45,7 +45,9 @@ import type {
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { runScript, type RunResult } from '@supercharts/script-lang';
 import { SubPaneIndicators, type SubPaneView } from './sub-pane-indicators';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IndicatorLegend } from './indicator-legend';
+import { SymbolStatusLine } from './symbol-status-line';
 import { buildLegendRows } from './indicator-legend-util';
 import { buildDataWindow } from './data-window-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
@@ -150,6 +152,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // Bumped (debounced via the chart's range-change callback) when the visible range pans/zooms,
   // so the React-rendered oscillator sub-panes re-read the chart's time projection and stay aligned.
   const [subTick, setSubTick] = useState(0);
+  // Collapse toggle for the on-chart indicator legend (the symbol status line stays visible).
+  const [legendCollapsed, setLegendCollapsed] = useState(false);
 
   // Initial mount: create chart, load historical, subscribe.
   useEffect(() => {
@@ -1380,6 +1384,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     [subTick, hoverTime, legendTick, loading, pane.symbol, pane.interval, candleBufRef.current.length],
   );
 
+  // Bar feeding the symbol status line: the crosshair candle (or latest) + its prior close.
+  const statusBuf = candleBufRef.current;
+  const statusCandle =
+    legendHoverIdx >= 0 && legendHoverIdx < statusBuf.length ? statusBuf[legendHoverIdx]! : null;
+  const statusPrevClose = legendHoverIdx - 1 >= 0 ? statusBuf[legendHoverIdx - 1]?.close ?? null : null;
+
   // Data Window (M3): the ACTIVE pane publishes a compact snapshot (crosshair candle OHLCV +
   // every visible indicator's channel values) to the store; the right-rail Data tab renders it.
   // Only published while the Data tab is open — no point writing the store on every tick otherwise
@@ -1431,16 +1441,35 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           ref={canvasRef}
           className="absolute inset-0 h-full w-full"
         />
-        <IndicatorLegend
-          rows={legendRows}
-          atCrosshair={hoverTime != null}
-          onToggleVisible={(id) => {
-            const inst = pane.classicIndicators.find((i) => i.id === id);
-            if (inst) updateIndicator(pane.id, id, { visible: !inst.visible });
-          }}
-          onSettings={(id) => requestIndicatorSettings(id)}
-          onRemove={(id) => removeIndicator(pane.id, id)}
-        />
+        <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[72%] flex-col items-start gap-0.5">
+          <div className="flex items-center gap-1">
+            <SymbolStatusLine candle={statusCandle} prevClose={statusPrevClose} atCrosshair={hoverTime != null} />
+            {legendRows.length > 0 ? (
+              <button
+                type="button"
+                title={legendCollapsed ? `Show ${legendRows.length} indicator${legendRows.length > 1 ? 's' : ''}` : 'Hide indicators'}
+                aria-label={legendCollapsed ? 'Show indicators' : 'Hide indicators'}
+                onClick={() => setLegendCollapsed((v) => !v)}
+                className="pointer-events-auto flex items-center gap-0.5 rounded bg-surface/75 px-1 py-[3px] text-[10px] tabular-nums text-muted-foreground backdrop-blur-[1px] hover:text-foreground"
+              >
+                {legendCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+                {legendCollapsed ? legendRows.length : null}
+              </button>
+            ) : null}
+          </div>
+          {!legendCollapsed ? (
+            <IndicatorLegend
+              rows={legendRows}
+              atCrosshair={hoverTime != null}
+              onToggleVisible={(id) => {
+                const inst = pane.classicIndicators.find((i) => i.id === id);
+                if (inst) updateIndicator(pane.id, id, { visible: !inst.visible });
+              }}
+              onSettings={(id) => requestIndicatorSettings(id)}
+              onRemove={(id) => removeIndicator(pane.id, id)}
+            />
+          ) : null}
+        </div>
         {loading && !loadError ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/40 backdrop-blur-[2px]">
             <div className="flex items-center gap-2 rounded-md border border-border bg-surface-raised/90 px-3 py-1.5 text-[11px] text-muted-foreground shadow-floating">

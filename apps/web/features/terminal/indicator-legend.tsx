@@ -1,5 +1,6 @@
 'use client';
 
+import { type MouseEvent as ReactMouseEvent } from 'react';
 import { Eye, EyeOff, Settings2, X } from 'lucide-react';
 import type { LegendRow } from './indicator-legend-util';
 
@@ -20,12 +21,20 @@ interface Props {
  */
 export function IndicatorLegend({ rows, atCrosshair, onToggleVisible, onSettings, onRemove }: Props) {
   if (rows.length === 0) return null;
+  const stop = (fn: () => void) => (e: ReactMouseEvent) => {
+    e.stopPropagation();
+    fn();
+  };
   return (
-    <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[62%] flex-col items-start gap-0.5">
+    <div className="pointer-events-none flex flex-col items-start gap-0.5">
       {rows.map((r) => (
         <div
           key={r.id}
-          className={`group pointer-events-auto flex items-center gap-1.5 rounded bg-surface/75 px-1.5 py-[3px] text-[11px] leading-none backdrop-blur-[1px] ${
+          role="button"
+          tabIndex={0}
+          title="Double-click to open settings"
+          onDoubleClick={() => onSettings(r.id)}
+          className={`group pointer-events-auto flex cursor-default items-center gap-1.5 rounded bg-surface/75 px-1.5 py-[3px] text-[11px] leading-none backdrop-blur-[1px] ${
             r.visible ? '' : 'opacity-50'
           }`}
         >
@@ -38,7 +47,7 @@ export function IndicatorLegend({ rows, atCrosshair, onToggleVisible, onSettings
               type="button"
               title={r.visible ? 'Hide' : 'Show'}
               aria-label={r.visible ? 'Hide indicator' : 'Show indicator'}
-              onClick={() => onToggleVisible(r.id)}
+              onClick={stop(() => onToggleVisible(r.id))}
               className="text-muted-foreground hover:text-foreground"
             >
               {r.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
@@ -47,7 +56,7 @@ export function IndicatorLegend({ rows, atCrosshair, onToggleVisible, onSettings
               type="button"
               title="Settings"
               aria-label="Indicator settings"
-              onClick={() => onSettings(r.id)}
+              onClick={stop(() => onSettings(r.id))}
               className="text-muted-foreground hover:text-foreground"
             >
               <Settings2 className="h-3 w-3" />
@@ -56,7 +65,7 @@ export function IndicatorLegend({ rows, atCrosshair, onToggleVisible, onSettings
               type="button"
               title="Remove"
               aria-label="Remove indicator"
-              onClick={() => onRemove(r.id)}
+              onClick={stop(() => onRemove(r.id))}
               className="text-muted-foreground hover:text-bear"
             >
               <X className="h-3 w-3" />
