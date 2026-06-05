@@ -7,6 +7,8 @@ import type { IndicatorInstance } from '@supercharts/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { nanoid } from './nanoid';
 import { nextIndicatorName } from './indicator-manager-util';
@@ -264,88 +266,111 @@ function IndicatorEditor({
   onClose: () => void;
 }) {
   return (
-    <div className="rounded-md border border-accent/40 bg-accent/5 p-2">
-      <div className="mb-2 flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-[0.14em] text-accent">
-          {spec.label} · settings
-        </div>
-        <Button size="sm" variant="ghost" className="h-6 px-2" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {spec.inputs.map((input) => {
-          const value = inst.inputs[input.key] ?? input.default;
-          if (input.type === 'enum') {
-            return (
-              <label key={input.key} className="block">
-                <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                  {input.label}
-                </div>
-                <select
-                  value={String(value)}
-                  onChange={(e) =>
-                    onChange({
-                      inputs: { ...inst.inputs, [input.key]: e.target.value },
-                    })
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <span
+              className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+              style={{ backgroundColor: legendColor(spec, inst) }}
+              aria-hidden
+            />
+            <span className="truncate">{inst.name || spec.label}</span>
+            <span className="text-xs font-normal text-muted-foreground">· settings</span>
+          </DialogTitle>
+        </DialogHeader>
+        <Tabs defaultValue="inputs" className="px-5 pb-5">
+          <TabsList className="mb-3 w-full">
+            <TabsTrigger value="inputs" className="flex-1">Inputs</TabsTrigger>
+            <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
+            <TabsTrigger value="about" className="flex-1">About</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="inputs">
+            {spec.inputs.length === 0 ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">No tunable inputs for this indicator.</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {spec.inputs.map((input) => {
+                  const value = inst.inputs[input.key] ?? input.default;
+                  if (input.type === 'enum') {
+                    return (
+                      <label key={input.key} className="block">
+                        <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                          {input.label}
+                        </div>
+                        <select
+                          value={String(value)}
+                          onChange={(e) => onChange({ inputs: { ...inst.inputs, [input.key]: e.target.value } })}
+                          className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+                        >
+                          {input.options?.map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
                   }
-                  className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
-                >
-                  {input.options?.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            );
-          }
-          if (input.type === 'bool') {
-            return (
-              <div key={input.key} className="flex items-center justify-between rounded-md px-1 py-1.5">
-                <span className="text-[11px] text-foreground">{input.label}</span>
-                <Switch
-                  checked={Boolean(value)}
-                  onCheckedChange={(v) =>
-                    onChange({ inputs: { ...inst.inputs, [input.key]: v } })
+                  if (input.type === 'bool') {
+                    return (
+                      <div key={input.key} className="col-span-2 flex items-center justify-between rounded-md px-1 py-1.5">
+                        <span className="text-[11px] text-foreground">{input.label}</span>
+                        <Switch
+                          checked={Boolean(value)}
+                          onCheckedChange={(v) => onChange({ inputs: { ...inst.inputs, [input.key]: v } })}
+                        />
+                      </div>
+                    );
                   }
-                />
+                  return (
+                    <label key={input.key} className="block">
+                      <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                        {input.label}
+                      </div>
+                      <input
+                        type="number"
+                        step={input.step ?? (input.type === 'float' ? 0.1 : 1)}
+                        min={input.min}
+                        max={input.max}
+                        value={typeof value === 'number' ? value : Number(value)}
+                        onChange={(e) => onChange({ inputs: { ...inst.inputs, [input.key]: Number(e.target.value) } })}
+                        className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+                      />
+                    </label>
+                  );
+                })}
               </div>
-            );
-          }
-          return (
-            <label key={input.key} className="block">
-              <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                {input.label}
-              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="style">
+            <label className="block">
+              <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Color</div>
               <input
-                type="number"
-                step={input.step ?? (input.type === 'float' ? 0.1 : 1)}
-                min={input.min}
-                max={input.max}
-                value={typeof value === 'number' ? value : Number(value)}
-                onChange={(e) =>
-                  onChange({
-                    inputs: { ...inst.inputs, [input.key]: Number(e.target.value) },
-                  })
-                }
-                className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+                type="text"
+                value={String(inst.style.color ?? spec.style.color ?? '#42a5f5')}
+                onChange={(e) => onChange({ style: { ...inst.style, color: e.target.value } })}
+                className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs font-mono"
               />
             </label>
-          );
-        })}
-        <label className="block col-span-2">
-          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Color</div>
-          <input
-            type="text"
-            value={String(inst.style.color ?? spec.style.color ?? '#42a5f5')}
-            onChange={(e) =>
-              onChange({ style: { ...inst.style, color: e.target.value } })
-            }
-            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs font-mono"
-          />
-        </label>
-      </div>
-    </div>
+          </TabsContent>
+
+          <TabsContent value="about">
+            <div className="space-y-2 text-xs text-muted-foreground">
+              <div className="text-sm font-medium text-foreground">{spec.label}</div>
+              {spec.description ? <p className="leading-relaxed">{spec.description}</p> : null}
+              <div>
+                Renders <span className="text-foreground">{spec.pane === 'overlay' ? 'on the price chart' : 'in a lower pane'}</span>.
+              </div>
+              <div>
+                Plots: <span className="text-foreground">{spec.channels.join(', ')}</span>
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }
