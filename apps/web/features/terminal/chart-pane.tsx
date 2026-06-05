@@ -1129,6 +1129,10 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       const channels = computeAll(inst.type, bars, inputs);
       const color = (k: string): string =>
         String(inst.style[k] ?? spec.style[k] ?? spec.style.color ?? '#42a5f5');
+      // Span of `lines` this instance contributes — used below to apply the user's line
+      // width / style (solid·dashed·dotted) overrides from the Style tab without rewriting
+      // every per-type push (defaults are untouched when those keys aren't set).
+      const lineStart = lines.length;
       switch (inst.type) {
         case 'sma':
         case 'ema':
@@ -1251,6 +1255,15 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           }
           break;
         }
+      }
+      // Apply Style-tab line width / line style to every line this instance contributed.
+      const lw = Number(inst.style.lineWidth);
+      const ls = typeof inst.style.lineStyle === 'string' ? inst.style.lineStyle : undefined;
+      const dash: [number, number] | undefined =
+        ls === 'dashed' ? [6, 4] : ls === 'dotted' ? [2, 3] : undefined;
+      for (let li = lineStart; li < lines.length; li += 1) {
+        if (Number.isFinite(lw) && lw > 0) lines[li]!.lineWidth = lw;
+        if (ls && ls !== 'solid') lines[li]!.dash = dash;
       }
     }
     layer.visible = lines.length > 0 || bands.length > 0 || dots.length > 0;

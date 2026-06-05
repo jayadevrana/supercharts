@@ -265,6 +265,13 @@ function IndicatorEditor({
   onChange: (patch: Partial<IndicatorInstance>) => void;
   onClose: () => void;
 }) {
+  // Colour-ish style keys to expose as pickers (e.g. color, middleColor, bandColor, macdColor).
+  const colorKeys = Object.keys(spec.style).filter((k) => {
+    const v = inst.style[k] ?? spec.style[k];
+    return typeof v === 'string' && (/color/i.test(k) || /^(#|rgb)/i.test(String(v)));
+  });
+  // Line width / style apply to line-plot indicators (those with a base colour or width default).
+  const isLineStyleable = 'lineWidth' in spec.style || 'color' in spec.style;
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent className="max-w-md">
@@ -346,15 +353,64 @@ function IndicatorEditor({
           </TabsContent>
 
           <TabsContent value="style">
-            <label className="block">
-              <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Color</div>
-              <input
-                type="text"
-                value={String(inst.style.color ?? spec.style.color ?? '#42a5f5')}
-                onChange={(e) => onChange({ style: { ...inst.style, color: e.target.value } })}
-                className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs font-mono"
-              />
-            </label>
+            <div className="space-y-2.5">
+              {colorKeys.length === 0 ? (
+                <ColorField
+                  label="Color"
+                  value={String(inst.style.color ?? spec.style.color ?? '#42a5f5')}
+                  onChange={(v) => onChange({ style: { ...inst.style, color: v } })}
+                />
+              ) : (
+                colorKeys.map((k) => (
+                  <ColorField
+                    key={k}
+                    label={styleKeyLabel(k)}
+                    value={String(inst.style[k] ?? spec.style[k] ?? '#42a5f5')}
+                    onChange={(v) => onChange({ style: { ...inst.style, [k]: v } })}
+                  />
+                ))
+              )}
+
+              {isLineStyleable ? (
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <label className="block">
+                    <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Line width</div>
+                    <input
+                      type="number"
+                      min={0.5}
+                      max={6}
+                      step={0.5}
+                      value={Number(inst.style.lineWidth ?? spec.style.lineWidth ?? 1.5)}
+                      onChange={(e) => onChange({ style: { ...inst.style, lineWidth: Number(e.target.value) } })}
+                      className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Line style</div>
+                    <select
+                      value={String(inst.style.lineStyle ?? 'solid')}
+                      onChange={(e) => onChange({ style: { ...inst.style, lineStyle: e.target.value } })}
+                      className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+                    >
+                      <option value="solid">Solid</option>
+                      <option value="dashed">Dashed</option>
+                      <option value="dotted">Dotted</option>
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+
+              <div className="flex justify-end pt-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  onClick={() => onChange({ style: { ...spec.style } })}
+                >
+                  Reset to defaults
+                </Button>
+              </div>
+            </div>
           </TabsContent>
 
           <TabsContent value="about">
@@ -373,4 +429,46 @@ function IndicatorEditor({
       </DialogContent>
     </Dialog>
   );
+}
+
+/** A colour swatch (native picker) + free-text field so hex AND rgba(...) values both work. */
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const trimmed = value.trim();
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(trimmed) ? trimmed : '#888888';
+  return (
+    <label className="block">
+      <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</div>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={hex}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={`${label} colour`}
+          className="h-7 w-9 shrink-0 cursor-pointer rounded-md border border-border bg-surface-sunken p-0.5"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs font-mono"
+        />
+      </div>
+    </label>
+  );
+}
+
+/** Humanise a style colour key for the Style tab ("middleColor" → "Middle", "color" → "Color"). */
+function styleKeyLabel(key: string): string {
+  const base = key.replace(/Color$/i, '');
+  if (!base) return 'Color';
+  const spaced = base.replace(/([a-z])([A-Z])/g, '$1 $2');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
