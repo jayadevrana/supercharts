@@ -77,7 +77,7 @@ export function buildLegendRows(
     const raw = series && index >= 0 && index < series.length ? series[index] : undefined;
     rows.push({
       id: inst.id,
-      name: spec.label,
+      name: inst.name || spec.label,
       color: legendColor(spec, inst),
       summary: indicatorInputSummary(spec, inst),
       value: formatIndicatorValue(raw),

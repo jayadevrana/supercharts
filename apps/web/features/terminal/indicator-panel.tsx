@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Settings2, Trash2, Eye, EyeOff, LineChart } from 'lucide-react';
+import { Plus, Settings2, Trash2, Eye, EyeOff, LineChart, ChevronUp, ChevronDown, Copy } from 'lucide-react';
 import { INDICATOR_REGISTRY, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
 import type { IndicatorInstance } from '@supercharts/types';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { nanoid } from './nanoid';
+import { nextIndicatorName } from './indicator-manager-util';
 
 interface Props {
   pane: PaneState;
@@ -21,6 +22,7 @@ export function IndicatorPanel({ pane }: Props) {
   const addIndicator = useTerminalStore((s) => s.addIndicator);
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
   const updateIndicator = useTerminalStore((s) => s.updateIndicator);
+  const reorderIndicator = useTerminalStore((s) => s.reorderIndicator);
   const settingsTarget = useTerminalStore((s) => s.indicatorSettingsTarget);
   const clearSettingsTarget = useTerminalStore((s) => s.clearIndicatorSettingsTarget);
 
@@ -36,6 +38,21 @@ export function IndicatorPanel({ pane }: Props) {
       clearSettingsTarget();
     }
   }, [settingsTarget, active, clearSettingsTarget]);
+
+  // Clone an instance (same inputs/style) with a fresh id + numbered name — multiple instances of
+  // one type are supported (the chart keys every line/series by instance id).
+  const duplicate = (inst: IndicatorInstance): void => {
+    const spec = INDICATOR_LOOKUP[inst.type];
+    if (!spec) return;
+    addIndicator(pane.id, {
+      ...inst,
+      id: `${inst.type}_${nanoid().slice(0, 6)}`,
+      name: nextIndicatorName(active, spec),
+      inputs: { ...inst.inputs },
+      style: { ...inst.style },
+      visible: true,
+    });
+  };
 
   return (
     <div className="space-y-3 p-3 text-xs">
@@ -54,7 +71,7 @@ export function IndicatorPanel({ pane }: Props) {
             const inst: IndicatorInstance = {
               id: `${spec.type}_${nanoid().slice(0, 6)}`,
               type: spec.type,
-              name: spec.label,
+              name: nextIndicatorName(active, spec),
               paneId: spec.pane === 'overlay' ? 'price' : spec.type,
               inputs: Object.fromEntries(spec.inputs.map((i) => [i.key, i.default])) as IndicatorInstance['inputs'],
               style: { ...spec.style },
@@ -74,7 +91,7 @@ export function IndicatorPanel({ pane }: Props) {
             No classic indicators yet. Click <span className="text-foreground">Add</span> to pick from the registry.
           </div>
         ) : null}
-        {active.map((inst) => {
+        {active.map((inst, idx) => {
           const spec = INDICATOR_LOOKUP[inst.type];
           if (!spec) return null;
           return (
@@ -90,16 +107,50 @@ export function IndicatorPanel({ pane }: Props) {
                   >
                     {inst.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                   </button>
-                  <span className="truncate font-medium text-foreground">{spec.label}</span>
+                  <span className="truncate font-medium text-foreground">{inst.name || spec.label}</span>
                   <Badge tone={spec.pane === 'overlay' ? 'muted' : 'accent'} className="text-[8px]">
                     {spec.pane}
                   </Badge>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-0.5">
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-1"
+                    className="h-6 px-0.5 disabled:opacity-30"
+                    title="Move up"
+                    aria-label="Move indicator up"
+                    disabled={idx === 0}
+                    onClick={() => reorderIndicator(pane.id, inst.id, 'up')}
+                  >
+                    <ChevronUp className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-0.5 disabled:opacity-30"
+                    title="Move down"
+                    aria-label="Move indicator down"
+                    disabled={idx === active.length - 1}
+                    onClick={() => reorderIndicator(pane.id, inst.id, 'down')}
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-0.5"
+                    title="Duplicate"
+                    aria-label="Duplicate indicator"
+                    onClick={() => duplicate(inst)}
+                  >
+                    <Copy className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 px-0.5"
+                    title="Settings"
+                    aria-label="Indicator settings"
                     onClick={() => setEditing((cur) => (cur === inst.id ? null : inst.id))}
                   >
                     <Settings2 className="h-3 w-3" />
@@ -107,7 +158,9 @@ export function IndicatorPanel({ pane }: Props) {
                   <Button
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-1 text-bear/80 hover:text-bear"
+                    className="h-6 px-0.5 text-bear/80 hover:text-bear"
+                    title="Remove"
+                    aria-label="Remove indicator"
                     onClick={() => removeIndicator(pane.id, inst.id)}
                   >
                     <Trash2 className="h-3 w-3" />

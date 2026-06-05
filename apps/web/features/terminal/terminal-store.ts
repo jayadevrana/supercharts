@@ -5,6 +5,7 @@ import type { ChartType, IndicatorInstance, Interval } from '@supercharts/types'
 import type { InputDef } from '@supercharts/script-lang';
 import { DEFAULT_LAYOUT_ID, getLayout, type PaneLayout } from './layouts';
 import type { DataWindowSnapshot } from './data-window-util';
+import { reorderInstances } from './indicator-manager-util';
 
 /** Default PulseScript shown in a fresh code terminal — exercises inputs, ta.*, draw, and marks. */
 export const SAMPLE_PULSE = `# EMA cross study — PulseScript
@@ -169,6 +170,8 @@ interface TerminalStore {
     indicatorId: string,
     patch: Partial<IndicatorInstance>,
   ) => void;
+  /** Move an indicator one slot up/down within a pane's list (legend + manager + render order). */
+  reorderIndicator: (id: string, indicatorId: string, dir: 'up' | 'down') => void;
   setDrawTool: (tool: string | null) => void;
   setShowLeftRail: (v: boolean) => void;
   setShowRightRail: (v: boolean) => void;
@@ -393,6 +396,12 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
               ),
             }
           : p,
+      ),
+    })),
+  reorderIndicator: (id, indicatorId, dir) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, classicIndicators: reorderInstances(p.classicIndicators, indicatorId, dir) } : p,
       ),
     })),
 

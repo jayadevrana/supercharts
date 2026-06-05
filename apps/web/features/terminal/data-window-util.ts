@@ -85,7 +85,7 @@ export function buildDataWindow(
     const series = inst.visible ? channelsByInstance.get(inst.id) : undefined;
     indicators.push({
       id: inst.id,
-      name: spec.label,
+      name: inst.name || spec.label,
       color: legendColor(spec, inst),
       channels: spec.channels.map((name) => ({
         label: name,
