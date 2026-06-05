@@ -33,6 +33,12 @@ export interface IndicatorSpec {
   style: Record<string, string | number>;
   /** Optional short description used as a tooltip in the picker. */
   description?: string;
+  /**
+   * Search aliases / acronyms so the picker finds an indicator by its common short name
+   * even when the display label spells it out (typing "ema" → Exponential Moving Average,
+   * "bb" → Bollinger Bands). Populated from SEARCH_ALIASES below.
+   */
+  aliases?: string[];
 }
 
 export const INDICATOR_REGISTRY: IndicatorSpec[] = [
@@ -347,6 +353,47 @@ export const INDICATOR_REGISTRY: IndicatorSpec[] = [
       "Each completed session's volume Point of Control, drawn forward until price trades back through it. Untouched (virgin) POCs extend to now. Volume-profile POC on candle volume — real on all symbols.",
   },
 ];
+
+/**
+ * Searchable aliases / acronyms keyed by spec.type. The display labels spell names out
+ * ("Exponential Moving Average"), so without these, typing the acronym a trader actually
+ * uses ("ema", "bb", "sar") matched nothing. Universal short names only — no third-party
+ * product identifiers. Applied to each spec below.
+ */
+const SEARCH_ALIASES: Record<string, string[]> = {
+  sma: ['sma', 'ma'],
+  ema: ['ema', 'ma'],
+  wma: ['wma', 'ma'],
+  hma: ['hma', 'ma'],
+  rsi: ['rsi'],
+  macd: ['macd'],
+  stochastic: ['stoch', 'stochastic', '%k', '%d'],
+  williams_r: ['williams %r', 'wpr', 'willr', '%r'],
+  cci: ['cci'],
+  mfi: ['mfi'],
+  roc: ['roc', 'momentum'],
+  atr: ['atr'],
+  bollinger: ['bb', 'bbands', 'boll'],
+  keltner: ['kc'],
+  donchian: ['dc'],
+  adx: ['adx', 'dmi', 'di'],
+  supertrend: ['st', 'supertrend'],
+  psar: ['psar', 'sar'],
+  ichimoku: ['ichimoku', 'cloud', 'kumo'],
+  aroon: ['aroon'],
+  vwap: ['vwap'],
+  obv: ['obv'],
+  cmf: ['cmf'],
+  volume_oscillator: ['vo', 'volume osc'],
+  rvol: ['rvol', 'relative volume'],
+  vwap_bands: ['vwap bands', 'vwap σ', 'vwap std'],
+  initial_balance: ['ib', 'initial balance'],
+  naked_poc: ['npoc', 'poc', 'vpoc', 'naked poc'],
+};
+
+for (const s of INDICATOR_REGISTRY) {
+  if (!s.aliases) s.aliases = SEARCH_ALIASES[s.type];
+}
 
 export const INDICATOR_LOOKUP: Record<string, IndicatorSpec> = Object.fromEntries(
   INDICATOR_REGISTRY.map((s) => [s.type, s]),

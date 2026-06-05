@@ -49,9 +49,20 @@ const entryId = (e: Entry): string => (e.kind === 'classic' ? e.type : e.key);
  */
 
 type Entry =
-  | { kind: 'overlay'; key: keyof PaneState['overlays']; label: string; desc: string; orderflow?: boolean }
-  | { kind: 'smc'; key: keyof PaneState['smc']; label: string; desc: string; orderflow?: boolean }
-  | { kind: 'classic'; type: string; label: string; desc: string };
+  | { kind: 'overlay'; key: keyof PaneState['overlays']; label: string; desc: string; orderflow?: boolean; aliases?: string[] }
+  | { kind: 'smc'; key: keyof PaneState['smc']; label: string; desc: string; orderflow?: boolean; aliases?: string[] }
+  | { kind: 'classic'; type: string; label: string; desc: string; aliases?: string[] };
+
+/**
+ * Search aliases for an entry. Classic entries inherit the registry's acronyms (so "ema",
+ * "bb", "sar" resolve even though the label spells the name out); overlay/SMC entries carry
+ * their own inline aliases below.
+ */
+function aliasesFor(e: Entry): string[] {
+  const own = e.aliases ?? [];
+  if (e.kind === 'classic') return [...own, ...(INDICATOR_LOOKUP[e.type]?.aliases ?? [])];
+  return own;
+}
 
 interface Group {
   group: string;
@@ -63,8 +74,8 @@ const CATALOG: Group[] = [
     group: 'Volume & Profile',
     items: [
       { kind: 'overlay', key: 'volume', label: 'Volume', desc: 'Per-bar volume histogram.' },
-      { kind: 'overlay', key: 'profile', label: 'Volume Profile (VPVR)', desc: 'Volume traded at each price · POC / VAH / VAL.' },
-      { kind: 'overlay', key: 'marketProfile', label: 'Market Profile (TPO)', desc: 'Per-session time-at-price histogram · POC + value area.' },
+      { kind: 'overlay', key: 'profile', label: 'Volume Profile (VPVR)', desc: 'Volume traded at each price · POC / VAH / VAL.', aliases: ['vpvr', 'vp', 'volume profile'] },
+      { kind: 'overlay', key: 'marketProfile', label: 'Market Profile (TPO)', desc: 'Per-session time-at-price histogram · POC + value area.', aliases: ['tpo', 'mp', 'market profile'] },
       { kind: 'overlay', key: 'heatmap', label: 'Liquidity Heatmap', desc: 'Resting order-book liquidity over time.', orderflow: true },
       { kind: 'smc', key: 'hvnLvn', label: 'HVN / LVN nodes', desc: 'High / low volume nodes.' },
       { kind: 'classic', type: 'vwap', label: 'VWAP', desc: 'Volume-weighted average price (session).' },
@@ -79,9 +90,9 @@ const CATALOG: Group[] = [
   {
     group: 'Order Flow & Delta',
     items: [
-      { kind: 'overlay', key: 'footprint', label: 'Footprint / Cluster', desc: 'Bid × ask volume per price cell.', orderflow: true },
-      { kind: 'overlay', key: 'deepTrades', label: 'Delta Bubbles', desc: 'Per-trade aggressive-flow bubbles.', orderflow: true },
-      { kind: 'smc', key: 'cvdDivergence', label: 'CVD + Delta Divergence', desc: 'Cumulative volume delta + price/delta divergence.', orderflow: true },
+      { kind: 'overlay', key: 'footprint', label: 'Footprint / Cluster', desc: 'Bid × ask volume per price cell.', orderflow: true, aliases: ['footprint', 'cluster', 'bid ask'] },
+      { kind: 'overlay', key: 'deepTrades', label: 'Delta Bubbles', desc: 'Per-trade aggressive-flow bubbles.', orderflow: true, aliases: ['delta bubbles', 'trades'] },
+      { kind: 'smc', key: 'cvdDivergence', label: 'CVD + Delta Divergence', desc: 'Cumulative volume delta + price/delta divergence.', orderflow: true, aliases: ['cvd', 'delta', 'divergence'] },
       { kind: 'overlay', key: 'timeAndSales', label: 'Time & Sales', desc: 'Live trade-by-trade tape (price · size · side).', orderflow: true },
       { kind: 'overlay', key: 'domLadder', label: 'DOM Ladder', desc: 'Live depth-of-market — top bid/ask sizes per price.', orderflow: true },
       { kind: 'overlay', key: 'openInterest', label: 'Open Interest', desc: 'Binance USD-M futures open interest + trend.', orderflow: true },
@@ -90,13 +101,13 @@ const CATALOG: Group[] = [
   {
     group: 'Smart Money (SMC)',
     items: [
-      { kind: 'smc', key: 'fvg', label: 'Fair Value Gaps', desc: 'Price imbalances / gaps.' },
-      { kind: 'smc', key: 'orderBlocks', label: 'Order Blocks', desc: 'Institutional order-block zones.' },
-      { kind: 'smc', key: 'liquidity', label: 'Liquidity Pools', desc: 'Equal highs/lows liquidity.' },
-      { kind: 'smc', key: 'liquiditySweeps', label: 'Liquidity Sweeps', desc: 'Stop-run / sweep markers.' },
-      { kind: 'smc', key: 'marketStructure', label: 'Market Structure (BOS/CHoCH)', desc: 'Break of structure / change of character.' },
-      { kind: 'smc', key: 'premiumDiscount', label: 'Premium / Discount', desc: 'Dealing-range premium/discount zones.' },
-      { kind: 'smc', key: 'anchoredVwap', label: 'Anchored VWAP', desc: 'VWAP anchored to a swing.' },
+      { kind: 'smc', key: 'fvg', label: 'Fair Value Gaps', desc: 'Price imbalances / gaps.', aliases: ['fvg', 'imbalance', 'gap'] },
+      { kind: 'smc', key: 'orderBlocks', label: 'Order Blocks', desc: 'Institutional order-block zones.', aliases: ['ob', 'order block'] },
+      { kind: 'smc', key: 'liquidity', label: 'Liquidity Pools', desc: 'Equal highs/lows liquidity.', aliases: ['liquidity', 'eqh', 'eql'] },
+      { kind: 'smc', key: 'liquiditySweeps', label: 'Liquidity Sweeps', desc: 'Stop-run / sweep markers.', aliases: ['sweep', 'stop run'] },
+      { kind: 'smc', key: 'marketStructure', label: 'Market Structure (BOS/CHoCH)', desc: 'Break of structure / change of character.', aliases: ['bos', 'choch', 'market structure', 'mss'] },
+      { kind: 'smc', key: 'premiumDiscount', label: 'Premium / Discount', desc: 'Dealing-range premium/discount zones.', aliases: ['premium', 'discount', 'ote'] },
+      { kind: 'smc', key: 'anchoredVwap', label: 'Anchored VWAP', desc: 'VWAP anchored to a swing.', aliases: ['avwap', 'anchored vwap'] },
       { kind: 'smc', key: 'sessions', label: 'Sessions', desc: 'Asia / London / NY session boxes.' },
       { kind: 'smc', key: 'regimeBadge', label: 'Regime Badge', desc: 'Trend / range regime classifier.' },
     ],
@@ -104,7 +115,7 @@ const CATALOG: Group[] = [
   {
     group: 'Signals',
     items: [
-      { kind: 'overlay', key: 'signalsTrendScore', label: 'Signals & Trend Score', desc: 'MA cloud + ATR trail + buy/sell + MTF dashboards.' },
+      { kind: 'overlay', key: 'signalsTrendScore', label: 'Signals & Trend Score', desc: 'MA cloud + ATR trail + buy/sell + MTF dashboards.', aliases: ['sts', 'signals', 'trend score'] },
     ],
   },
   {
@@ -255,7 +266,8 @@ export function IndicatorsDialog() {
     !lower ||
     e.label.toLowerCase().includes(lower) ||
     e.desc.toLowerCase().includes(lower) ||
-    group.toLowerCase().includes(lower);
+    group.toLowerCase().includes(lower) ||
+    aliasesFor(e).some((a) => a.includes(lower));
 
   // Sections in render + keyboard-focus order. Favorites and Recently-used lead, but only when
   // not searching (a search should reveal the full filtered catalog, not a partial pinned view).

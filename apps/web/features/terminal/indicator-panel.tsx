@@ -189,7 +189,11 @@ function IndicatorPickerList({ onPick }: { onPick: (spec: IndicatorSpec) => void
   const items = useMemo(() => {
     const lower = q.toLowerCase();
     return INDICATOR_REGISTRY.filter(
-      (s) => !lower || s.label.toLowerCase().includes(lower) || s.type.toLowerCase().includes(lower),
+      (s) =>
+        !lower ||
+        s.label.toLowerCase().includes(lower) ||
+        s.type.toLowerCase().includes(lower) ||
+        (s.aliases ?? []).some((a) => a.includes(lower)),
     );
   }, [q]);
   return (
