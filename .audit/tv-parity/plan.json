@@ -1,0 +1,1584 @@
+{
+  "parityScore": 42,
+  "summary": "SuperCharts has a genuinely strong indicator FOUNDATION — a 38-indicator tested registry, a working legend/Data Window/manager built on pure reusable helpers, and renderers that already accept rgba fill, lineWidth, dash, log-scale math, and per-channel data — but the UX layer that exposes all of it to TradingView parity is largely unbuilt, so the score lands at 42. The single biggest theme is 'capability built, never wired': scale modes, paneId, line width/style, opacity, percent/log toggles, and a complete plot-cross alert evaluator all EXIST in code yet are unreachable from any control, making most fixes additive wiring rather than new systems. The second theme is a missing settings/discovery surface — there is no tabbed settings modal (M4b), no acronym search (typing 'EMA' returns only Keltner), no colour picker, no legend overflow menu, and sub-panes are a disconnected last-200-bar SVG thumbnail that doesn't share the chart's time axis (the one true blocker, PANES-1). The plan front-loads quick high-confidence wins (alias search, manager identity, legend double-click) and the sub-pane axis blocker, then builds the M4b settings modal as the parent for all style controls and the legend overflow menu as the parent for move-to-pane and create-alert. Hard constraints are respected throughout: every TA fix reuses packages/indicators, the create-alert engine work defaults legacy rows to ma_cross so the 48 live Telegram alerts keep loading, no fix fabricates data (Bollinger source and VWMA use real candles; secondary symbols are deferred and must show no-data), and PulseScript stays an original language surfaced only as data, never cloned syntax.",
+  "increments": [
+    {
+      "id": "INC-1",
+      "name": "Acronym/alias indicator search",
+      "goal": "Add an optional aliases?: string[] to IndicatorSpec (registry.ts) and the dialog's Entry union, OR it into matches() in indicators-dialog.tsx (and mirror in indicator-panel.tsx's IndicatorPickerList), and populate high-traffic aliases (ema, bb/bbands, stoch, %r/wpr, kc, dc, sar, st). Fixes the headline 'EMA returns only Keltner' dead-end. Single-source longer text from INDICATOR_LOOKUP[type].description where useful.",
+      "severity": "high",
+      "effort": "S",
+      "findingIds": [
+        "BROWSER-1",
+        "COVERAGE-1"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/indicator-panel.tsx"
+      ]
+    },
+    {
+      "id": "INC-2",
+      "name": "Browser fast-path: persistent favorites/recents + category rail + saved scripts + row info",
+      "goal": "Make the Indicators dialog browsable at scale. Keep matching Favorites surfaced during search (drop the if(!lower) guard on the favorites partition); add a left category rail bound to a new activeGroup state that the existing sections useMemo loop respects (keep flatRows/keyboard-nav intact); add a 'My scripts' section sourced from GET /scripts (same endpoint code-terminal uses) that toggles the pane's pulse source via setPulseSource/setPulseEnabled (single-slot per pane — replaces, does not stack); fall back to INDICATOR_LOOKUP[type].description + an info affordance per classic row to surface the stranded registry descriptions.",
+      "severity": "medium",
+      "effort": "L",
+      "findingIds": [
+        "BROWSER-6",
+        "BROWSER-2",
+        "BROWSER-3",
+        "BROWSER-4"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/code-terminal-dialog.tsx",
+        "packages/indicators/src/registry.ts"
+      ]
+    },
+    {
+      "id": "INC-3",
+      "name": "Manager row identity: full-name tooltip + input summary + colour swatch + pane grouping",
+      "goal": "Fix the 'Ex…' unidentifiable manager rows. In indicator-panel.tsx add title={inst.name||spec.label} to the name span, import and render the existing indicatorInputSummary helper as a muted suffix, add a legendColor swatch next to the eye button (both helpers already power the legend/Data Window, just not imported here), and group the flat list under lightweight 'On price'/per-sub-pane headers by inst.paneId while preserving the flat-array index used by the up/down chevrons.",
+      "severity": "high",
+      "effort": "S",
+      "findingIds": [
+        "MANAGER-1",
+        "MANAGER-2",
+        "MANAGER-4"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts"
+      ]
+    },
+    {
+      "id": "INC-4",
+      "name": "Data Window completeness: per-channel colour, readable plot names, hidden/dim, change bar",
+      "goal": "Polish the Data Window to TV's per-plot fidelity. Add color to DataWindowChannel resolved via a new exported channelColor(spec,inst,channel) helper (lift the colorFor logic from sub-pane-indicators with an explicit channel→styleKey alias map for ADX/Bollinger mismatches); add optional channelLabels to IndicatorSpec for friendly plot names (MACD/Signal/Histogram, %K/%D, +DI/-DI, Span A, %B…) read in buildDataWindow; carry visible on DataWindowIndicator and dim+EyeOff hidden rows (EyeOff already imported in right-rail); prepend a thin bull/bear colour bar on the Change/Change% rows keyed off o.up.",
+      "severity": "medium",
+      "effort": "M",
+      "findingIds": [
+        "DATAWINDOW-1",
+        "DATAWINDOW-2",
+        "DATAWINDOW-5",
+        "DATAWINDOW-4"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/data-window-util.ts",
+        "apps/web/features/terminal/right-rail.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "packages/indicators/src/registry.ts"
+      ]
+    },
+    {
+      "id": "INC-5",
+      "name": "Surface PulseScript + SMC + STS in the Data Window",
+      "goal": "Make the flagship original features visible in the Data Window. Extend buildDataWindow's inputs additively: stash the latest RunResult.plots in a ref (mirroring indChannelsRef) and emit one DataWindowIndicator per pulse plot; stash the already-computed anchoredVwap.vwap / cvd.cvd frames (currently only written to layer.frame) in a ref and surface them; read stsFrame scalars (already in React state) at index. Gate each behind its enabled flag (pane.pulse.enabled / pane.smc.* / overlays.signalsTrendScore). Read existing per-bar Float64Arrays — never recompute, never duplicate math, never touch PulseScript identifiers.",
+      "severity": "high",
+      "effort": "L",
+      "findingIds": [
+        "DATAWINDOW-3"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/data-window-util.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ]
+    },
+    {
+      "id": "INC-6",
+      "name": "Symbol status line + legend quality-of-life (double-click, collapse, spinner)",
+      "goal": "Add the institutional top-left reading surface and legend muscle-memory. Render a crosshair-aware SymbolStatusLine sibling above IndicatorLegend in chart-pane fed by candleBufRef.current[legendHoverIdx] (O/H/L/C + abs/percent change, bull/bear classes, reusing formatPrice/formatPercent) — render as a sibling so it shows with zero indicators. Add onDoubleClick={onSettings} to legend rows (+stopPropagation on inner buttons), a local-state collapse chevron, and an optional computing spinner on LegendRow flipped on at recompute start.",
+      "severity": "high",
+      "effort": "M",
+      "findingIds": [
+        "LEGEND-3",
+        "LEGEND-2",
+        "LEGEND-5",
+        "LEGEND-4"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/terminal-store.ts"
+      ]
+    },
+    {
+      "id": "INC-7",
+      "name": "Tabbed settings modal (M4b) — Inputs / Style / About in a centered dialog",
+      "goal": "The parent increment for all style controls. Wrap IndicatorEditor's existing fields in the already-present Tabs primitive (components/ui/tabs.tsx): keep the spec.inputs.map loop as the Inputs tab; add a Style tab and an About tab (from spec.description/label); render the whole editor inside components/ui/dialog.tsx keyed off the same editing state, keeping BOTH entry points (rail gear setEditing + legend gear requestIndicatorSettings/indicatorSettingsTarget). A centered modal removes the 'Ex…' truncation. Drive all content from IndicatorSpec — no per-indicator forms; do not rebuild fields.",
+      "severity": "high",
+      "effort": "L",
+      "findingIds": [
+        "SETTINGS-1",
+        "SETTINGS-7"
+      ],
+      "missionMap": "M4b",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/components/ui/tabs.tsx",
+        "apps/web/components/ui/dialog.tsx",
+        "packages/indicators/src/registry.ts"
+      ]
+    },
+    {
+      "id": "INC-8",
+      "name": "Style tab controls — colour-swatch+opacity, line width/style, precision, defaults",
+      "goal": "Fill the Style/Properties tab created in INC-7 with real controls (lands inside M4b). Build a ColorSwatch composing popover.tsx + native color input + slider.tsx → rgba, rendered per spec style colour-key (iterate keys like indicator-legend-util's list); add lineWidth stepper + lineStyle enum threaded through chart-pane's overlay push sites (start with the MA/EMA case that passes none) and sub-pane-indicators (dashed:[6,4]/dotted:[2,3]); add a precision style key threading inst.style.precision into formatIndicatorValue (new optional 2nd arg) for legend + Data Window; add a Defaults menu (Save-as-default / Reset-to-defaults) persisting per-type user defaults via the indicator-prefs.ts pattern and merged in onPick. Renderer already consumes rgba (band.fillColor), lineWidth, and dash — no chart-core change.",
+      "severity": "high",
+      "effort": "L",
+      "findingIds": [
+        "SETTINGS-2",
+        "SETTINGS-3",
+        "SETTINGS-6",
+        "SETTINGS-5"
+      ],
+      "missionMap": "M4b",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/components/ui/popover.tsx",
+        "apps/web/components/ui/slider.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/data-window-util.ts",
+        "apps/web/features/terminal/indicator-prefs.ts",
+        "packages/indicators/src/registry.ts"
+      ]
+    },
+    {
+      "id": "INC-9",
+      "name": "Per-plot enable / show-in-legend toggles (multi-plot visibility)",
+      "goal": "Give multi-plot indicators (MACD, Bollinger, Ichimoku, ADX) per-plot control. Add an optional plots field to IndicatorInstance keyed channel→{enabled,showInLegend} defaulted from spec.channels (absent flags default enabled, so existing instances are unaffected). Render per-plot checkboxes in the Style tab; skip pushing a disabled channel's line/band in chart-pane's overlay switch; gate buildLegendRows and buildDataWindow on showInLegend. Keep the instance-level eye as the master switch. Defer the per-plot price-line (no horizontal-level primitive in IndicatorsLayer yet) as a stretch.",
+      "severity": "medium",
+      "effort": "L",
+      "findingIds": [
+        "SETTINGS-4"
+      ],
+      "missionMap": "M4b",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/data-window-util.ts",
+        "packages/types/src/chart.ts"
+      ]
+    },
+    {
+      "id": "INC-10",
+      "name": "Indicator coverage: DEMA/TEMA reachable, VWMA, input bounds+tooltips, MA offset, Bollinger source",
+      "goal": "Close registry/math coverage gaps reusing packages/indicators. Add DEMA/TEMA registry+catalog rows (runner cases already exist — zero math); add vwma(values,volumes,length) to ma.ts + runner case reading candle.volume (no fabricated data); backfill min/max/step on all numeric inputs and add optional tooltip to IndicatorInputSpec rendered as help text + onChange clamp (a min-floor in runner.numberInput stops length 0 blanking a series); add an offsetInput()+shiftSeries for displaced MAs; add sourceInput()+source plumbing to Bollinger only (BollingerOptions gains optional source via pricesFromCandles) — NOT to CCI/Williams/MFI/Stochastic (HLC-defined; a source picker there would be misleading).",
+      "severity": "medium",
+      "effort": "M",
+      "findingIds": [
+        "COVERAGE-2",
+        "COVERAGE-4",
+        "COVERAGE-3",
+        "COVERAGE-5",
+        "SETTINGS-8"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "packages/indicators/src/runner.ts",
+        "packages/indicators/src/ma.ts",
+        "packages/indicators/src/volatility.ts",
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/indicator-panel.tsx"
+      ]
+    },
+    {
+      "id": "INC-11",
+      "name": "Sub-pane shared time axis + crosshair + real price scale (the blocker)",
+      "goal": "Make oscillator sub-panes real panes. Capture the live visible range via the already-wired onVisibleRangeChange callback into new subRange state and pass range + barWidth into SubPaneIndicators; replace the slice(-200) tail + i*xScale projection with the canvas's [fromTime,toTime] mapping; pass legendHoverIdx/hoverTime + the indChannelsRef map so SubPaneRow draws a crosshair line and a value-at-cursor readout in its header (read the shared channel map, don't recompute); compute min/max over the visible window and render graduated ticks aligned to the canvas axisWidth gutter instead of hardcoded width=360. Keep the SVG renderer (do not rebuild as a canvas layer).",
+      "severity": "blocker",
+      "effort": "L",
+      "findingIds": [
+        "PANES-1",
+        "PANES-5",
+        "PANES-6"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "packages/chart-core/src/chart-core.ts"
+      ]
+    },
+    {
+      "id": "INC-12",
+      "name": "Price-scale modes + axis context menu (log ticks, percent, auto, invert)",
+      "goal": "Make the declared-but-inert scale modes reachable and correct. Add a log-aware logTicks generator in grid.ts and branch GridLayer/AxisLayer on mode==='log' (hard prerequisite — linear ticks at log positions bunch unusably). Add ChartCore.setPriceScaleMode (sets state.mode, refits, markDirty) + percent/indexed math (rebase against first-visible close) in priceToY/yToPrice; add setAutoFit (extract onDblClick's fit body to share) and setInverted. Detect region:'price-axis' in onContextMenu (reuse the onPointerDown boundary tests) and render a PriceScaleContextMenu (Auto/Log/Percent/Regular/Invert) reusing the MenuItem/MenuSeparator primitives. Persist scaleMode on PaneState (rides the existing saveLayout panes serialization).",
+      "severity": "high",
+      "effort": "XL",
+      "findingIds": [
+        "SCALE-2",
+        "SCALE-1",
+        "SCALE-3",
+        "SCALE-4",
+        "SCALE-5",
+        "INTERACTION-3"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "packages/chart-core/src/layers/grid.ts",
+        "packages/chart-core/src/layers/axis.ts",
+        "packages/chart-core/src/scale.ts",
+        "packages/chart-core/src/chart-core.ts",
+        "apps/web/features/terminal/terminal-store.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ]
+    },
+    {
+      "id": "INC-13",
+      "name": "Legend overflow menu + move-to-pane (paneId becomes live state)",
+      "goal": "Add the per-indicator '…' overflow menu and make paneId actually drive rendering. Add a 4th hover button to IndicatorLegend opening a popover reusing the MenuItem/MenuSeparator pattern: Bring-to-front/Send-to-back (loop existing reorderIndicator), Settings, Remove, Reset-to-defaults (build explicit defaults from spec — NOT an empty-object patch, which the deep-merging updateIndicator no-ops), and Move-to-pane. Make paneId source-of-truth: give sub indicators unique pane ids at all three add paths + duplicate(), add moveIndicatorToPane store action, group sub-pane-indicators by inst.paneId, and have chart-pane's overlay loop honor paneId==='price'. Add group-focus-within reveal for keyboard a11y. Add-alert item defers to INC-14.",
+      "severity": "high",
+      "effort": "L",
+      "findingIds": [
+        "LEGEND-1",
+        "PANES-3",
+        "DND-2",
+        "MANAGER-3",
+        "DND-4",
+        "DND-5"
+      ],
+      "missionMap": "M6",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/terminal-store.ts",
+        "apps/web/features/terminal/indicator-manager-util.ts",
+        "packages/types/src/chart.ts"
+      ]
+    },
+    {
+      "id": "INC-14",
+      "name": "Create alert from indicator (M5) — engine + extracted evaluator + form + legend entry",
+      "goal": "Vertical slice that must land together to be functional. Extract the MT5 SignalRunner's inner evaluateCondition/evaluateConditions/indicatorRefs closures into a pure shared module (no accountId dependency) and import in both signal-runner and alert-engine. Add an 'indicator' discriminant to AlertDefinition.type + IndicatorAlertConfig reusing the SignalCondition union; make alertCreateSchema a discriminated union; branch alert-engine load()/evaluate() AND rowToAlert() with a legacy-default to 'ma_cross' so the 48 live alerts keep loading. Lift IndicatorCompareRow/PriceCrossesRow from signal-builder into a shared condition-editor and add an indicator-alert path to alerts-dialog seeded from a passed IndicatorInstance (copy full inputs → setIndicatorMetadata server-side). Add the legend/overflow 'Add alert' entry (depends on INC-13). NEVER touch the live alerts/Telegram config — open prefilled creation UI only.",
+      "severity": "high",
+      "effort": "XL",
+      "findingIds": [
+        "ALERTFROMIND-1",
+        "ALERTFROMIND-2",
+        "ALERTFROMIND-3",
+        "ALERTFROMIND-4",
+        "ALERTFROMIND-5",
+        "ALERTFROMIND-6",
+        "ALERTFROMIND-7"
+      ],
+      "missionMap": "M5",
+      "files": [
+        "apps/api/src/mt5/signal-runner.ts",
+        "apps/api/src/signal-conditions.ts",
+        "apps/api/src/alert-engine.ts",
+        "apps/api/src/routes/alerts.ts",
+        "apps/api/src/db.ts",
+        "packages/types/src/alerts.ts",
+        "apps/web/features/terminal/alerts-dialog.tsx",
+        "apps/web/features/terminal/signal-builder-dialog.tsx",
+        "apps/web/features/terminal/condition-editor.tsx",
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ]
+    },
+    {
+      "id": "INC-15",
+      "name": "Chart context menu staples + fixed-status-line OHLC + cursor affordances",
+      "goal": "Bring the right-click body menu and cursor up to TV staples. In chart-pane store {x,y,price,time} (the price/time are already computed and thrown away) and extend ChartContextMenu with Copy-price, Add-indicator (open dialog), Reset-chart (reuse onResetZoom), and Add-alert-at-price (open the INC-14 creation UI prefilled — never auto-create). Default the cursor-tracking TooltipLayer off (or gate behind a per-pane flag) now that the INC-6 status line shows OHLC, keeping the candle-column highlight by moving it to CrosshairLayer. Set canvas cursor (crosshair/grab/grabbing/ns-resize/ew-resize) from the pointer handlers.",
+      "severity": "high",
+      "effort": "M",
+      "findingIds": [
+        "INTERACTION-2",
+        "INTERACTION-1",
+        "INTERACTION-5"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "apps/web/features/terminal/chart-pane.tsx",
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/layers/tooltip.ts",
+        "packages/chart-core/src/layers/crosshair.ts",
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts"
+      ]
+    },
+    {
+      "id": "INC-16",
+      "name": "Pane resize separators + maximize/collapse",
+      "goal": "Add draggable sub-pane sizing and focus controls. Add optional paneHeight?/collapsed?/maximized? to IndicatorInstance; render a ~4px drag-handle above each SubPaneRow that calls updateIndicator({paneHeight}) (clamped, dbl-click reset, Arrow-key fallback) and use inst.paneHeight??80 for HEIGHT/svg; add header maximize/collapse buttons (collapsed→header only, maximized→full height, hide existing siblings). paneHeight rides classicIndicators persistence. The price-vs-sub boundary (flexing chart-container) is the heavier stretch since sub-panes are a sibling div below the canvas.",
+      "severity": "high",
+      "effort": "L",
+      "findingIds": [
+        "PANES-2",
+        "DND-3",
+        "PANES-4"
+      ],
+      "missionMap": "M6",
+      "files": [
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/terminal-store.ts",
+        "packages/types/src/chart.ts",
+        "packages/chart-core/src/viewport.ts"
+      ]
+    },
+    {
+      "id": "INC-17",
+      "name": "Drag-to-add from dialog + legend drag-reorder",
+      "goal": "Add the DnD interactions on top of the now-live paneId (INC-13). Make dialog rows draggable (onDragStart sets dataTransfer entryId); add onDragOver/onDrop to chart-container resolving the spec via INDICATOR_LOOKUP and calling addIndicator(buildInstance(spec)) — export buildInstance from indicators-dialog so chart-pane can call it. Make legend rows draggable to reorder via the existing reorderIndicator (+ a moveIndicatorTo(index) store action for precise drops). Keep click/Enter toggle and the up/down chevrons as keyboard fallbacks. True overlay-vs-new-pane drop targeting builds on INC-13's reassignable paneId.",
+      "severity": "medium",
+      "effort": "M",
+      "findingIds": [
+        "DND-1"
+      ],
+      "missionMap": "M6",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ]
+    },
+    {
+      "id": "INC-18",
+      "name": "Interaction feel: momentum pan, eased zoom, magnet crosshair, multi-pane Data Window, source-symbol (deferred)",
+      "goal": "Lower-priority feel + advanced polish, batched last. Add an optional momentum decay pass to the existing RAF loop (track pointer velocity, decay pan on flick, gated behind a flag so tests stay deterministic); add an opt-in magnet crosshair that snaps to the hovered bar's OHLC (factor findCandleAt out of tooltip.ts into a shared helper). Relax only the active guard so a hovered non-active pane can publish its Data Window snapshot (keep single-writer). Track per-indicator source-symbol (RSI of SPX on BTC) and left/secondary price scale as deferred XL roadmap items — must show no-data for symbols without a live feed, never fabricate candles.",
+      "severity": "low",
+      "effort": "XL",
+      "findingIds": [
+        "INTERACTION-4",
+        "INTERACTION-6",
+        "DATAWINDOW-6",
+        "BROWSER-5",
+        "SCALE-6"
+      ],
+      "missionMap": "NEW",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/scale.ts",
+        "packages/chart-core/src/layers/tooltip.ts",
+        "packages/chart-core/src/layers/crosshair.ts",
+        "packages/chart-core/src/viewport.ts",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/right-rail.tsx"
+      ]
+    }
+  ],
+  "quickWins": [
+    "BROWSER-1",
+    "COVERAGE-1",
+    "MANAGER-1",
+    "MANAGER-2",
+    "MANAGER-4",
+    "LEGEND-2",
+    "DATAWINDOW-4",
+    "DATAWINDOW-5",
+    "BROWSER-6",
+    "INTERACTION-5"
+  ],
+  "recommendedOrder": [
+    "INC-1",
+    "INC-3",
+    "INC-11",
+    "INC-6",
+    "INC-7",
+    "INC-8",
+    "INC-13",
+    "INC-4",
+    "INC-14",
+    "INC-15",
+    "INC-12",
+    "INC-5",
+    "INC-2",
+    "INC-10",
+    "INC-9",
+    "INC-16",
+    "INC-17",
+    "INC-18"
+  ],
+  "real": [
+    {
+      "id": "BROWSER-1",
+      "title": "Search matches only label/description substrings — no acronym/alias search",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "matches(e, group) at indicators-dialog.tsx lines 254-258 tests only e.label.toLowerCase().includes(lower), e.desc.toLowerCase().includes(lower), group.toLowerCase().includes(lower). The Entry union (lines 51-54) has label+desc only, no alias field; grep confirms zero 'alias' references in the file.",
+      "tvBehavior": "Search matches display name plus common aliases/acronyms: EMA→Moving Average Exponential, BB→Bollinger Bands, stoch→Stochastic. Acronym lookup is the primary discovery path.",
+      "gap": "No acronym/alias/synonym matching. Confirmed concrete: EMA's label is 'Exponential MA' and desc 'Exponential moving average' — neither contains the substring 'ema', so typing 'ema' surfaces ONLY Keltner Channels (desc 'EMA ± ATR channels'), not the actual EMA row. Typing 'bb' matches nothing (no label/desc contains 'bb'). 'rsi'/'macd'/'cci' work only because the label literally is the acronym. This is the single most common trader search and it frequently returns zero or wrong results.",
+      "fixRefined": "In apps/web/features/terminal/indicators-dialog.tsx add an optional `aliases?: string[]` to each variant of the `Entry` union (lines 51-54) and OR it into `matches()` (lines 254-258): `|| e.aliases?.some((a) => a.includes(lower))`. Populate aliases on the high-traffic CATALOG entries (ema→['ema','exp'], bollinger→['bb','bbands'], stochastic→['stoch'], williams_r→['wpr','%r'], macd already matches, sma→['sma'], vwap_bands→['bb? no'] etc). Pure additive change to the union + the matches predicate; no rebuild. Optionally single-source the longer text from INDICATOR_LOOKUP[type].description (already imported) so descriptions stay in one place.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified real and high-impact. The candidate's proposed `('aliases' in e && e.aliases?...)` works but is awkward; cleaner to add `aliases?` to all three Entry variants so the property exists structurally. Severity high is justified — acronym search is core TV parity for the browser dimension.",
+      "dimension": "browser"
+    },
+    {
+      "id": "BROWSER-2",
+      "title": "No left category sidebar — single long scroll instead of clickable category navigation",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "DialogContent is max-w-2xl (line 325) with one search Input (lines 341-357) and ONE scrolling column at line 361 (max-h-[56vh] overflow-y-auto). The sections useMemo (lines 262-284) stacks Favorites + Recently-used + every CATALOG group top-to-bottom. There are 8 CATALOG groups (~50 entries). No sidebar/activeGroup state exists (grep confirms).",
+      "tvBehavior": "Persistent LEFT category sidebar (Favorites, Personal, Technicals, Financials, Community) lets the user jump to a category; the result pane filters to the selection and works together with search.",
+      "gap": "No category scoping; the user must scroll the whole list or rely on inline uppercase group headers. Discoverability degrades as the catalog grows (saved scripts, more TA).",
+      "fixRefined": "Extend the existing DialogContent into a two-column flex layout: a left rail listing the CATALOG `group` names plus the 'Favorites'/'Recently used' pseudo-groups, backed by a new `activeGroup` state; clicking sets the filter that the existing `sections` useMemo (line 276 `for (const g of CATALOG)`) respects by skipping non-matching groups. Reuse the existing flatRows/keyboard-nav machinery (lines 286-311) unchanged — only the container layout and one guard in the loop change. Do not rebuild row rendering.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx"
+      ],
+      "effort": "M",
+      "notes": "Verified real. Medium is honest — it's a discoverability/scale gap, not broken. Fix lands correctly in the sections useMemo loop at line 276.",
+      "dimension": "browser"
+    },
+    {
+      "id": "BROWSER-3",
+      "title": "Saved PulseScripts are not browsable as indicators (no Personal / My scripts section)",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "indicators-dialog.tsx has zero references to pulse/script (grep confirmed NONE). Saved scripts live in code-terminal-dialog.tsx, fetched via api('/scripts') (line 77) and run onto the active pane via the store path setPulseSource/setPulseEnabled/setPulseInput + pulseResults (lines 50-63, 111). The CATALOG is a static built-in-only array. A saved PulseScript study cannot be found or added from the Indicators dialog.",
+      "tvBehavior": "Personal/'My scripts' is a first-class section in the indicator browser; the user's own saved scripts appear alongside built-ins and add the same way.",
+      "gap": "The two indicator systems (built-in TA and user PulseScripts) are siloed in separate dialogs. Real workflow gap for power users who write scripts.",
+      "fixRefined": "Extend indicators-dialog.tsx: on open, GET '/scripts' (same endpoint code-terminal-dialog.tsx line 77 uses) and synthesize Entry rows under a new `kind: 'script'` variant in the Entry union (lines 51-54). On toggle, set the active pane's pulse source via the SAME store actions the code terminal calls (setPulseSource(pane.id, source) + setPulseEnabled(pane.id, true)). Surface it as a leading 'My scripts' section when not searching, like Favorites/Recently-used. Additive — reuses existing endpoint + store, no new backend.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/code-terminal-dialog.tsx"
+      ],
+      "effort": "L",
+      "notes": "Verified real. Caveat: the pulse store is single-slot per pane (pane.pulse.source) — running a saved script overwrites the current pulse, unlike adding multiple built-in instances. The fix should acknowledge this (toggling a script row replaces the pane's pulse source, not stacks), or it risks surprising users. Severity medium is fair. Effort L is right given store/UX wiring.",
+      "dimension": "browser"
+    },
+    {
+      "id": "BROWSER-4",
+      "title": "No per-indicator details / About / info on rows in the browser",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Each row renders e.label + a single one-line e.desc (lines 393-405). No expand/info affordance. registry.ts has an optional `description?` field (line 35) populated on only 5 of 28 specs (sma line 49, rvol 303, vwap_bands 326, initial_balance 336, naked_poc 346); the dialog never reads INDICATOR_LOOKUP[type].description — it uses its own inline desc strings. No inputs/author preview.",
+      "tvBehavior": "Hovering/opening an indicator shows a short description/info (what it does, key inputs, sometimes author). Many show a read-more details panel.",
+      "gap": "Minor discoverability gap: a new user gets only one terse line, and the richer registry descriptions (RVOL/VWAP-bands/Naked-POC detail text) are stranded and unused.",
+      "fixRefined": "In indicators-dialog.tsx, for classic entries fall back to INDICATOR_LOOKUP[e.type]?.description (already imported at line 11) when present, else the inline desc; add an info icon next to the Star (lines 407-415) that reveals the full description plus an inputs summary from INDICATOR_LOOKUP[e.type].inputs. Pure extension of the row JSX. Note only the 'classic' Entry variant has a registry `type`; overlay/smc entries have no registry spec so they keep their inline desc.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "packages/indicators/src/registry.ts"
+      ],
+      "effort": "M",
+      "notes": "Verified real. Correctly low. One correction to the candidate: it says '5 of 28 specs' — the registry has 33 specs in INDICATOR_REGISTRY (counted), 5 with descriptions; the exact count is cosmetic to the finding. Fix is sound but only applies to classic (registry-backed) rows; overlay/smc rows aren't in the registry.",
+      "dimension": "browser"
+    },
+    {
+      "id": "BROWSER-5",
+      "title": "No per-indicator source-symbol picker in the browser",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "No symbol/source-symbol control in indicators-dialog.tsx (grep for sourceSymbol/source-symbol returns NONE). buildInstance (lines 153-164) sets inputs from spec defaults + paneId only; no per-instance source-symbol. registry sourceInput() (lines 355-371) only chooses a price field (open/high/low/close/hl2/hlc3/ohlc4), not a different ticker. Every indicator computes on the active pane's symbol.",
+      "tvBehavior": "When adding an indicator the source symbol can be chosen per indicator (e.g. RSI of SPX on a BTC chart).",
+      "gap": "Cross-symbol indicators unavailable. Genuinely lower priority for SC because it touches the data layer (needs secondary-symbol candles aligned to the chart's time index), not a dialog-only change.",
+      "fixRefined": "Deferable and correctly XL: requires an optional `sourceSymbol` on IndicatorInstance, fetching the secondary symbol's candles, and aligning them in the compute path — beyond the dialog. If pursued, add the selector to the future tabbed settings modal (roadmap M4b) gated behind data availability, NOT a browser row. Must NOT fabricate candles for symbols without a live feed (Yahoo/Binance/OANDA only). Recommend tracking as its own roadmap item.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "packages/indicators/src/registry.ts"
+      ],
+      "effort": "XL",
+      "notes": "Verified real but correctly down-prioritized to low/XL. Risk callout honored: the no-fabrication constraint is real — secondary symbols without a feed must show no-data, never synthetic candles. Should be a roadmap item, not folded into the browser increment.",
+      "dimension": "browser"
+    },
+    {
+      "id": "BROWSER-6",
+      "title": "Favorites/Recently-used vanish during search instead of staying as a fast path",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "indicator-prefs.ts implements favorites + recent (MAX_RECENT=12, line 11) with localStorage persistence and pure tested transforms (toggleFavorite/pushRecent/sanitize) — this MATCHES TV. But in indicators-dialog.tsx sections (line 264) the Favorites and Recently-used sections are pushed ONLY inside `if (!lower)`, so the instant the user types both pinned sections disappear entirely.",
+      "tvBehavior": "Favorites and Recently-used are persistent first-class sections; users rely on them as the fast path and they stay reachable while exploring (Favorites sorted-first within results).",
+      "gap": "A search hides the user's favorites/recents even when a favorited item matches the query, losing the curated fast-path during search.",
+      "fixRefined": "In the `sections` useMemo (lines 262-284), when searching, still surface matching favorites first — partition flatRows so favorited entries passing matches() render under a 'Favorites' header at the top, or keep the Favorites section filtered by the query. Favorites detection already exists via isFavorite(prefs, entryId(e)) (line 374). A few lines in the sections builder; no data/model change.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified real. Correctly low/S. The candidate's note that the prefs layer itself matches TV is accurate — the gap is purely the render-time `if (!lower)` guard at line 264.",
+      "dimension": "browser"
+    },
+    {
+      "id": "SETTINGS-1",
+      "title": "No tabbed settings modal — single flat inline editor, no Style/Visibility/Scale/About tabs",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorEditor (indicator-panel.tsx lines 222-318) renders one flat `grid grid-cols-2` of every spec.input plus a single hardcoded Color text field. Heading is just `{spec.label} · settings` with a Close ghost button. No tab container anywhere.",
+      "tvBehavior": "TV Settings is a modal split into Inputs / Style / Visibility / Properties(Scale) / About tabs.",
+      "gap": "Everything is one column; no Inputs/Style separation, no Visibility, no Scale/Properties, no About. This is the explicitly-unchecked roadmap item M4b in CLAUDE.md.",
+      "fixRefined": "Extend the `IndicatorEditor` function in apps/web/features/terminal/indicator-panel.tsx (lines 222-318) by wrapping its existing fields in the already-present Tabs primitive (apps/web/components/ui/tabs.tsx). Keep the current `spec.inputs.map(...)` loop as the 'Inputs' tab; add a 'Style' tab driven by spec.channels/spec.style; add an 'About' tab from spec.description+spec.label. Drive all tab content from IndicatorSpec (registry.ts) — no per-indicator forms. Do not rebuild; wrap existing fields.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "packages/indicators/src/registry.ts"
+      ],
+      "effort": "L",
+      "notes": "Confirmed real. tabs.tsx already exists in components/ui, so the primitive is in hand. This is the parent of SETTINGS-2/3/4/6 — they land inside the Style tab this creates.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-2",
+      "title": "Color is a raw hex text input, not a swatch + color picker with opacity",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorEditor renders Color as `<input type=\"text\" value={String(inst.style.color ?? spec.style.color ?? '#42a5f5')} ... className=\"... font-mono\">` (indicator-panel.tsx lines 304-314). Only the single `color` key is editable; multi-plot style keys (macdColor, middleColor, bandColor, conversionColor, etc.) are not surfaced at all. The observed brief confirms a raw '#2196f3' string and 'No opacity'.",
+      "tvBehavior": "Every plot color is a clickable swatch opening a palette+hue+alpha popover; opacity is first-class on the same control.",
+      "gap": "Hand-typed hex is error-prone and off-brand; no opacity even though the band renderer already accepts rgba fillColor; multi-plot indicators expose only the one primary color.",
+      "fixRefined": "Add a small ColorSwatch component in apps/web/features/terminal/ that composes apps/web/components/ui/popover.tsx (a preset palette + native `<input type=\"color\">` + an opacity Slider from apps/web/components/ui/slider.tsx → rgba). Render one swatch per relevant style key the spec declares (iterate spec.style color-keys, mirroring the legendColor key list in indicator-legend-util.ts) instead of the single hardcoded color field. Store path unchanged: still `onChange({ style: { ...inst.style, [key]: value } })`.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/components/ui/popover.tsx",
+        "apps/web/components/ui/slider.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed real. Verified popover.tsx and slider.tsx both exist in components/ui (candidate said 'reuse the existing Radix popover' — it is present). Renderer genuinely consumes rgba via band.fillColor (indicators.ts L87), so opacity is wired-through-able with no chart-core change. Refined the file list to the concrete primitive paths.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-3",
+      "title": "No per-plot line width / line style (solid·dashed·dotted) controls — renderer supports them but UI and most push-sites don't expose them",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorsLayer.render consumes line.lineWidth (default 1.5) and line.dash → setLineDash (packages/chart-core/src/layers/indicators.ts lines 102-103). BUT the common MA/EMA/overlay push passes only `{ id, channel, values, color }` (chart-pane.tsx line 1131); supertrend/vwap/IB/poc pass a HARDCODED lineWidth (1.5/1.25/0.75) but never read inst.style.lineWidth. Registry stores a default lineWidth:1.5 on MAs (registry.ts e.g. line 48,60) that the editor never surfaces. No lineStyle/dash field is user-editable anywhere.",
+      "tvBehavior": "Every line plot gets a width stepper + style dropdown (solid/dashed/dotted), applied live.",
+      "gap": "Users can't change thickness or dash even though the rendering primitive accepts both — the data isn't threaded style→chart-pane→layer and no control exists.",
+      "fixRefined": "(1) In the new Style tab (SETTINGS-1) add a `lineWidth` number stepper + `lineStyle` enum (solid/dashed/dotted). (2) In chart-pane.tsx, in the overlay switch (lines 1122-1240), thread `lineWidth: Number(inst.style.lineWidth ?? spec.style.lineWidth ?? 1.5)` and map lineStyle→dash (dashed:[6,4], dotted:[2,3], solid:undefined) into the existing lines.push(...) calls — start with the MA/EMA case at line 1131 which currently passes none. Sub-pane lines (sub-pane-indicators.tsx) need the same thread for parity. Renderer needs no change. Add lineWidth/lineStyle optional defaults on line-type specs in registry.ts.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "packages/indicators/src/registry.ts"
+      ],
+      "effort": "M",
+      "notes": "Confirmed real. Minor correction to the candidate: it's not true that ALL push-sites omit lineWidth — supertrend(L1175-76), vwap_bands(L1211), IB(L1218-20) and naked_poc pass hardcoded literals; but none read inst.style and the user-facing MA/EMA case (L1131) passes nothing. Added sub-pane-indicators.tsx to files for full parity (sub-pane oscillators render in a separate React canvas, not IndicatorsLayer).",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-4",
+      "title": "No per-plot enable checkbox, price-line toggle, or value-in-status-line toggle in Style",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Visibility is all-or-nothing per instance: the eye button calls `updateIndicator(pane.id, inst.id, { visible: !inst.visible })` (indicator-panel.tsx lines 104-109). chart-pane's overlay switch always pushes every channel a spec declares; buildLegendRows always reads spec.channels[0]; buildDataWindow maps all spec.channels. IndicatorInstance.style is a flat Record (packages/types/src/chart.ts lines 89-98) with no per-channel structure. No price-line concept for indicator plots exists.",
+      "tvBehavior": "Style lists each plot with an enable checkbox + per-plot price-line + show-value-in-status-line toggles.",
+      "gap": "For multi-plot indicators (MACD, Bollinger, Ichimoku) users can't hide one plot, suppress one value from the legend, or add a per-plot price line.",
+      "fixRefined": "Add an optional `plots` field to IndicatorInstance (packages/types/src/chart.ts) keyed channel→{enabled,priceLine,showInLegend}, defaulted from spec.channels. Render per-plot checkboxes in the Style tab. In chart-pane.tsx overlay switch (lines 1122-1240) skip pushing a line/band whose channel is disabled; in indicator-legend-util.ts buildLegendRows and data-window-util.ts buildDataWindow respect showInLegend. Keep the instance-level `visible` eye as the master switch. Additive — absent flags default enabled, so existing instances are unaffected. (Price-line is the larger sub-part — it needs a new horizontal-line draw in IndicatorsLayer; scope it as a stretch.)",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/data-window-util.ts",
+        "packages/types/src/chart.ts"
+      ],
+      "effort": "L",
+      "notes": "Confirmed real. Added data-window-util.ts to files (it also unconditionally lists all channels at line 90-93, so showInLegend should gate it too for consistency). The price-line part has no existing primitive (IndicatorsLayer has no horizontal-level draw), so it is the heaviest sub-part — noted as stretch; the enable/showInLegend toggles are the cheap, high-value core.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-5",
+      "title": "No Defaults menu — cannot Save as default, Reset settings, or save/apply templates",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorEditor has only a Close button (indicator-panel.tsx lines 239-241) — no Defaults/Reset UI. onPick seeds every new instance from registry: `inputs: Object.fromEntries(spec.inputs.map((i)=>[i.key,i.default]))` and `style: { ...spec.style }` (lines 76-80). No per-type user-default persistence; indicator_layouts persists active instances, not defaults.",
+      "tvBehavior": "Settings has a Defaults menu: Save as default / Reset settings / Reset to TV defaults, plus named templates.",
+      "gap": "A user who always wants EMA(50) in orange must reconfigure every add; no reset path, no templates.",
+      "fixRefined": "Add a small Defaults menu to the IndicatorEditor header (next to Close, indicator-panel.tsx line 235-242) with 'Save as default' / 'Reset to defaults'. Persist per-type user defaults in localStorage following the exact pattern of indicator-prefs.ts (versioned KEY, sanitize/read/write side-effect wrappers — extend that module or add a sibling). In onPick (lines 70-84) merge saved defaults over spec defaults. 'Reset to defaults' restores spec.inputs/spec.style. Do not touch indicator_layouts or any alert config.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-prefs.ts"
+      ],
+      "effort": "M",
+      "notes": "Confirmed real. indicator-prefs.ts is exactly the localStorage pattern the candidate cites (KEY 'sc.indicatorPrefs.v1', pure sanitize/toggle + read/write wrappers) — a clean place to extend. No conflict with the protected alerts/Telegram config.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-6",
+      "title": "No per-instance precision / decimals control",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "formatIndicatorValue (indicator-legend-util.ts lines 51-56) picks decimals purely by magnitude (>=100→2, >=1→3, >=0.01→5, else 8) with no override. It is the single formatter used by both buildLegendRows (line 90) and buildDataWindow (data-window-util.ts lines 90-93). No precision key on IndicatorInstance/style; editor exposes no precision field.",
+      "tvBehavior": "Style/Properties lets you set display precision, driving the status-line value and the indicator's price-axis labels.",
+      "gap": "Can't pin an oscillator to 2 decimals or show more precision on a sub-dollar MA — everything is locked to the heuristic.",
+      "fixRefined": "Give formatIndicatorValue an optional `precision?: number` 2nd arg (fall back to the current magnitude heuristic when undefined) in indicator-legend-util.ts. Add an optional `precision` style key set via a number stepper in the Style/Properties tab (indicator-panel.tsx). Thread it through buildLegendRows (pass inst.style.precision) and buildDataWindow so legend + Data Window agree. Additive/back-compatible.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/data-window-util.ts"
+      ],
+      "effort": "M",
+      "notes": "Confirmed real. Note formatVolume (data-window-util.ts L42) is separate and should stay magnitude-based; precision should apply only to the indicator-value path, not volume. The candidate's 'price-axis labels' parity is out of scope here (sub-pane axis formatting is elsewhere) — the legend+Data Window thread is the achievable core.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-7",
+      "title": "Settings editor is docked in the right rail, not a movable/centered dialog",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorEditor renders inline below the instance list inside the right-rail Ind panel (indicator-panel.tsx lines 175-182, inside IndicatorPanel's div). It's a fixed-width rail element; the observed brief confirms the instance name truncates to 'Ex…'. The legend gear routes here via requestIndicatorSettings → set({ rightRailTab:'ind', indicatorSettingsTarget:id }) (terminal-store.ts line 416).",
+      "tvBehavior": "Settings is a draggable centered modal floating over the chart.",
+      "gap": "Cramped width forces truncation and a single column; no reposition over the live plot.",
+      "fixRefined": "When the tabbed editor (SETTINGS-1) is built, render it inside apps/web/components/ui/dialog.tsx (present in the components library) keyed off the same `editing` state in IndicatorPanel (indicator-panel.tsx line 21,175-182). Keep both entry points working: the rail gear (setEditing) and the legend gear (requestIndicatorSettings/indicatorSettingsTarget effect, lines 35-40) — just have them open the dialog. Keep the rail instance list itself.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/components/ui/dialog.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed real. dialog.tsx exists. Verified the legend→settings route is exactly terminal-store.ts L416 as cited. Honestly low priority (compounds the missing controls rather than being a control itself). Note TV's full drag-to-reposition is a stretch beyond a centered Radix Dialog; a centered modal already removes the truncation, which is the real pain.",
+      "dimension": "settings"
+    },
+    {
+      "id": "SETTINGS-8",
+      "title": "Source dropdown missing on several indicators; candidate overstates how many can honor one",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "sourceInput() is attached only to sma/ema/wma/hma/dema/tema/rsi/macd/roc (registry.ts lines 46,58,67,75,84/86,98,143 + sourceInput at 355-371). The runner honors inputs.source ONLY for those (runner.ts lines 74-115,145). Many indicators omit it. CRITICAL CHECK: the candidate claims CCI/Williams %R/MFI/Stochastic/Bollinger/Keltner 'math already accepts a source' — that is FALSE: WilliamsROptions/CCIOptions/MFIOptions take only {length} (oscillators.ts 97-164), StochasticOptions has no source, and BollingerOptions/KeltnerOptions (volatility.ts 32,70) take only length/multiplier. CCI/Williams/MFI are definitionally typical-price/high-low studies.",
+      "tvBehavior": "Most TV overlay/oscillator indicators expose a Source dropdown in Inputs.",
+      "gap": "Bollinger and Keltner genuinely have a legitimate, common 'source' variant (TV's Bollinger defaults to close and lets you change it) but offer no Source dropdown; their math does NOT yet accept a source, so it's a math+registry change, not registry-only.",
+      "fixRefined": "Limit the change to where it is defensible. The cheap, correct part: add sourceInput() to the registry entries whose math ALREADY accepts a source (none are missing today — sma/ema/etc already have it), so registry-only coverage is already complete. The real remaining work is Bollinger (and optionally Keltner middle): add an optional `source?: PriceSource` to BollingerOptions in packages/indicators/src/volatility.ts (compute the SMA basis from pricesFromCandles(candles, source) instead of close), thread inputs.source in runner.ts case 'bollinger' (lines 156-167), then add sourceInput() to the bollinger registry entry. Do NOT add a Source dropdown to CCI/Williams/MFI/Stochastic — their math is high/low/typical-price by construction and a source picker there would be fake/misleading.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "packages/indicators/src/volatility.ts",
+        "packages/indicators/src/runner.ts"
+      ],
+      "effort": "S",
+      "notes": "Downgraded medium→low and corrected the scope. The candidate's premise ('add sourceInput where computeAll already accepts a source') is mostly already satisfied — every MA/RSI/MACD/ROC already has it. The only genuinely-missing meaningful case is Bollinger (real source variant), which requires a math change (volatility.ts), so the candidate's 'registry data change only / editor needs no change' is wrong for that case. Adding source to CCI/Williams/MFI/Stochastic would violate the 'never fake values' constraint, so I narrowed the fix to Bollinger only.",
+      "dimension": "settings"
+    },
+    {
+      "id": "LEGEND-1",
+      "title": "Legend row has no \"more\" (…) overflow menu — per-indicator actions (move to pane / pin to scale / visual order / source code / reset) all unreachable from the legend",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed in apps/web/features/terminal/indicator-legend.tsx lines 36-64: the group-hover span renders exactly three buttons — Eye/EyeOff (onToggleVisible), Settings2 (onSettings), X (onRemove). No MoreHorizontal/… button, no popover. The only MoreHorizontal import in the terminal feature is in left-rail.tsx (unrelated). The menu primitives ChartContextMenu/MenuItem/MenuSeparator do exist in chart-pane.tsx (defined lines 1488/1555/1575, used lines 1512-1543) and are reusable.",
+      "tvBehavior": "On hover, each TV legend row exposes a … overflow menu: Add alert on this indicator, Move to (existing/new pane above/below), Pin to scale (left/right/none), Visual order (bring to front/send to back), Source code, Reset settings, Remove. Primary discoverability surface for per-indicator actions.",
+      "gap": "None of these per-indicator actions are reachable from the legend. Reorder exists only in the right-rail Ind panel via reorderIndicator. IndicatorInstance.paneId exists (packages/types/src/chart.ts line 93) but no UI mutates it, so Move-to-pane is unreachable. No reset-to-defaults, no add-alert-from-indicator, no source/about.",
+      "fixRefined": "Add a 4th hover button (MoreHorizontal from lucide-react) to IndicatorLegend opening a small popover that reuses the MenuItem/MenuSeparator pattern from chart-pane.tsx. Wire the items that already have store actions: Bring to front / Send to back via the EXISTING reorderIndicator(pane.id, id, 'up'|'down') called in a loop to the list edge; Settings via existing onSettings; Remove via existing onRemove. IMPORTANT CORRECTION to the candidate fix: 'Reset to defaults' must NOT be updateIndicator(pane.id,id,{inputs:{},style:{}}) — terminal-store.ts updateIndicator (line 394) DEEP-MERGES inputs/style (inputs:{...i.inputs,...patch.inputs}), so an empty object is a no-op and tuned values survive. Instead build explicit defaults from the spec: const spec=INDICATOR_LOOKUP[inst.type]; updateIndicator(pane.id,id,{inputs:Object.fromEntries(spec.inputs.map(i=>[i.key,i.default])), style:{...spec.style}}) (spec.inputs[].default and spec.style confirmed in packages/indicators/src/registry.ts lines 13/31/33; preserve inst.name so M4a numbering isn't clobbered). Pass pane.id, reorderIndicator, updateIndicator into IndicatorLegend props from the call site (chart-pane.tsx line 1418). Defer Add-alert to M5 and Move-to-pane/Pin-to-scale to M4b/M6 (need new store actions on paneId/scale). Source code should point at PulseScript, NOT clone Pine.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "M",
+      "notes": "Real and high-value. The only error in the candidate was the Reset-to-defaults snippet which would be a silent no-op against the deep-merging updateIndicator; corrected above. Everything else (button count, menu primitives, store actions) verified accurate.",
+      "dimension": "legend"
+    },
+    {
+      "id": "LEGEND-2",
+      "title": "Double-click a legend row does not open its Settings",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed: the row <div> in indicator-legend.tsx (lines 26-31) has no onDoubleClick/onDblClick handler; a repo grep across the terminal feature returns no onDoubleClick. Settings only reachable via the hover gear (onSettings → requestIndicatorSettings in terminal-store.ts line 416, which sets rightRailTab:'ind'+indicatorSettingsTarget). The wiring works today.",
+      "tvBehavior": "Double-clicking anywhere on a TV legend row opens that indicator's Settings — a muscle-memory shortcut not requiring the gear icon.",
+      "gap": "Users expecting TV double-click-to-configure get no response; settings only reachable via the small hover gear.",
+      "fixRefined": "Add onDoubleClick={()=>onSettings(r.id)} to the row <div> in IndicatorLegend (reusing the same onSettings prop the gear already calls → requestIndicatorSettings). Add e.stopPropagation() on the existing inner eye/gear/X buttons' onClick so a fast double-tap on a button doesn't also double-fire the row handler. Tiny, reuses existing path.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified real and the fix lands correctly. Note: SC routes settings to the right-rail Ind tab (an inline editor), not a movable dialog — TV opens a modal — but that modal upgrade is tracked separately as M4b; the double-click itself is the gap here and the fix is correct. Severity medium is fair.",
+      "dimension": "legend"
+    },
+    {
+      "id": "LEGEND-3",
+      "title": "No symbol status-line legend (OHLC + change) at top-left of the pane",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. IndicatorLegend (rendered chart-pane.tsx line 1418) renders only indicator rows. The pane header (chart-pane.tsx lines 1394-1411) shows symbol label + interval/chartType badges + last.price + last.change percent, but last is set only from the latest candle / live ticks (setLast at lines 364, 392, 451) — never from the crosshair index — and shows only price + percent (no O/H/L/C, no absolute change). OHLC appears only in (a) the floating crosshair tooltip drawn by layers/tooltip.ts that tracks the cursor (sc-observed.md line 32 confirms this is NOT TV's approach) and (b) the right-rail Data Window. legendHoverIdx (chart-pane.tsx lines 1344-1360) and candleBufRef (full OHLC) are already computed.",
+      "tvBehavior": "TV's top-left status line shows the SYMBOL's own legend row: ticker + O/H/L/C + absolute and percent change for the crosshair bar (latest off-chart), bull/bear coloured, co-located with the indicator legend rows and crosshair-aware.",
+      "gap": "No always-visible, crosshair-aware O/H/L/C + change line co-located with the indicator legend — the institutional default reading position. The cursor-tracking floating tooltip is explicitly not what TV does for OHLC.",
+      "fixRefined": "Render a symbol status row at the TOP of the IndicatorLegend stack (either a new SymbolStatusLine sibling above it in chart-pane.tsx, or a header slot in IndicatorLegend). Feed it candleBufRef.current[legendHoverIdx] (already computed; gate on legendHoverIdx>=0) and reuse formatPrice/formatPercent (already imported at chart-pane.tsx line 71) plus formatIndicatorValue/existing text-bull/text-bear classes used in the header (lines 1407-1408). Pure render of buffered candles — no new data fetch, does not touch or replace the floating tooltip or the header.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "Verified real. Confirmed the header's last is latest-only (3 setLast sites, none crosshair-indexed) and OHLC lives only in the floating tooltip + Data Window. High severity is justified — this is a core institutional reading surface TV has and SC lacks. Note one nuance: IndicatorLegend currently returns null when rows.length===0 (line 22); if the symbol status row is folded into IndicatorLegend, that early return must change so the status line shows even with zero indicators. Cleaner to render it as a sibling in chart-pane.tsx.",
+      "dimension": "legend"
+    },
+    {
+      "id": "LEGEND-4",
+      "title": "No loading/computing state on legend rows while an indicator is recomputing",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. buildLegendRows (indicator-legend-util.ts lines 72-95) always emits a value string — a number or formatIndicatorValue(undefined) → '—' (line 52) for missing/NaN/warmup. LegendRow (lines 58-65) has no computing field. Recompute happens synchronously in the chart-pane effect (lines 554-571): it rebuilds indChannelsRef then bumps legendTick (setLegendTick line 569). So '—' during warmup is indistinguishable from a transient empty recompute.",
+      "tvBehavior": "While an indicator is computing (just added, or recomputing after a settings change on a large dataset), TV shows a loading indicator in that row instead of a stale/blank value.",
+      "gap": "A freshly-added or recomputing indicator briefly shows '—' with no in-flight signal; users can't tell 'still loading' from 'no value at this bar'.",
+      "fixRefined": "Add an optional computing?:boolean to LegendRow (indicator-legend-util.ts) and to IndicatorLegend's render: when r.computing, show a small spinner in place of the value (reuse the animate-spin rounded-full border-2 spinner markup already used for the chart loading overlay in chart-pane.tsx lines 1430-1431). Set it true at the start of the lines 554-571 effect before computeAll and clear after indChannelsRef is set/legendTick bumped. Keep additive (default false) so existing tests are unchanged.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend-util.ts",
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "S",
+      "notes": "Real but genuinely low — SC's computeAll is synchronous and fast, so the visible window is essentially one render frame; the practical value is mostly for warmup/large-dataset clarity. The candidate's caveat is correct and severity is honest. Implementation caveat: the recompute effect is synchronous within a single render pass, so naively setting computing=true then false in the same effect body won't produce two paints — to actually show the spinner you'd need to flip it on in a layout-effect before the heavy work or only show it on first-add. Worth noting but doesn't change that the gap is real.",
+      "dimension": "legend"
+    },
+    {
+      "id": "LEGEND-5",
+      "title": "Legend cannot be collapsed/minimized",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. IndicatorLegend always renders every row in a fixed absolute left-2 top-2 flex column capped at max-w-[62%] (line 24); it returns null only when rows.length===0 (line 22). No collapse toggle, no persisted collapsed flag anywhere (grep for legendCollapsed/collapse in the legend component returns nothing; the only collapse state in the terminal is right-rail.tsx's symbol-category collapse, unrelated).",
+      "tvBehavior": "TV lets the user collapse the legend (a chevron) so a crowded chart isn't obscured top-left; collapsed state hides the rows behind a compact toggle.",
+      "gap": "On a busy chart the legend permanently occupies up to 62% of the top-left width with no minimize, unlike TV. Compounds if the LEGEND-3 symbol status row is added.",
+      "fixRefined": "Add a small chevron toggle at the top of the IndicatorLegend stack backed by local useState (collapsed) — or a per-pane legendCollapsed flag in terminal-store.ts if persistence is wanted — that, when collapsed, renders only a compact pill (e.g. indicator count) and hides the rows. Purely additive; no compute/data impact.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "S",
+      "notes": "Real and accurately described. Nice-to-have; low severity is correct. Local useState is the minimal version (no store change needed) — only touch terminal-store.ts if cross-reload persistence is desired.",
+      "dimension": "legend"
+    },
+    {
+      "id": "DATAWINDOW-1",
+      "title": "Indicator plot values are not colour-keyed to their plot colour",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "buildDataWindow (data-window-util.ts:86-94) emits ONE color per indicator via legendColor(spec, inst), which walks a fixed priority key list (indicator-legend-util.ts:26-43) and returns only the first matching style key. That single color paints the indicator HEADER swatch (right-rail.tsx:126). Each channel value row (right-rail.tsx:130-135) carries no colour: label is text-muted-foreground, value is text-foreground/90. DataWindowChannel (data-window-util.ts:11-14) has only {label,value}. So for MACD the three rows (macd/signal/histogram) are identical grey.",
+      "tvBehavior": "In TradingView's Data Window each plot's value is colour-keyed to the exact colour it is drawn with (MACD line blue, signal red, histogram its bar colour; Bollinger basis/upper/lower each their own).",
+      "gap": "Multi-plot indicators (MACD, Stochastic, ADX/DMI, Bollinger, Ichimoku, Supertrend, VWAP bands) lose the per-plot colour key. Note the header DOES already show one swatch + the numbered inst.name, so it is not fully ambiguous — hence medium not high.",
+      "fixRefined": "Add `color: string` to DataWindowChannel (data-window-util.ts:11-14) and resolve it per channel inside buildDataWindow's `spec.channels.map(...)` (data-window-util.ts:90-93). Lift the colorFor logic from sub-pane-indicators.tsx:74-77 into an exported pure helper in indicator-legend-util.ts (e.g. `channelColor(spec, inst, channel)`); both call sites reuse it. CRITICAL: the bare `${channel}Color` rule is INSUFFICIENT — verified registry mismatches: ADX channels adx/plusDI/minusDI vs style keys adxColor/plusColor/minusColor (registry.ts:202-204), and Bollinger upper/lower/bandwidth/percentB have NO matching colour key (registry.ts:171,176). So the helper needs an explicit channel→styleKey alias map (plusDI→plusColor, minusDI→minusColor, upper/lower→bandColor, percentB/bandwidth→bandColor/middleColor) plus the existing fallback chain inst.style→spec.style→spec.style.color→default. Then in right-rail.tsx:131-134 render a 2px swatch before each channel label using ch.color.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/data-window-util.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/right-rail.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/indicator-legend-util.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed in code. legendColor returns single color; DataWindowChannel has no color field; channel rows render colourless. The candidate's own warning about the non-uniform registry key naming is accurate and verified (ADX plusDI→plusColor, Bollinger upper/lower→bandColor only). Downgraded high→medium: the header swatch + numbered names already disambiguate per-INSTANCE; this is per-CHANNEL polish for the handful of multi-plot indicators.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "DATAWINDOW-2",
+      "title": "Channel labels are raw internal keys, not human-readable plot names",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "buildDataWindow (data-window-util.ts:90-92) sets channel label = the raw registry channel key (`label: name`). right-rail.tsx:132 renders it with CSS `capitalize` only. Verified registry keys that surface verbatim: macd/signal/histogram, k/d (stochastic), plusDI/minusDI/adx, spanA/spanB/conversion/base/lagging (ichimoku), percentB/bandwidth (bollinger), upper1/lower1/upper2/lower2 (vwap_bands). camelCase keys (spanA, percentB, plusDI) do not split on `capitalize`, so they read run-together (\"SpanA\", \"PercentB\", \"PlusDI\").",
+      "tvBehavior": "TradingView labels each plot row with a display name: MACD, Signal, Histogram, %K, %D, Leading Span A, +DI, -DI, Upper, Basis, Lower.",
+      "gap": "Plot rows show raw camelCase keys instead of readable names — looks unpolished for a product at institutional quality.",
+      "fixRefined": "Add optional `channelLabels?: Record<string,string>` to IndicatorSpec (registry.ts:22-36) and populate friendly names on the multi-channel specs (macd→MACD, signal→Signal, histogram→Histogram, k→%K, d→%D, plusDI→+DI, minusDI→-DI, spanA→Span A, percentB→%B, etc.). In buildDataWindow read `spec.channelLabels?.[name] ?? name` at data-window-util.ts:91. Registry is the right SSOT since the legend/sub-pane can reuse it. Acceptable fallback: a label map kept local in data-window-util.ts if a registry change is unwanted. No TA/math touched.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/data-window-util.ts",
+        "/Volumes/PortableSSD/new start/supercharts/packages/indicators/src/registry.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/right-rail.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed: label is set to the raw channel key and rendered with only `capitalize`. The specific camelCase keys (spanA, percentB, plusDI, etc.) verified present in registry.ts. Fix is metadata-only, respects the 'extend not rebuild' and 'no duplicate math' constraints. Severity medium is honest.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "DATAWINDOW-3",
+      "title": "PulseScript, SMC suite and Signals & Trend Score never appear in the Data Window",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The Data Window publish effect (chart-pane.tsx:1371-1385) passes ONLY `pane.classicIndicators` to buildDataWindow. PulseScript output (res.plots, computed in chart-pane.tsx:1276-1296, each plot has title + per-bar values index-aligned to bars, palette at line 1280) is rendered to the pulse-script layer but not snapshotted. The 11-indicator SMC suite (chart-pane.tsx:594-662) computes anchoredVwap (AnchoredVwapResult.vwap: Float64Array per bar) and cvd (CvdResult.cvd: Float64Array per bar) — but these go to layer.frame only, not state. STS (chart-pane.tsx:666-750) computes stsFrame held in state (setStsFrame, chart-pane.tsx:116,694) with per-bar Float64Arrays (ema21, rsiSeries, atrSeries, vwapSeries, stLine, adx, diPlus, diMinus). None reach buildDataWindow.",
+      "tvBehavior": "TradingView's Data Window lists EVERY indicator on the chart — including custom Pine scripts — with each plot's value at the crosshair.",
+      "gap": "The two flagship original features (PulseScript, SMC/order-flow) plus STS are invisible in the Data Window — incomplete for exactly the tools that differentiate SuperCharts.",
+      "fixRefined": "Extend buildDataWindow's inputs additively (data-window-util.ts:51-98 signature + loop at 81-95). (a) PulseScript — cheapest: stash the latest RunResult.plots in a ref (mirroring indChannelsRef at chart-pane.tsx:147) inside the pulse effect, pass it as a new optional `pulsePlots` arg, emit one DataWindowIndicator named from res.meta with one channel per plot (value at `index`, colour = the per-plot color resolved at chart-pane.tsx:1282). (b) SMC: surface anchoredVwap.vwap[index] and cvd.cvd[index] as DataWindowIndicator entries — read the EXISTING frames (already arrays), never recompute; note these are computed in a useEffect into layer.frame today, so to read them in the publish effect you must also keep them in a ref/state (small additive change). (c) STS: read stsFrame (already in React state) scalars at `index` (vwap/ema21/rsi/atr/adx + trendDir). Gate each behind its enabled flag (pane.pulse.enabled, pane.smc.*, pane.overlays.signalsTrendScore) so hidden suites add nothing. Reuse @supercharts/indicators / chart-core frames — do not duplicate math. Keep OHLCV + classic path untouched. Do NOT touch the live alert/Telegram config or PulseScript language identifiers.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/data-window-util.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "L",
+      "notes": "Verified: buildDataWindow call (chart-pane.tsx:1373-1383) passes only pane.classicIndicators. AnchoredVwapResult.vwap, CvdResult.cvd, and SignalsTrendScoreFrame.* are all per-bar Float64Arrays (so index-readable, no recompute needed) — confirmed in anchored-vwap.ts:15-20, cvd.ts:26-29, signals-trend-score.ts:44-71. One refinement to the candidate's fix: SMC anchoredVwap/cvd currently live in a useEffect that writes ONLY layer.frame (chart-pane.tsx:643-656), NOT React state — unlike stsFrame which IS in state. So surfacing SMC requires also stashing those frames in a ref/state, a slightly larger change than the candidate implies (still L, but worth flagging). STS path is genuinely cheap (stsFrame already in state). high is the correct severity.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "DATAWINDOW-4",
+      "title": "No source-price row and no coloured Change bar",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "DataWindowPanel (right-rail.tsx:104-120) renders Open/High/Low/Close/Change/Change %/Volume as plain text rows via the local Row component (right-rail.tsx:97-102). Change and Change % only get a text-colour class (text-bull/text-bear via `sign` at right-rail.tsx:93). No coloured bar element; no source-price row. The `up` flag exists on DataWindowOhlcv (data-window-util.ts:29, set at line 77). Observed brief confirms 'No source-price row, no coloured change bar'.",
+      "tvBehavior": "TradingView shows O/H/L/C then Change and Change% WITH a small coloured up/down bar/indicator for an at-a-glance directional read.",
+      "gap": "Direction conveyed only by subtle 11px text colour; missing TV's coloured-bar affordance. Minor polish, not a data-completeness blocker.",
+      "fixRefined": "In right-rail.tsx extend the Change/Change% rows (lines 117-118) to prepend a thin 2-3px rounded bar span tinted bg-bull/bg-bear keyed off `o.up` (data-window-util.ts:29 already exposes it). The local Row helper (right-rail.tsx:97-102) would need a small optional `bar?: boolean` prop or a dedicated row variant. No new data. Source-price row is lower value (indicators only expose source as an input string) — skip unless trivial.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/right-rail.tsx"
+      ],
+      "effort": "S",
+      "notes": "Confirmed: Change/Change% rows are text-only with sign colour; o.up flag present and usable. Pure presentational, no data fabrication. low/polish is correct. Note the candidate's line citation 117-118 is exact.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "DATAWINDOW-5",
+      "title": "Hidden indicators are not visually distinguished — they render as all-dashes",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "buildDataWindow (data-window-util.ts:85): `const series = inst.visible ? channelsByInstance.get(inst.id) : undefined;` — a hidden instance has series=undefined, so every channel formats to '—' (formatIndicatorValue, indicator-legend-util.ts:52). DataWindowIndicator (data-window-util.ts:15-20) does NOT carry `visible`, so right-rail.tsx:124-128 paints the header (name + colour swatch) at full opacity. A hidden EMA is visually identical to a visible-but-warming-up EMA (both: full header + dashes).",
+      "tvBehavior": "TradingView keeps a hidden indicator in the window but dims/marks it off, and shows n/a where a plot has no value — hidden, warming-up, and no-data are distinguishable.",
+      "gap": "Hidden vs warmup/NaN are indistinguishable; the M3 spec intent ('— for hidden/warmup/NaN', per CLAUDE.md) collapses all three to the same look.",
+      "fixRefined": "Carry `visible: boolean` on DataWindowIndicator (data-window-util.ts:15-20); `inst.visible` is already in scope at data-window-util.ts:85 (note: the buildLegendRows path already carries `visible` on LegendRow at indicator-legend-util.ts:58-65, so this just mirrors an existing pattern). In right-rail.tsx:124-128 dim the header (opacity-50 + EyeOff icon — EyeOff is ALREADY imported at right-rail.tsx:4) when `!ind.visible`.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/data-window-util.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/right-rail.tsx"
+      ],
+      "effort": "S",
+      "notes": "Confirmed all claims: data-window-util.ts:85 visible gate, DataWindowIndicator lacks visible, header full-opacity, EyeOff imported at right-rail.tsx:4. Bonus accuracy point — the LegendRow type (indicator-legend-util.ts:58-65) already carries `visible`, so the DataWindow type is simply behind the legend; the fix is a clean mirror. low is correct.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "DATAWINDOW-6",
+      "title": "Data Window only ever reflects the active pane; inactive panes show nothing",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The publish effect is gated `if (!active || rightRailTab !== 'data') return;` (chart-pane.tsx:1372). The store holds a SINGLE `dataWindow: DataWindowSnapshot | null` (terminal-store.ts:188,418-419) keyed by paneId, and DataWindowPanel filters `dataWindow.paneId === activePaneId` (right-rail.tsx:82), blanking to the empty hint (right-rail.tsx:84-91) otherwise. So only the active pane writes, and only when the Data tab is open; hovering a non-active pane in a multi-pane grid updates nothing.",
+      "tvBehavior": "Each TradingView chart's Data Window follows that chart's crosshair; in a multi-chart layout the window tracks wherever the user reads.",
+      "gap": "In multi-pane layouts the Data tab reads stale/empty until the user clicks to activate the hovered pane. This is a DELIBERATE single-writer design (one snapshot keyed by paneId) — a minor UX gap, not a defect.",
+      "fixRefined": "Low priority; must preserve the single-snapshot store (don't have every pane write on every tick). Smallest safe extension: relax ONLY the `active` guard at chart-pane.tsx:1372 to also let the hovered pane publish while `rightRailTab==='data'` (keeping the rightRailTab guard so off-tab panes still skip the work), keying the snapshot by its own paneId; OR activate-on-hover. DataWindowPanel (right-rail.tsx:82) then shows whichever pane most recently published. Keep the active-pane fast path.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/chart-pane.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/right-rail.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed: single dataWindow snapshot in store (terminal-store.ts:188), active+tab gate (chart-pane.tsx:1372), paneId filter in panel (right-rail.tsx:82). The candidate correctly frames this as deliberate single-writer design and keeps it low. Honest assessment — note any fix must avoid every-pane-every-tick store writes, which the candidate calls out.",
+      "dimension": "dataWindow"
+    },
+    {
+      "id": "MANAGER-1",
+      "title": "Indicator name truncates with no tooltip and no input summary",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "In indicator-panel.tsx the manager row renders only `<span className=\"truncate font-medium text-foreground\">{inst.name || spec.label}</span>` at line 110 with NO `title` attribute and NO input summary. The row also carries an eye toggle, a `spec.pane` Badge (line 111), and FIVE action buttons (up/down/duplicate/gear/trash, lines 116-167) inside the 340px shared right rail (right-rail.tsx line 39 `w-[340px]`), so the long registry label collapses to \"Ex…\" (sc-observed.md line 22 confirms truncation to \"Ex…\"). For non-duplicate instances `inst.name` is the bare label with no parameters shown.",
+      "tvBehavior": "TradingView's Object Tree / data-window list shows each indicator's full name (recoverable via native tooltip where clipped) and distinguishes instances by their tuned inputs (e.g. \"EMA 21\" vs \"EMA 50\").",
+      "gap": "The user cannot tell which indicator a row is, nor read its parameters, from the manager. The tested helper `indicatorInputSummary(spec, inst)` that produces exactly the missing summary already exists in indicator-legend-util.ts (line 10) but is NOT imported into indicator-panel.tsx (verified: no import of it there).",
+      "fixRefined": "In apps/web/features/terminal/indicator-panel.tsx, (a) add `title={inst.name || spec.label}` to the name span at line 110 so the full name is recoverable on hover; (b) import the existing pure helper `indicatorInputSummary` from './indicator-legend-util' and render its output (the same `21 · close` string the on-chart legend uses) as a muted second line or inline suffix so duplicates/variants are distinguishable. No new math. Optionally make the duplicate/reorder buttons hover-only to reduce truncation pressure.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts"
+      ],
+      "effort": "S",
+      "notes": "Real gap, confirmed in code. One factual correction to the candidate: the row has FIVE action buttons (up, down, duplicate, gear, trash — lines 116-167), not six; the eye toggle is a separate plain button on the left (line 104). The proposed fix lands in the right symbol (line 110 span) and correctly reuses the existing unused helper. Severity high is justified: a manager where you can't identify the row is a core usability failure.",
+      "dimension": "manager"
+    },
+    {
+      "id": "MANAGER-2",
+      "title": "Manager rows have no colour swatch, so multi-instance/variant rows look identical",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The manager row in indicator-panel.tsx (lines 103-114) renders only the eye button + truncated name + `spec.pane` Badge — no colour swatch. Meanwhile the on-chart legend builds a swatch via `legendColor` (indicator-legend-util.ts line 23, exposed on LegendRow.color) and the Data Window renders one at right-rail.tsx line 126 (`style={{ backgroundColor: ind.color }}`). Duplicated instances differ only by the numbered name suffix from `nextIndicatorName` (indicator-manager-util.ts line 15 → \" 2\", \" 3\"), which is exactly the text MANAGER-1's truncation clips.",
+      "tvBehavior": "TradingView's indicator list carries each plot's colour swatch so two SMAs or an EMA/EMA-2 pair are told apart by colour at a glance, not only a trailing number.",
+      "gap": "Distinguishing multiple instances of one type relies entirely on a numbered name suffix that is itself truncated, with no colour cue — so EMA 21 (blue) and EMA 50 (orange) show as two near-identical \"Ex…\" rows.",
+      "fixRefined": "In apps/web/features/terminal/indicator-panel.tsx, near the eye button (lines 104-109), add a small swatch `<span className=\"h-2.5 w-2.5 shrink-0 rounded-[2px]\" style={{ backgroundColor: legendColor(spec, inst) }} />`, importing `legendColor` from './indicator-legend-util' (the same helper the legend and Data Window use). Pure, no duplication. `legendColor` is currently NOT imported into indicator-panel.tsx (verified).",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts"
+      ],
+      "effort": "S",
+      "notes": "Real gap, confirmed. The swatch helper `legendColor` exists, is already used by both the legend and Data Window, and is absent from the manager row. Fix is correct and lands in the right place. Pairs naturally with MANAGER-1 (same file, same import source) — both could be one small commit. Severity medium is fair: cosmetic-leaning but compounds the MANAGER-1 identification problem.",
+      "dimension": "manager"
+    },
+    {
+      "id": "MANAGER-3",
+      "title": "No drag-to-reorder; reorder is one-step-at-a-time up/down chevrons only",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "indicator-panel.tsx wires `reorderIndicator(pane.id, inst.id, 'up'|'down')` to ChevronUp/ChevronDown buttons (lines 116-137, disabled at edges via `idx === 0` / `idx === active.length - 1`), backed by `reorderInstances` in indicator-manager-util.ts (line 19) which swaps with the ADJACENT neighbour only. Moving an item across N positions takes N clicks. No drag handle exists, and there is no move-to-index helper (verified: no `moveInstance`/`reorderIndicatorTo`/`targetIndex` anywhere in features/terminal). The store action `reorderIndicator` (terminal-store.ts line 401) only accepts dir 'up'|'down'.",
+      "tvBehavior": "TradingView lets you drag a row in the indicator list to set z-order directly, dropping it anywhere in the stack in one gesture.",
+      "gap": "Reordering many indicators is tedious vs TV's single drag — functional but slower. The up/down buttons are keyboard-accessible (which TV's drag is not), so this is a UX-speed gap, not a missing capability.",
+      "fixRefined": "Extend the existing reorder path, do not rebuild. Keep the up/down buttons as the accessible/menu fallback, and add a drag handle to the row that on drop calls a new store action `reorderIndicatorTo(paneId, instId, targetIndex)` (sibling to `reorderIndicator` at terminal-store.ts line 401), implemented by adding a splice-based `moveInstance(list, id, targetIndex)` to indicator-manager-util.ts (unit-tested alongside the existing `reorderInstances`). Dovetails with planned roadmap M6 (drag-and-drop).",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-manager-util.ts",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "M",
+      "notes": "Real gap, confirmed in code. CLAUDE.md roadmap M6 explicitly lists drag-and-drop as not-yet-done, so this is genuinely unimplemented. Severity low is honest — the capability exists (reorder works), only the speed/ergonomics differ, and the keyboard buttons must be kept per the project's accessibility mandate. Fix correctly extends rather than replaces.",
+      "dimension": "manager"
+    },
+    {
+      "id": "MANAGER-4",
+      "title": "Manager is a flat list with no grouping by pane (overlay vs sub-pane)",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "indicator-panel.tsx renders `active.map((inst, idx) => ...)` as one flat list (line 94). Each row shows a small `spec.pane` Badge (`overlay`/sub-pane type, lines 111-113) but rows are not grouped or sectioned by pane. `IndicatorInstance.paneId` exists (packages/types/src/chart.ts line 93; set at add time in indicator-panel.tsx line 75 as `spec.pane === 'overlay' ? 'price' : spec.type`) but is unused for layout/grouping. sc-observed.md line 21 confirms \"One row per instance\" with no grouping.",
+      "tvBehavior": "TradingView's Object Tree groups indicators by the pane they occupy (main chart vs each lower pane), making it clear which oscillators share a pane and which overlays sit on price.",
+      "gap": "With several overlays plus multiple sub-pane oscillators, the user can't see at a glance which indicators occupy which pane; only a per-row badge hints at it.",
+      "fixRefined": "Group the existing `active` array by `inst.paneId` (or `spec.pane`) before the `.map` at indicator-panel.tsx line 94 and insert lightweight section headers (\"On price\" / one per sub-pane) above the existing row markup. Pure presentational change reusing data already on the instance (paneId) — no store or math change. Note: reorder (MANAGER-3) operates on the single flat `classicIndicators` array, so grouping is display-only and must not break the existing up/down index logic. Lower priority than MANAGER-1/2.",
+      "files": [
+        "apps/web/features/terminal/indicator-panel.tsx"
+      ],
+      "effort": "S",
+      "notes": "Real gap, confirmed. paneId is populated but never used for layout. Severity low is right — purely organizational, only matters with many indicators. One caveat the fix should respect: the up/down reorder buttons use `idx` against the flat list, so any grouped rendering must keep a stable mapping back to the real array index or the chevrons will misbehave; otherwise the change is safe and additive.",
+      "dimension": "manager"
+    },
+    {
+      "id": "PANES-1",
+      "title": "Oscillator sub-panes don't share the chart's time axis, pan, or zoom (SVG-only, last-200-bars)",
+      "severity": "blocker",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Sub-pane indicators render as a plain React <svg> in SubPaneRow (sub-pane-indicators.tsx). The x-mapping is a fixed last-200-bars tail: `const tail = candles.slice(-Math.min(candles.length, 200))` (line 46) and `const xScale = tail.length > 1 ? (width - 30) / (tail.length - 1) : 0` (line 71), with bars plotted at `x = i * xScale`. This is entirely independent of the Canvas engine's `timeScale`. The price chart is the Canvas2D ChartCore driven by TimeScale (`timeToX`/`xToTime`/`visibleRange` in scale.ts). The two share no scale, so panning/zooming the canvas (TimeScale.pan / zoomAroundX in scale.ts) does not move the SVG and bars do not align in time.",
+      "tvBehavior": "Each oscillator renders in its own sub-pane that shares the price pane's exact time axis; scroll/pan/zoom move every pane in lockstep and the crosshair lines up across panes.",
+      "gap": "The single most important TV pane property — a shared time axis so an RSI bar sits under its price bar — is absent; the oscillator is a disconnected last-200-bars thumbnail.",
+      "fixRefined": "In chart-pane.tsx, capture the live visible range and pass it to SubPaneIndicators. The ChartCore option `onVisibleRangeChange` is ALREADY wired in the ctor (chart-pane.tsx line 169) and `core.getVisibleRange()` exists (used line 963) — add a `const [subRange, setSubRange] = useState<{fromTime,toTime}>()` updated from inside that existing onVisibleRangeChange callback (it already destructures `{fromTime,toTime}`), seeded once after initial setCandles. Pass `range={subRange}` plus `core.timeScale.state.barWidth` (state.barWidth exists on TimeScaleState, see chart-core.ts:190) into <SubPaneIndicators> (currently line 1479-1483). In sub-pane-indicators.tsx SubPaneRow, replace the slice(-200) tail + `i*xScale` with the same projection the canvas uses: filter candles to [fromTime,toTime] and map `x = (openTime - fromTime)/(toTime - fromTime) * (width-30)` (equivalent to TimeScale.timeToX shifted to the SVG origin). Keep the SVG renderer for v1 (do not rebuild as a canvas layer). Re-render on the existing range-change callback.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/chart-pane.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/packages/chart-core/src/chart-core.ts"
+      ],
+      "effort": "L",
+      "notes": "Verified exactly: tail=slice(-200) at line 46, xScale at line 71. onVisibleRangeChange callback already destructures {fromTime,toTime} (chart-pane line 169); getVisibleRange() exists (chart-core.ts:253). TimeScale.timeToX/xToTime/visibleRange confirmed in scale.ts lines 33/38/48. barWidth on state confirmed. Fix is sound. One nuance: the fix should also account for the canvas axis gutter so the plot width matches — see PANES-5. Blocker severity is justified: without a shared axis the panes are unusable for reading values under a price bar.",
+      "dimension": "panes"
+    },
+    {
+      "id": "PANES-2",
+      "title": "No draggable separator to resize sub-panes (height is hardcoded 80px)",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "SubPaneRow hardcodes `const HEIGHT = 80;` (sub-pane-indicators.tsx line 48) and renders `<svg ... className=\"block h-[80px] w-full\">` (line 85); each sub-pane is a fixed 80px strip stacked in a `<div className=\"border-t border-border/60 bg-surface/60\">` wrapper (line 20). Grep across apps/web/features/terminal for separator/resize-handle/paneHeight/paneRatio confirms NO pane-resize handler exists (only UI <Separator> imports in right-rail.tsx and order-panel.tsx, unrelated). The canvas volume pane is a fixed `volumePaneRatio: 0.18` default in computeGeometry (viewport.ts line 39) with no drag handle.",
+      "tvBehavior": "Every pane boundary has a draggable horizontal separator; dragging resizes the oscillator pane and the price pane reflows. Pane heights persist.",
+      "gap": "Users can't size an oscillator pane; an 80px MACD is unreadable on a tall chart and eats the price pane on a short one.",
+      "fixRefined": "Extend IndicatorInstance (packages/types/src/chart.ts, the interface at line 89) with `paneHeight?: number`. In sub-pane-indicators.tsx render a ~4px drag-handle <div> above each SubPaneRow; on pointer-drag call the existing `updateIndicator(paneId, inst.id, { paneHeight })` store action (terminal-store.ts exposes updateIndicator at line 168/386). Use `inst.paneHeight ?? 80` for HEIGHT and the svg height (replacing the literal 80 at lines 48 and 85). For the canvas volume pane, computeGeometry already accepts `volumePaneRatio` and `axisWidth` (viewport.ts lines 31-32) so thread a draggable ratio through. Add +/- keyboard-fallback buttons in the row header. Persistence: paneHeight rides along in classicIndicators which is already persisted via indicator_layouts.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/packages/types/src/chart.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/terminal-store.ts",
+        "/Volumes/PortableSSD/new start/supercharts/packages/chart-core/src/viewport.ts"
+      ],
+      "effort": "M",
+      "notes": "Confirmed: HEIGHT=80 (line 48), h-[80px] (line 85). No resize handler anywhere in terminal. updateIndicator action confirmed in terminal-store.ts. volumePaneRatio/axisWidth are computeGeometry params (viewport.ts 31-32,36,39). IndicatorInstance is the correct type to extend (chart.ts line 89). Fix lands correctly.",
+      "dimension": "panes"
+    },
+    {
+      "id": "PANES-3",
+      "title": "No move-to-pane / move-to-new-pane action; paneId is computed once and ignored",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorInstance carries `paneId: 'price' | string` (chart.ts line 93) but it is assigned once at add-time: `paneId: spec.pane === 'overlay' ? 'price' : spec.type` in indicator-panel.tsx (line 75) AND indicators-dialog.tsx (line 158). No renderer reads it: the overlay path (IndicatorsLayer feed, chart-pane.tsx ~line 1112) keys off `spec.pane !== 'overlay'`, and SubPaneIndicators filters by `INDICATOR_LOOKUP[i.type]?.pane === 'sub'` (sub-pane-indicators.tsx line 15) — never by inst.paneId. There is no moveIndicatorToPane store action (grep confirms none). Because every sub indicator of a type gets paneId=spec.type, two of the same type collide on one id. The legend controls are eye/gear/× only (indicator-legend.tsx lines 41/50/59) and the Ind panel is eye/up/down/duplicate/gear/trash (indicator-panel.tsx) — no Move-to-pane.",
+      "tvBehavior": "An indicator's '...' menu offers Move to → existing pane / new pane above / below; overlays merge onto price or split into their own pane; pane assignment is real state the renderer honors.",
+      "gap": "A user can't pull an EMA off price into its own pane, stack two oscillators into one pane, or reorder which pane an oscillator lives in.",
+      "fixRefined": "Make paneId the source of truth instead of spec.type. (1) On add, give sub indicators a unique pane id so duplicates don't collide — note duplicate() in indicator-panel.tsx (line 44) already generates a fresh INSTANCE id via nanoid but copies the colliding paneId, so fix both the add paths (indicator-panel.tsx:75 and indicators-dialog.tsx:158) and duplicate(). (2) Add `moveIndicatorToPane(paneId, instId, target)` to terminal-store.ts setting inst.paneId. (3) In SubPaneIndicators, group visible sub indicators by inst.paneId (multiple sharing one paneId draw in one box) instead of one box per instance. (4) Add a 'Move to…' item to the legend controls (indicator-legend.tsx, which currently only has onToggleVisible/onSettings/onRemove props) and the Ind row (indicator-panel.tsx), listing price + each existing sub-pane + 'New pane'. Honor the overlay/sub flip: moved-to-price feeds the IndicatorsLayer path, otherwise the SVG sub-pane path. Reuse updateIndicator plumbing.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/indicator-panel.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/terminal-store.ts",
+        "/Volumes/PortableSSD/new start/supercharts/packages/types/src/chart.ts"
+      ],
+      "effort": "L",
+      "notes": "Confirmed paneId is dead state: assigned at indicator-panel.tsx:75, indicators-dialog.tsx:158, strategy-builder-dialog.tsx (several), never read by any renderer. Correction to candidate: the candidate omitted indicators-dialog.tsx:158 as a third add path and strategy-builder-dialog.tsx which also sets paneId — those must be updated too for consistency. Also the existing duplicate() in indicator-panel.tsx already gives a fresh instance id but reuses the spec.type-derived paneId, so the collision is real. Otherwise accurate. High severity justified.",
+      "dimension": "panes"
+    },
+    {
+      "id": "PANES-4",
+      "title": "No maximize / restore / collapse / hide controls per sub-pane",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "SubPaneRow's header (sub-pane-indicators.tsx lines 80-84) renders only `<span>{spec.label}</span>` + `<span>{paramsLabel(inst)}</span>` — no buttons. No collapse/maximize flags exist on IndicatorInstance (chart.ts line 89 has only id/type/name/paneId/inputs/style/visible/locked) or on any PaneState. The only related controls are the on-chart legend eye/gear/× (indicator-legend.tsx) and the Ind panel eye/up/down/duplicate/gear/trash (indicator-panel.tsx) — these toggle inst.visible, not a pane maximize/collapse.",
+      "tvBehavior": "Each pane has hover controls to maximize to full height (and restore), collapse to a thin strip, hide, or remove — letting a trader focus or fold an oscillator without deleting it.",
+      "gap": "A user can't focus or fold an oscillator pane; the only options are full delete or the fixed 80px strip.",
+      "fixRefined": "Add a small control cluster to the SubPaneRow header flex div (lines 80-84). Back it with two optional fields on IndicatorInstance (chart.ts line 89): `collapsed?: boolean` and `maximized?: boolean`, mutated via the existing updateIndicator action (terminal-store.ts:386). Collapsed → render header only (skip the <svg> at line 85); maximized → in SubPaneIndicators give that row the full stacked height and skip rendering siblings. Hide already exists as the visible eye. Purely additive UI + two boolean flags; reuse updateIndicator, no new pane subsystem.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/packages/types/src/chart.ts",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "M",
+      "notes": "Confirmed header has no controls (lines 80-84). No collapsed/maximized on IndicatorInstance. Fix is additive and lands correctly. Medium severity is honest — this is a focus/ergonomics nicety, not a core blocker; effort M is generous (closer to S since it's two flags + header buttons), but maximized interaction with sibling layout adds a little, so M is acceptable.",
+      "dimension": "panes"
+    },
+    {
+      "id": "PANES-5",
+      "title": "Sub-pane has no real price scale / right-axis aligned to the price pane's axis gutter",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "SubPaneRow computes local min/max over the last-200 tail (lines 50-70) and draws exactly two <text> labels: `{max.toFixed(2)}` at x={width-28} y=12 (line 126) and `{min.toFixed(2)}` at the bottom (line 127). width is the hardcoded constant 360 passed from chart-pane.tsx (`<SubPaneIndicators ... width={360} />`, line 1482), while the canvas axis gutter is `axisWidth=64` (viewport.ts line 36). So the right edges don't line up and there are no graduated ticks. Reference bands draw via BandRefs (lines 159-197) as dashed lines but carry no axis labels.",
+      "tvBehavior": "Every pane has its own price scale in the same right-hand axis column as the price pane, with auto-fit ticks and labeled reference levels (e.g. RSI 70/30).",
+      "gap": "The sub-pane value axis is a two-number approximation that neither auto-fits to the visible window (fixed 200-bar tail) nor aligns to the price axis column, so panes look mismatched and values are hard to read.",
+      "fixRefined": "Once PANES-1 makes the sub-pane range-driven, compute min/max over the VISIBLE window (not slice(-200)) and render 3-4 graduated tick labels via a small shared helper. Pass the real measured pane width and the canvas axisWidth (64, from computeGeometry default in viewport.ts:36) down from chart-pane.tsx instead of the hardcoded 360 (line 1482), and reserve that same right gutter so the sub-pane axis lines up with the price axis. Label the BandRefs levels at the axis. Pure SVG changes in sub-pane-indicators.tsx plus passing two numbers down; no engine rewrite.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed: two text labels (lines 126-127) at width-28, hardcoded width={360} (chart-pane line 1482), axisWidth default 64 (viewport.ts:36). BandRefs draws unlabeled dashed lines (159-197). Fix is correct and rightly depends on PANES-1. Medium severity honest. Note: width=360 is doubly wrong because the SVG uses viewBox so it's not even the real rendered width — passing a measured width is the right call.",
+      "dimension": "panes"
+    },
+    {
+      "id": "PANES-6",
+      "title": "Crosshair and per-bar value readout don't extend into the oscillator sub-pane",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The crosshair is a Canvas layer (CrosshairLayer, registered in chart-core.ts:298) bounded to the canvas geometry: it draws the vertical line from `geometry.pricePane.y` down to `pricePane.height + volumePane.height` (crosshair.ts lines 21-24), i.e. price+volume panes only. The oscillator SVG is a separate DOM element below the canvas (chart-pane.tsx line 1479), so the crosshair line stops at the canvas bottom and never crosses the sub-pane. SubPaneRow's header shows only static paramsLabel (line 83), not the crosshair-bar value — even though chart-pane.tsx already tracks hoverTime (line 149), computes legendHoverIdx (line 1344), and holds per-indicator channel arrays in indChannelsRef.current keyed by inst.id (line 147, filled at lines 554-568). SubPaneIndicators receives none of that (only candles/indicators/width, line 1479-1483).",
+      "tvBehavior": "Moving the crosshair draws a vertical line through the price pane AND every sub-pane, and each pane's legend shows that bar's value (e.g. RSI=62.4) at the crosshair time.",
+      "gap": "The oscillator pane is non-interactive: no crosshair line through it and no value-at-crosshair, so a trader can't read RSI under the cursor in its own pane (only in the top-left legend / Data tab).",
+      "fixRefined": "Pass `legendHoverIdx`/`hoverTime` (already computed in chart-pane.tsx, lines 149/1344) and the `indChannelsRef.current` map (line 147) into <SubPaneIndicators> (line 1479). In SubPaneRow, draw a vertical <line> at the crosshair x (computed from the shared range from PANES-1) and print the channel value(s) at legendHoverIdx in the row header. Read from the passed channel map keyed by inst.id rather than recomputing in SubPaneRow's local `computeAll` (lines 38-43) so the readout matches the top-left legend exactly. SVG-only addition reusing existing computed state.",
+      "files": [
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/sub-pane-indicators.tsx",
+        "/Volumes/PortableSSD/new start/supercharts/apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "Confirmed: CrosshairLayer bounded to pricePane+volumePane (crosshair.ts lines 14,21-24). SubPaneRow header static (line 83). hoverTime/legendHoverIdx/indChannelsRef all exist in chart-pane and are NOT passed to SubPaneIndicators (props are only candles/indicators/width). One refinement worth noting: SubPaneRow currently recomputes channels itself via computeAll (lines 38-43), so passing indChannelsRef avoids double-compute. Fix correct, depends on PANES-1 for the x mapping. Medium severity honest.",
+      "dimension": "panes"
+    },
+    {
+      "id": "SCALE-1",
+      "title": "No way to switch price-scale mode (Log / Percent / Indexed-to-100 / Auto / Regular) — modes declared but inert",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "PriceScale (packages/chart-core/src/scale.ts:77) declares PriceScaleMode = 'linear' | 'log' | 'percent' and priceToY/yToPrice implement a real log branch (scale.ts:100-107, 116-121). But mode is hardcoded 'linear' at construction (chart-core.ts:118) and there is NO public method on ChartCore to change it — a repo-wide grep for setPriceScaleMode/setScaleMode/setMode/state.mode= returns nothing outside scale.ts's type decl. PaneState (terminal-store.ts:56-125) has no scaleMode field; togglePaneOverlay/setStsSetting exist but nothing for scale mode. 'percent' is NOT implemented — priceToY only branches on 'log', so 'percent' silently uses linear math. Indexed-to-100 has no representation at all.",
+      "tvBehavior": "TradingView exposes Auto, Logarithmic, Percent, Indexed-to-100 and Regular scale modes, toggled from buttons near the axis and from the price-scale right-click menu. Log re-maps the axis; Percent re-bases to % off the leftmost visible bar; Indexed-to-100 normalizes to 100.",
+      "gap": "Users cannot enable log scale (essential for long-range crypto spanning 10x+) or percent/indexed comparison scaling, despite the log math already existing. The capability is one setter + one toggle away but completely unreachable.",
+      "fixRefined": "Add ChartCore.setPriceScaleMode(mode: PriceScaleMode) that sets this.priceScale.state.mode, then calls fitPriceScaleToVisible() (chart-core.ts:531) + markDirty(). Add a scaleMode: PriceScaleMode field to PaneState (terminal-store.ts:56) with a setScaleMode(paneId, mode) action — it WILL persist, since saveLayout serializes config:{layoutId,layout,panes} (terminal-top-bar.tsx:128). Wire from the new price-scale menu (SCALE-3) and re-apply on chart-pane mount. For 'percent'/indexed, extend priceToY/yToPrice to subtract/normalize against a baseValue (first visible candle close) captured by the SAME visible-range scan in fitPriceScaleToVisible (chart-core.ts:535-539) — do not duplicate any TA/math, reuse @supercharts/indicators for nothing new here (pure pixel transform).",
+      "files": [
+        "packages/chart-core/src/scale.ts",
+        "packages/chart-core/src/chart-core.ts",
+        "apps/web/features/terminal/terminal-store.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "L",
+      "notes": "Confirmed across all 4 files. Persistence claim verified: panes array is serialized whole in saveLayout (terminal-top-bar.tsx:128), so a new PaneState field round-trips. Honest caveat: percent/indexed-to-100 are genuinely new math (priceToY currently only special-cases 'log'), so the 'log already works' framing applies only to log; percent/indexed are net-new but still small.",
+      "dimension": "scale"
+    },
+    {
+      "id": "SCALE-2",
+      "title": "Log-mode gridlines and axis labels computed in linear space → wrong, bunched, non-round ticks",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "GridLayer.render (grid.ts:15) and AxisLayer.render (axis.ts:21) both call niceTicks(priceScale.state.priceMin, priceScale.state.priceMax, 8). niceTicks (grid.ts:52-61) generates LINEARLY-spaced values (start = ceil(min/step)*step, then v += step), then each is plotted via priceScale.priceToY(p). In log mode priceToY applies log spacing (scale.ts:100-105), so those linearly-spaced values land at log positions — they bunch toward one end and are not log-round. So the moment log mode (SCALE-1) is reachable, the axis/grid render unusably.",
+      "tvBehavior": "In log mode TradingView draws round, log-appropriate tick values (1, 2, 5, 10, 20, 50…) that are evenly spaced on screen because spacing follows the log mapping.",
+      "gap": "Log scale, once enabled, renders an unusable axis: ticks crowd at one end with arbitrary values. This is a hard dependency that blocks SCALE-1 from being shippable.",
+      "fixRefined": "Add a log-aware generator (e.g. logTicks(min, max, target)) next to niceTicks in grid.ts that walks decades (powers of 10) and emits 1/2/5 mantissa steps within the visible decade(s). In BOTH GridLayer.render (grid.ts:15) and AxisLayer.render (axis.ts:21), branch on priceScale.state.mode === 'log' to pick logTicks vs niceTicks. Leave niceTicks untouched for linear/percent — extend, don't replace. AxisLayer imports niceTicks from './grid' already (axis.ts:2) so export logTicks there too.",
+      "files": [
+        "packages/chart-core/src/layers/grid.ts",
+        "packages/chart-core/src/layers/axis.ts"
+      ],
+      "effort": "M",
+      "notes": "Verified niceTicks is purely linear and both layers consume it. axis.ts already imports from grid.ts (line 2), so the new export lands cleanly. Correctly scoped as a blocker-dependency of SCALE-1; severity high is justified ONLY conditional on log being shipped — on its own (log unreachable today) the bug is latent. Kept high since it gates SCALE-1.",
+      "dimension": "scale"
+    },
+    {
+      "id": "SCALE-3",
+      "title": "Right-click on the price axis shows the generic chart menu, not a dedicated price-scale menu",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "ChartCore.onContextMenu (chart-core.ts:474-491) fires a single contextmenu ChartPointerEvent for any right-click and does NOT indicate the region (price axis vs body vs time axis); ChartPointerEvent (chart-core.ts:41-52) has no region field. chart-pane.tsx:159-160 unconditionally sets menu={x,y} on any contextmenu, and the menu render (chart-pane.tsx:1447) always mounts ChartContextMenu (chart-pane.tsx:1488), whose items are Reset zoom / Delete drawing / heatmap / volume profile / deep trades / footprint / volume pane — purely body/overlay. Brief confirms the axis shows the SAME generic menu with no scale menu.",
+      "tvBehavior": "Right-clicking the price scale opens a scale-specific menu: Auto, Logarithmic, Percent, Indexed-to-100, Regular, Lock price to bar ratio, Invert scale, Scale settings.",
+      "gap": "No entry point for any scale operation. Even with SCALE-1 implemented, users have nowhere to trigger it.",
+      "fixRefined": "In ChartCore.onContextMenu (chart-core.ts:474) compute region: 'price-axis' | 'time-axis' | 'body' using the SAME boundary tests already in onPointerDown (chart-core.ts:394-395: x >= geometry.axisPane.x → price-axis, else y >= geometry.timeAxisPane.y → time-axis, else body) and add it to the emitted ChartPointerEvent (extend the interface at chart-core.ts:41). In chart-pane.tsx store region alongside the menu state (line 115: setMenu now {x,y,region}); when region==='price-axis' render a new PriceScaleContextMenu reusing the existing MenuItem/MenuSeparator primitives (chart-pane.tsx:1555-1577) with items Auto / Logarithmic / Percent / Indexed-to-100 / Regular / Invert / Scale settings, each calling the SCALE-1/4/5 setters.",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "Fully verified incl. the exact boundary tests the fix reuses (chart-core.ts:394-395). MenuItem/MenuSeparator primitives exist at the cited lines (1555-1577). Solid; the region computation is genuinely a few lines reusing existing geometry.",
+      "dimension": "scale"
+    },
+    {
+      "id": "SCALE-4",
+      "title": "Auto-fit cannot be re-enabled except via an undiscoverable double-click; no explicit Auto control or state indicator",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "ChartCore tracks a private field autoFollow (chart-core.ts:82, default true), set false on wheel-zoom (chart-core.ts:383), pan (chart-core.ts:409) and implicitly during axis drag; only set true again inside onDblClick (chart-core.ts:459). There is no public getter/setter and no UI affordance — the only way to restore auto-fit is to know the double-click gesture. Reset-zoom in the body menu just dispatches a synthetic dblclick (chart-pane.tsx:1453-1457).",
+      "tvBehavior": "TradingView shows an 'Auto' button on the price scale, highlighted when auto-fit is on; any manual zoom/pan flips it off and it can be re-enabled from the button or the scale menu.",
+      "gap": "After any manual zoom the price scale stays frozen with no discoverable way back to auto-fit other than an unlabelled double-click, and no indication of which mode is active.",
+      "fixRefined": "Expose ChartCore.setAutoFit(on: boolean) and getAutoFit(): both read/write the existing private autoFollow field (chart-core.ts:82) — when turning on, run the same fit branch as onDblClick (chart-core.ts:457-472: reset rightTime + pxPerMs + fitPriceScaleToVisible + scheduleRangeChange + markDirty), ideally by extracting that body into a private autoFit() and calling it from both. Add an 'Auto' entry to the price-scale menu (SCALE-3). Reuses existing state — no new fit logic.",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "S",
+      "notes": "Real. One correction to the candidate: the internal field is autoFollow (not autoFit), and it is private; the setter must read/write that exact field. Recommend extracting onDblClick's body into a reusable private method so setAutoFit(true) and the existing dblclick share one implementation rather than duplicating the fit math. Severity medium is fair — there IS a working escape hatch (dblclick), it is just undiscoverable.",
+      "dimension": "scale"
+    },
+    {
+      "id": "SCALE-5",
+      "title": "Invert scale exists in state but is unreachable; 'Lock price to bar ratio' is missing",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "PriceScaleState.inverted is fully wired in priceToY/yToPrice (scale.ts:87, 98, 109, 113-114: return inverted ? height - y : y, and effY = inverted ? height - y : y) but is hardcoded false at construction (chart-core.ts:119) with no setter and no UI. 'Lock price to bar ratio' has no representation anywhere in scale.ts or chart-core.ts.",
+      "tvBehavior": "The scale menu offers 'Invert scale' (flips the price axis) and 'Lock price to bar ratio' (fixed price-per-pixel : time-per-pixel).",
+      "gap": "Invert is one toggle from working but unreachable; bar-ratio lock is entirely absent. Both niche, hence low.",
+      "fixRefined": "For invert: add ChartCore.setInverted(on: boolean) setting this.priceScale.state.inverted + markDirty(), exposed via the SCALE-3 menu — trivial, the math (scale.ts:109,114) is done. For lock-ratio: defer; if pursued, add a flag that in onWheel/zoom (chart-core.ts:376) scales priceScale by the same factor as timeScale rather than calling fitPriceScaleToVisible. Do NOT block SCALE-1 on lock-ratio.",
+      "files": [
+        "packages/chart-core/src/scale.ts",
+        "packages/chart-core/src/chart-core.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified: inverted is implemented in both transforms and hardcoded false at chart-core.ts:119; lock-ratio is genuinely absent. The invert half is S; the lock-ratio half is realistically larger and rightly deferred. Splitting these would be cleaner but low priority overall.",
+      "dimension": "scale"
+    },
+    {
+      "id": "SCALE-6",
+      "title": "Only a single right-side price scale; no left scale / multiple scales",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "computeGeometry (viewport.ts:26-62) reserves exactly one axisPane on the right (axisPane: { x: paneWidth, ... }, viewport.ts:59) and a single timeAxisPane; ChartCore holds one priceScale (chart-core.ts:59). ChartGeometry (viewport.ts:8-24) has no leftAxisPane. No per-series scale assignment exists; all overlays share the one priceScale.",
+      "tvBehavior": "TradingView supports multiple price scales (left + right), letting different series pin to separate axes.",
+      "gap": "Overlays with very different magnitudes all share one scale; no left axis. Advanced, so low priority relative to log/percent/menu work.",
+      "fixRefined": "Larger change: extend ChartGeometry (viewport.ts:8) with an optional leftAxisPane and computeGeometry to reserve it when a series requests a left/secondary scale; add a second PriceScale to ChartCore and a per-indicator scale-id. Defer until SCALE-1..4 land; tracked here, not started now.",
+      "files": [
+        "packages/chart-core/src/viewport.ts",
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/layers/axis.ts"
+      ],
+      "effort": "XL",
+      "notes": "Accurate. Single right axisPane and single priceScale confirmed. Correctly flagged XL/low and recommended for deferral — agree it should not be started before the log/percent/menu work; it touches geometry, every layer's priceToY call site, and indicator routing.",
+      "dimension": "scale"
+    },
+    {
+      "id": "DND-1",
+      "title": "Cannot drag an indicator from the dialog onto the chart (no overlay-vs-new-pane drop zones)",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Each catalog row in indicators-dialog.tsx is a `<div role=\"button\" tabIndex={0} onClick={() => toggle(e)}>` (lines 377-392). `toggle` (217-234) immediately mutates store via togglePaneOverlay/toggleSmcOverlay or addIndicator(pane.id, buildInstance(spec)). `buildInstance` (153-164) hardcodes `paneId: spec.pane === 'overlay' ? 'price' : spec.type`. No draggable/onDragStart/dataTransfer on rows; chart-container wrapper (chart-pane.tsx:1412) has no onDrop/onDragOver. Repo-wide grep found zero drag/drop handlers in apps/web/features/terminal and no DnD library in apps/web/package.json.",
+      "tvBehavior": "In TradingView you grab an indicator row in the picker and drag it onto the chart; dropping on the price pane adds it as an overlay, dropping on a sub-pane or the highlighted 'new pane' zone creates/targets that pane.",
+      "gap": "There is no drag-from-dialog interaction at all, so no overlay-vs-pane drop-zone semantics. Placement (overlay vs sub) is dictated entirely by the indicator's spec via buildInstance, never by where the user drops.",
+      "fixRefined": "EXTEND, don't rebuild. In indicators-dialog.tsx make each row draggable with onDragStart setting dataTransfer 'application/x-sc-indicator' to entryId(e) (entryId exists at line 36; INDICATOR_LOOKUP already imported, line 11). In chart-pane.tsx's data-testid=chart-container div (line 1412) add onDragOver (preventDefault + highlight) and onDrop that reads the id, resolves the spec via INDICATOR_LOOKUP, and calls the existing addIndicator(pane.id, buildInstance(spec)). NOTE: buildInstance is module-local to indicators-dialog.tsx, so export it (or duplicate the tiny builder) for chart-pane to call. Keep click/Enter toggle as the keyboard fallback. The overlay-vs-sub drop targeting only becomes meaningful once DND-2/DND-3 make paneId reassignable; on its own this delivers 'drop-to-add', not full TV drop-zone targeting.",
+      "files": [
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "All concrete claims verified. Two refinements vs the candidate: (1) buildInstance is module-local in indicators-dialog.tsx, so chart-pane cannot call it without an export; (2) downgraded the implied 'full drop-zone semantics' to 'drop-to-add' because true overlay-vs-new-pane targeting depends on DND-2/DND-3 landing first (paneId is currently dead at render time). Severity high kept.",
+      "dimension": "dnd"
+    },
+    {
+      "id": "DND-2",
+      "title": "No 'move to pane' for indicators - paneId is set at creation and never reassignable",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "IndicatorInstance.paneId (packages/types/src/chart.ts:93) is assigned once in buildInstance (indicators-dialog.tsx:158) and indicator-panel.tsx:75, then never updated - grep for setIndicatorPane/moveIndicatorTo across apps/web + packages returns nothing. paneId is DEAD in the render pipeline: the overlay draw loop in chart-pane.tsx:1112-1115 filters by `spec.pane !== 'overlay'`, and sub-pane-indicators.tsx:15 filters by `INDICATOR_LOOKUP[i.type]?.pane === 'sub'` - neither reads inst.paneId. The on-chart legend (indicator-legend.tsx) exposes only eye/gear/x (lines 36-64); no overflow/'move to' menu (sc-observed.md:18 confirms 'No more overflow menu'). The right-rail IndicatorPanel offers up/down/duplicate/gear/trash but no pane reassignment.",
+      "tvBehavior": "TradingView lets you move an existing indicator between panes - drag its legend row to another pane, or use the legend overflow's 'Move to -> New pane above/below / Existing pane / Pin to price scale'.",
+      "gap": "Once added, an indicator is locked to overlay-or-sub by its spec. There is no menu or drag path to move it to a different pane, pin it to the price scale, or split it out - and the existing paneId field is never even consulted when rendering.",
+      "fixRefined": "Data-model extension first: make paneId actually drive rendering. Change BOTH render paths to key off inst.paneId - group sub-pane-indicators.tsx by inst.paneId (instead of only spec.pane==='sub') AND have chart-pane.tsx's overlay loop (line 1112) include any inst whose paneId==='price' even when spec.pane==='sub' (and vice versa). Add a store action setIndicatorPane(paneId, indicatorId, target) next to reorderIndicator (terminal-store.ts:401-406) reusing the panes.map pattern. Surface as a menu to satisfy the keyboard/menu fallback: add a 'Move to' control to indicator-legend.tsx's hover cluster and/or indicator-panel.tsx's per-row button group (lines 115-168).",
+      "files": [
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "L",
+      "notes": "Verified real; diagnosis accurate - paneId is genuinely never reassigned and never read at render time. Refinement: the candidate listed only sub-pane-indicators.tsx for the grouping change, but chart-pane.tsx's overlay draw loop (line 1112) ALSO filters by spec.pane and must change for a true move-between-panes (e.g. pulling an oscillator onto price); added chart-pane.tsx to files. Severity high kept - a core TV pane-organization affordance is entirely absent.",
+      "dimension": "dnd"
+    },
+    {
+      "id": "DND-3",
+      "title": "Sub-panes are fixed-height SVG rows with no draggable separator to resize",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "sub-pane-indicators.tsx renders each sub indicator as a stacked SubPaneRow with `const HEIGHT = 80` (line 48) inside `<svg viewBox=\"0 0 ${width} ${HEIGHT}\" className=\"block h-[80px] w-full\">` (line 85). No separator element, no onMouseDown/cursor-row-resize handle, no per-pane height state; container is just `<div className=\"border-t border-border/60 ...\">` (line 20). chart-pane.tsx places <SubPaneIndicators candles=... indicators=... width={360}/> (lines 1479-1483) below the canvas with no resize boundary. Grep found no resize handlers anywhere in the terminal feature.",
+      "tvBehavior": "TradingView draws a draggable horizontal separator between the price pane and each indicator pane (and between stacked indicator panes); dragging grows one and shrinks the neighbor, double-click resets.",
+      "gap": "Indicator sub-panes cannot be resized; they are locked at 80px regardless of content, and the price pane can't be grown to give an oscillator more room. The separator-drag interaction TV users rely on does not exist.",
+      "fixRefined": "EXTEND sub-pane-indicators.tsx: replace `const HEIGHT = 80` (line 48) with a per-instance height read from a new store field paneHeights: Record<string,number> (keyed by inst.id) defaulting to 80, and render a thin separator div above each SubPaneRow with onMouseDown tracking pointer delta -> new setPaneHeight store action (clamped, double-click reset). The SVG already uses viewBox + a dynamic yScale (lines 71-73), so it rescales cleanly. Add a focusable separator with Arrow-key nudge for the no-mouse fallback. No chart-core change. CAVEAT: SC's sub-panes live in a separate div BELOW the canvas (chart-pane.tsx:1479, outside the chart-container at 1412); resizing sub-pane rows is straightforward, but 'grow the price pane vs the sub-pane strip' additionally needs to flex the chart-container height (the canvas auto-sizes via absolute inset-0), which is a bigger lift.",
+      "files": [
+        "apps/web/features/terminal/sub-pane-indicators.tsx",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "L",
+      "notes": "Verified real - HEIGHT=80 hardcoded, fixed 80px SVG, zero resize handlers. Added caveat: resizing sub-pane ROWS is easy, but the price-vs-sub boundary the candidate emphasizes is structurally harder because sub-panes are a sibling div outside the canvas-backed chart-container and the canvas resizes via absolute inset-0 to its parent. Severity high kept: zero resize capability is a real gap vs TV.",
+      "dimension": "dnd"
+    },
+    {
+      "id": "DND-4",
+      "title": "Legend rows can't be dragged to reorder z-order or move panes",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "indicator-legend.tsx renders each row as a static `<div className=\"group ...\">` with swatch/name/summary/value + hover controls eye/gear/x (lines 25-64). No draggable, no drag handle, no reorder affordance. Reordering exists ONLY in the right-rail IndicatorPanel via ChevronUp/ChevronDown calling reorderIndicator(pane.id, inst.id, 'up'|'down') (indicator-panel.tsx:121-137 -> store reorderIndicator at terminal-store.ts:401-406 -> reorderInstances on classicIndicators[]). Confirmed the array order IS the overlay z-order: chart-pane.tsx:1112 iterates pane.classicIndicators in order pushing lines/bands/dots, so later entries draw on top.",
+      "tvBehavior": "TradingView's on-chart legend lets you drag a study row up/down to change draw order, or drag it onto another pane to relocate it.",
+      "gap": "The legend - the most natural place to reorder - is read-only for ordering. Users must leave the chart for the right-rail Ind tab to change draw order, and cannot move between panes there either (DND-2).",
+      "fixRefined": "EXTEND indicator-legend.tsx: make rows reorderable (add a drag handle or draggable on the row at line 26); on drop over a sibling row call the EXISTING reorderIndicator store action. For precise index drops add a sibling moveIndicatorTo(paneId, id, index) in terminal-store.ts next to reorderIndicator (line 401). Also mirror the existing up/down chevrons into the legend's hover cluster (lines 36-64) for a no-drag path. Pure reuse of reorderIndicator - no math/chart changes; z-order wiring already works via the line-1112 loop.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/terminal-store.ts"
+      ],
+      "effort": "M",
+      "notes": "Verified real; the underlying z-order claim is correct (array order = draw order, confirmed at chart-pane.tsx:1112). Severity medium is honest - a keyboard-accessible reorder path already exists in the right rail, so this is a convenience/discoverability gap, not a missing capability. Reuse of reorderIndicator is valid.",
+      "dimension": "dnd"
+    },
+    {
+      "id": "DND-5",
+      "title": "Legend controls are hover-gated with no focus-within fallback; the two missing interactions have no keyboard path",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Reorder HAS a keyboard fallback: indicator-panel.tsx ChevronUp/ChevronDown have aria-label 'Move indicator up/down' and disabled at edges (lines 121-137). But the on-chart legend's eye/gear/x cluster is hover-only: `className=\"... opacity-0 transition-opacity group-hover:opacity-100\"` (indicator-legend.tsx:36) with no group-focus-within (grep confirms zero focus-within usage in the terminal feature), so a keyboard user tabbing in can't see/reach them reliably. Move-to-pane (DND-2) and separator resize (DND-3) have no keyboard fallback because the interactions themselves don't exist.",
+      "tvBehavior": "Every TradingView drag has a keyboard/menu equivalent - reorder buttons, a move-to-pane menu, and focusable separators with arrow-key resize.",
+      "gap": "The fallback story is incomplete: the legend's controls are hover-gated (poor keyboard discoverability) and the two missing interactions have no fallback because they're absent.",
+      "fixRefined": "Small a11y tightening in indicator-legend.tsx line 36: add group-focus-within:opacity-100 alongside the existing group-hover:opacity-100 so the eye/gear/x cluster reveals when a keyboard user tabs into the row. The deeper fallbacks (move-to-pane menu, arrow-key resizable separator) are delivered as part of DND-2 and DND-3 - ship each new drag interaction with its menu/keyboard twin.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified real - no group-focus-within anywhere, and line 36 is hover-only. Trimmed indicator-panel.tsx from the files list since its chevrons are already accessible (it's the positive example, not a change site). The substantive one-line a11y fix is the focus-within reveal; the rest is correctly deferred to DND-2/DND-3. Low severity is right.",
+      "dimension": "dnd"
+    },
+    {
+      "id": "ALERTFROMIND-1",
+      "title": "No way to create an alert from an indicator — legend has no overflow/Add-alert entry point",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "`IndicatorLegend` (indicator-legend.tsx) renders exactly three hover buttons per row: Eye/EyeOff (onToggleVisible), Settings2 (onSettings), X (onRemove). Props interface has only those 3 callbacks — no onAddAlert, no overflow. chart-pane.tsx:1418-1427 wires them: onToggleVisible→updateIndicator visible toggle, onSettings→requestIndicatorSettings(id), onRemove→removeIndicator(pane.id,id). AlertsDialog is mounted ONLY at terminal-top-bar.tsx:213 (`<AlertsDialog activeSymbol={active.symbol} />`) and its New tab (CreateAlertForm) never references pane indicators. sc-observed.md line 18 confirms no overflow menu.",
+      "fixRefined": "EXTEND indicator-legend.tsx: add an optional `onAddAlert?: (id: string) => void` to the Props interface and, when present, render a fourth hover button (e.g. a lucide `BellPlus`/`MoreHorizontal`) inside the existing hover `<span>` next to the Settings2/X buttons. In chart-pane.tsx, pass `onAddAlert` next to onSettings/onRemove at line 1425-1426, calling a new store action / dialog opener seeded with `pane.classicIndicators.find(i=>i.id===id)`. Purely additive — does not touch the existing 3 controls or the MA-cross path. NOTE: depends on ALERTFROMIND-4 (the dialog must accept a pre-seeded indicator instance) to be functional, so land them together.",
+      "files": [
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "notes": "Verified exactly as claimed. Legend Props (lines 6-13) has 3 callbacks; chart-pane wiring at 1418-1427 matches the cited 1418-1427 range. Honest high severity — there is zero UI path from a plotted indicator to an alert.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-2",
+      "title": "Alert engine + create schema are hard-locked to ma_cross — no indicator/plot alert type exists",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "packages/types/src/alerts.ts:108 declares `type: 'ma_cross'` (single literal). routes/alerts.ts:73 `alertCreateSchema` uses `type: z.literal('ma_cross')`; `alertUpdateSchema` (78-83) has no type field but config is `maCrossConfigSchema`. alert-engine.ts load() line 86 `if (row.type !== 'ma_cross') continue;` and evaluate() line 223 only ever calls `computeMaCross`. The `SignalCondition` union (trading.ts:94-117) DOES define indicator_compare/price_crosses, but the alert engine cannot run them.",
+      "fixRefined": "As proposed: add `'indicator'` discriminant to `AlertDefinition.type` (alerts.ts:108) + a new `IndicatorAlertConfig` interface reusing the existing `SignalCondition` union and an `IndicatorInstance` spec. Make routes/alerts.ts `alertCreateSchema` (line 70) a `z.discriminatedUnion('type', [maCrossSchema, indicatorSchema])`. In alert-engine.ts, branch load() (the `continue` at line 86 must instead build an indicator AlertDefinition) and evaluate() (line 199) on `alert.type`, keeping `computeMaCross` verbatim for ma_cross. CRITICAL constraint correctly called out: the 48 live ma_cross rows must keep loading — guard so a missing/legacy `type` defaults to 'ma_cross'. rowToAlert() (alerts.ts:122-138) also hard-casts `type as 'ma_cross'` and must branch too.",
+      "files": [
+        "packages/types/src/alerts.ts",
+        "apps/api/src/routes/alerts.ts",
+        "apps/api/src/alert-engine.ts"
+      ],
+      "effort": "L",
+      "notes": "Fully verified incl. line numbers. Added: rowToAlert() in routes/alerts.ts also coerces type to 'ma_cross' and JSON.parses config as MaCrossAlertConfig — it needs the same discriminant branch, slightly widening the change but not the effort tier. Touches the live-alerts loader, so the additive-default guard is mandatory, not optional.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-3",
+      "title": "Working plot-cross condition evaluator already exists but is trapped in the MT5 SignalRunner",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "mt5/signal-runner.ts defines `evaluateCondition` (lines 102-177) and `evaluateConditions` (82-100) and `indicatorRefs` (66-80) as CLOSURES inside `createSignalRunner` — not exported. They fully implement indicator_compare + price_crosses with >,<,>=,<=,==,crosses_above,crosses_below, plot-vs-constant/plot/price, using `computeIndicatorChannel`/`setIndicatorMetadata` from @supercharts/indicators/runner. Output is only `router.submit(recipe.accountId, intent)` (line 203) for open_position. SignalRecipe requires `accountId` (trading.ts:188). So a no-MT5 user cannot reach this logic and it delivers no web/Telegram.",
+      "fixRefined": "Extract `evaluateCondition`/`evaluateConditions`/`indicatorRefs` (lines 66-177) into a new pure module (e.g. apps/api/src/signal-conditions.ts) exporting a function like `evaluateConditionsAt(conditions, logic, bars, specs)`. Make signal-runner.ts import it (behavior-preserving). Have alert-engine.ts's new `indicator` branch import the same function. Reuses one evaluator; satisfies the 'reuse, don't duplicate' rule. Note: the extracted fn must take the SignalCondition[] + logic + indicatorSpecs directly (not a SignalRecipe) so it has no accountId dependency.",
+      "files": [
+        "apps/api/src/mt5/signal-runner.ts",
+        "apps/api/src/signal-conditions.ts",
+        "apps/api/src/alert-engine.ts"
+      ],
+      "effort": "L",
+      "notes": "Verified: the three functions are inner closures (lines 66-177), not exported — so they genuinely cannot be reused without extraction. The refactor is behavior-preserving for the MT5 path. Honest L (refactor + alert-engine wiring + keep signal-runner tests green).",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-4",
+      "title": "Create-alert form has no plot/operator/level picker — it is a pure MA-cross form",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "CreateAlertForm (alerts-dialog.tsx:2138-2272) only renders MA type/length/source/labels/web+telegram toggles, builds a MaCrossAlertConfig, and POSTs `type: 'ma_cross'` (line 2169). It receives only `initialSymbol` — it never reads pane indicators. The full plot/operator/RHS UI EXISTS in signal-builder-dialog.tsx: `IndicatorCompareRow` (lines 287-412) and `PriceCrossesRow` (414-504) — channel dropdown from `spec.channels` via INDICATOR_LOOKUP, operator dropdown incl. crosses_above/below, constant/indicator/price RHS toggle. But SignalBuilderDialog is bound to MT5 `/signals` and `save()` aborts without `activeAccountId` (lines 105-107).",
+      "fixRefined": "Add an indicator-alert path to alerts-dialog.tsx (a new condition editor or a New-tab sub-mode) seeded from a passed-in IndicatorInstance. Lift `IndicatorCompareRow`/`PriceCrossesRow` (signal-builder-dialog.tsx:287-504) into a shared module (condition-editor.tsx) and import them in both places, feeding `indicators={[instance]}` and channels from INDICATOR_LOOKUP[type]. POST to /api/alerts with the new `type:'indicator'` body (depends on ALERTFROMIND-2). Keep the existing MA-cross New tab untouched as default.",
+      "files": [
+        "apps/web/features/terminal/alerts-dialog.tsx",
+        "apps/web/features/terminal/signal-builder-dialog.tsx",
+        "apps/web/features/terminal/condition-editor.tsx"
+      ],
+      "effort": "L",
+      "notes": "Verified: CreateAlertForm is pure MA-cross and takes only initialSymbol (no pane indicators threaded in). The reusable condition rows exist exactly where cited and already pull channels from INDICATOR_LOOKUP. The 'lift into shared module' approach respects the reuse rule. Honest L.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-5",
+      "title": "Indicator instance ids are per-pane/client-only — alert engine has no inputs to compute the plot server-side",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "runner.ts computeIndicatorChannel() (lines 41-63): `const meta = activeMeta?.byId.get(ref.id)` then `const type = (meta?.type ?? ref.id).toLowerCase()` and inputs default to registry defaults via `spec.inputs.map(i=>[i.key, inputs[i.key] ?? i.default])`. Without setIndicatorMetadata, EMA falls back to length=21 (runner.ts:78). signal-runner.ts handles this by calling setIndicatorMetadata(recipe.indicatorSpecs) (line 92-94); the bulk-subscribe flow persists indicatorSpecs on the recipe. But legend instances live in the per-pane Zustand store / indicator_layouts; an alert row keyed by id alone would lose the inputs.",
+      "fixRefined": "When building the `indicator` alert body in alerts-dialog.tsx, copy the full IndicatorInstance (id+type+name+inputs) from pane.classicIndicators into the alert config (e.g. `indicatorSpec`/`indicatorSpecs`). In alert-engine.ts's indicator branch, call `setIndicatorMetadata([config.indicatorSpec])` before evaluating — mirroring signal-runner.ts:92. Reuses the existing metadata mechanism; no new math. IndicatorInstance (chart.ts:89) carries id/type/name/inputs, so the copy is complete.",
+      "files": [
+        "apps/web/features/terminal/alerts-dialog.tsx",
+        "apps/api/src/alert-engine.ts",
+        "packages/types/src/alerts.ts"
+      ],
+      "effort": "M",
+      "notes": "Verified end-to-end against runner.ts and the signal-runner precedent. Medium is fair — it is a correctness requirement for the indicator-alert feature, but only matters once ALERTFROMIND-2/4 exist. setIndicatorMetadata uses a module-level `activeMeta`, so the call must happen per-evaluation pass right before computeIndicatorChannel (as signal-runner does), or concurrent alerts on different specs could race; worth flagging in the fix.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-6",
+      "title": "AlertEvent shape assumes maValue — indicator alerts would have nothing meaningful to log/deliver",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "AlertEvent (alerts.ts:131) has required `maValue: number`. The INSERT (alert-engine.ts:268-290) writes ma_value, and the DB column is `ma_value REAL NOT NULL` (db.ts:195). formatTelegramMessage (alert-engine.ts:449-471) renders MA-specific copy ('EMA(20) on close'). EventHistory (alerts-dialog.tsx:2423) prints `MA {formatPrice(e.maValue)}`. None of this describes a generic plot cross.",
+      "fixRefined": "Make `maValue` optional in the AlertEvent TS type and add optional `conditionLabel?: string` + `indicatorValue?: number`. CRITICAL REFINEMENT (candidate missed this): `ma_value` is NOT NULL in the SQLite schema (db.ts:195), so the indicator branch CANNOT insert NULL — either ALTER the column to add `DEFAULT 0` / make it nullable via a migration, or have the indicator branch write the indicator's plot value into ma_value (preferred: reuse the column to store `indicatorValue`). In alert-engine.ts branch the event build + formatTelegramMessage on alert.type; for indicator, derive conditionLabel from the SignalCondition (reuse describeCondition in apps/web/lib/strategy-describe.ts, or a small server mirror — note that file is in the web package, so a server-side copy/move is needed). Guard EventHistory (alerts-dialog.tsx:2423) to show conditionLabel when the alert is an indicator type.",
+      "files": [
+        "packages/types/src/alerts.ts",
+        "apps/api/src/alert-engine.ts",
+        "apps/web/features/terminal/alerts-dialog.tsx",
+        "apps/api/src/db.ts"
+      ],
+      "effort": "M",
+      "notes": "REAL but the candidate's fix is incomplete: it says 'Additive columns only — no migration of existing rows', yet ma_value is NOT NULL (db.ts:195) so an indicator event cannot omit it without a schema change or writing a real value. Also `describeCondition` lives in the WEB package (apps/web/lib/strategy-describe.ts) — alert-engine.ts is server-side and cannot import it; needs a server mirror or shared package. Added db.ts to files touched. Severity medium is fair.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "ALERTFROMIND-7",
+      "title": "Backtest/optimize/sizer/walk-forward actions on an indicator alert would 400 — they assume ma_cross",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "AlertRow (alerts-dialog.tsx:1040-1260) renders Backtest (Activity), Optimize (Sliders), Walk-forward (Shuffle), Paper (ClipboardList), Sizer (Calculator) buttons unconditionally for every alert. The routes hard-return `{error:'unsupported_alert_type'}` when `row.type !== 'ma_cross'`: backtest 386-389, optimize 453-456, sizer-preview 511-514, walk-forward 846-849. So those buttons would error on an indicator alert.",
+      "fixRefined": "In AlertRow (alerts-dialog.tsx:1189-1254), gate the Backtest/Optimize/Walk-forward/Sizer buttons behind `alert.type === 'ma_cross'` (hide, or disable with a tooltip) for indicator alerts. No backend change needed for v1 — the routes already return a clean 400. Paper-trading (ClipboardList) could remain if the indicator branch books paper trades on fire (optional follow-up). Pure affordance-hiding.",
+      "files": [
+        "apps/web/features/terminal/alerts-dialog.tsx"
+      ],
+      "effort": "S",
+      "notes": "Verified: all four route guards exist at the cited lines and all five analytics buttons render unconditionally in AlertRow. Honest low severity — only matters after indicator alerts exist (depends on ALERTFROMIND-2). Note `alert.type` is currently the literal 'ma_cross' so the gate is a no-op until ALERTFROMIND-2 widens the type; harmless to add now but only meaningful post-2.",
+      "dimension": "alertFromInd"
+    },
+    {
+      "id": "INTERACTION-1",
+      "title": "Floating OHLC tooltip chases the cursor instead of living in a fixed status line",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "TooltipLayer (packages/chart-core/src/layers/tooltip.ts) is registered by default in registerDefaultLayers() (chart-core.ts line 299) with zIndex 97 and visible=true. render() draws a rounded O/H/L/C/V/Δ panel at x=crosshair.x+14, y=crosshair.y+14 (tooltip.ts lines 39-40), flipping sides only to avoid clipping the axis. It moves with the cursor and overlays candles.",
+      "tvBehavior": "TradingView shows OHLCV in a fixed top-left status line next to the symbol; values update in place and never occlude price action with a moving box.",
+      "gap": "SC draws a cursor-tracking OHLC box over the candles where TV shows OHLC once in a fixed status line. The box occludes price action as the mouse moves.",
+      "fixRefined": "Surface OHLCV in the existing fixed UI instead of the floating canvas box. The hovered candle index is already computed as `legendHoverIdx` (chart-pane.tsx line 1344) and `hoverTime` is tracked (line 149). Extend `IndicatorLegend` (indicator-legend.tsx) with an optional OHLC row (extend the `LegendRow`/Props contract in indicator-legend-util.ts which currently only carries id/name/color/summary/value/visible at line 58), and either default `TooltipLayer.visible=false` or gate it behind a per-pane `overlays.cursorTooltip` flag toggled via the existing togglePaneOverlay. Keep the candle-column highlight strip (tooltip.ts lines 81-87) by moving it into CrosshairLayer.render. Note: the top-bar header (chart-pane.tsx lines 1405-1410) shows only last price + percent, NOT full OHLC, so OHLC is not strictly duplicated today — the real problem is occlusion, not duplication.",
+      "notes": "Real. Downgraded high→medium: this is a noticeable UX deviation from TV, not a missing core capability — full OHLC IS available (just in a moving box). The candidate's 'OHLC is duplicated in the legend' claim is overstated: IndicatorLegend renders indicator values, and the top-bar header shows only price/percent, so OHLC currently appears only in the floating box.",
+      "files": [
+        "packages/chart-core/src/layers/tooltip.ts",
+        "packages/chart-core/src/layers/crosshair.ts",
+        "apps/web/features/terminal/chart-pane.tsx",
+        "apps/web/features/terminal/indicator-legend.tsx",
+        "apps/web/features/terminal/indicator-legend-util.ts"
+      ],
+      "effort": "M",
+      "dimension": "interaction"
+    },
+    {
+      "id": "INTERACTION-2",
+      "title": "Right-click menu is overlay-toggle-only — missing every TV staple action",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "ChartContextMenu (chart-pane.tsx lines 1488-1553) renders only: Reset zoom, Delete selected drawing, and Show/Hide for heatmap/volume profile/deep trades/footprint/volume pane. onContextMenu in chart-core.ts (lines 474-491) already computes time and price under the cursor and threads them through onPointerEvent, but the chart-pane handler discards them: line 160 stores only `{ x: e.x, y: e.y }`, and the menu state type at line 115 is `{ x: number; y: number } | null`.",
+      "tvBehavior": "TV's chart context menu offers Add indicator, Add alert at the clicked price, Reset chart, Chart/scale settings, Copy price, Object tree, Hide all drawings — and captures the price/time under the cursor so 'Add alert' and 'Copy price' act on that exact level.",
+      "gap": "None of TV's core context actions exist; the menu is purely overlay toggles, and the cursor price/time (already available) is thrown away.",
+      "fixRefined": "In chart-pane.tsx line 160 store `{ x: e.x, y: e.y, price: e.price, time: e.time }` and widen the `menu` state type at line 115 to include price/time. Extend ChartContextMenu with a top section: 'Copy price' (`navigator.clipboard.writeText(formatPrice(menu.price))` — formatPrice is already imported at chart-pane.tsx line 71), 'Add indicator' (open the existing indicators dialog via the store), 'Reset chart' (reuse the existing onResetZoom wiring at line 1453, relabel), and 'Add alert at <price>' that opens the EXISTING alert-create UI prefilled with this symbol/interval/price. Do NOT auto-create or mutate the 48 live alerts — only open the creation UI prefilled. Keep overlay toggles in a lower section.",
+      "notes": "Real and accurately scoped. Severity high is fair — these are core TV context actions users expect. Fix correctly respects the live-alerts constraint (open prefilled UI only, no auto-create).",
+      "files": [
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "M",
+      "dimension": "interaction"
+    },
+    {
+      "id": "INTERACTION-3",
+      "title": "No log / percent / auto price-scale modes and no price-axis context menu",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "PriceScale (scale.ts) defines `mode: 'linear' | 'log' | 'percent'` (line 77/86) and implements correct LOG math in priceToY (lines 100-104) and yToPrice (lines 116-119). Mode is hardcoded `mode: 'linear'` in the ChartCore constructor (chart-core.ts line 118); there is no setter, fitPriceScaleToVisible always calls the linear fit() (lines 531-542), and onContextMenu fires the same generic menu for axis-pane clicks (it never distinguishes `x >= geometry.axisPane.x`, which is only used for priceAxisDrag at line 394).",
+      "tvBehavior": "Right-clicking the price axis opens a dedicated menu (Auto/fit, Logarithmic, Percent, Regular, Scale settings) with small Auto/Log/% toggles at the axis. Log scale is essential for assets moving orders of magnitude.",
+      "gap": "Log scale math exists but is unreachable dead code (no setter, no UI, no axis menu). Percent mode is declared in the type but NOT actually implemented in the math.",
+      "fixRefined": "Add `ChartCore.setPriceScaleMode(mode)` that sets `this.priceScale.state.mode`, re-runs fitPriceScaleToVisible(), and markDirty(). In chart-core.ts onContextMenu (line 474), detect `x >= this.geometry.axisPane.x` and emit a distinct event (e.g. add a `target: 'scale'` field to ChartPointerEvent, or a new type) so chart-pane.tsx can render a scale-specific menu (Auto / Logarithmic / Regular). IMPORTANT CORRECTION: 'percent' is NOT implemented — priceToY/yToPrice only branch on 'log' and otherwise fall through to the linear path, so percent currently behaves identically to linear. Shipping a working 'Percent' option requires ADDING percent math (normalize against the first visible close) to priceToY/yToPrice and fit() — it is not just 'wiring existing math.' Log mode, by contrast, is genuinely complete and only needs wiring.",
+      "notes": "Real. Candidate's core claim (log is working dead code, no toggle, no axis menu) is correct. But its assertion that 'the math path already supports' percent is WRONG — only log is implemented; percent falls through to linear. Refined the fix to add percent math rather than just wire it. Effort L stands given the new event-routing + axis menu + percent math.",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/scale.ts",
+        "apps/web/features/terminal/chart-pane.tsx"
+      ],
+      "effort": "L",
+      "dimension": "interaction"
+    },
+    {
+      "id": "INTERACTION-4",
+      "title": "Pan and zoom are instant/1:1 — no inertia or smooth zoom, feels abrupt vs TV",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Pan is a direct per-event 1:1 translation: onPointerMove calls timeScale.pan(x-lastX) / priceScale.pan(y-lastY) (chart-core.ts lines 407-408); TimeScale.pan just does `rightTime -= dxPixels / pxPerMs` (scale.ts line 61). Wheel zoom applies a fixed factor 1.15 per tick instantly (chart-core.ts line 380). The render loop is a dirty-flag RAF that only repaints on markDirty() (lines 556-562); there is no continuous animation channel, so motion halts the instant the pointer/wheel stops. No velocity/momentum/inertia/decay symbols exist anywhere in chart-core/src.",
+      "tvBehavior": "TV pans with momentum (a fast flick glides and decelerates) and zooms with a brief smoothed ramp, a large part of why it 'feels smooth.'",
+      "gap": "No flick-pan momentum and no eased zoom; movement stops immediately, reading as less polished than TV.",
+      "fixRefined": "Add an optional momentum pass to the existing `loop` (chart-core.ts lines 556-562) without rebuilding it. Track pointer velocity across the last 2-3 pointermove deltas in attachInteractions; on pointerup while dragging, if speed exceeds a threshold, start a decay that markDirty()s each frame and applies timeScale.pan(vx) with vx*=~0.92 until below ~0.1px, cancelling on the next pointerdown/wheel (note: the RAF loop currently early-returns when !dirty, so the decay must keep setting dirty=true each frame). Gate behind a ChartCoreOptions flag so tests stay deterministic. Pure additive; no scale-math change.",
+      "notes": "Real and accurately described. Downgraded medium→low: this is genuine polish/feel, not a missing capability — pan/zoom work correctly today, they just lack easing. Honest severity per the rubric (nice-to-have).",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/scale.ts"
+      ],
+      "effort": "L",
+      "dimension": "interaction"
+    },
+    {
+      "id": "INTERACTION-5",
+      "title": "Canvas has no cursor affordances (no crosshair / grab / grabbing)",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The canvas JSX is `className=\"absolute inset-0 h-full w-full\"` (chart-pane.tsx line 1416) with no cursor style, and attachInteractions (chart-core.ts lines 368-509) never mutates canvas.style.cursor. grep for 'cursor' in chart-core/src returns only two doc-comment hits (scale.ts lines 57, 66) and chart-pane.tsx has no style.cursor or cursor-* class. So the OS arrow shows everywhere.",
+      "tvBehavior": "The chart cursor communicates state: crosshair over the plot, grab/grabbing while panning, resize cursor over the axes, target/pencil while a draw tool is armed.",
+      "fixRefined": "In attachInteractions (chart-core.ts), set `cvs.style.cursor` from the pointer handlers: 'crosshair' on hover inside the price pane (onPointerMove hover branch ~line 419), 'grabbing' on pointerdown / while dragging (line 388/406), 'ns-resize' when priceAxisDrag (x >= axisPane.x, line 394), 'ew-resize' for timeAxisDrag (line 395), resetting on pointerup/pointerleave. For the armed-drawing-tool state, set 'crosshair' or 'copy' when shouldSuppressPan() returns true. A handful of one-line style assignments; no layout impact.",
+      "notes": "Real, fully confirmed by grep. Low severity is correct (affordance polish). Fix lands in the right handlers.",
+      "files": [
+        "packages/chart-core/src/chart-core.ts"
+      ],
+      "effort": "S",
+      "dimension": "interaction"
+    },
+    {
+      "id": "INTERACTION-6",
+      "title": "Crosshair does not magnet-snap to OHLC and price label is raw cursor price",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "The crosshair price comes straight from the cursor y: onPointerMove sets `crosshair = { x, y, time, price: this.priceScale.yToPrice(y) }` (chart-core.ts lines 423-424). AxisLayer prints formatPrice(crosshair.price) from that raw value (axis.ts lines 66, 74). CrosshairLayer draws the horizontal line at the raw crosshair.y (crosshair.ts lines 39-40). There is no snapping; no 'magnet'/'snap' symbol exists in chart-core/src. findCandleAt already locates the hovered candle in tooltip.ts (lines 93-111) but is private to that layer.",
+      "tvBehavior": "In Magnet mode TV snaps the crosshair to the nearest OHLC level of the hovered bar; the axis price label and horizontal line reflect that snapped value.",
+      "gap": "No magnet/snap; the crosshair price label is an arbitrary cursor value rather than a real OHLC level.",
+      "fixRefined": "Factor findCandleAt out of tooltip.ts into a shared exported helper (e.g. in a scale/util module so both TooltipLayer and ChartCore can import it without duplicating the binary search). In chart-core.ts onPointerMove, when an optional `magnet` flag is on, after computing time/price find the hovered candle and snap crosshair.y/crosshair.price to the nearest of its open/high/low/close (via priceScale.priceToY for the snapped y). AxisLayer and CrosshairLayer then render the snapped value automatically. Expose a per-chart magnet toggle, default OFF so current behavior is unchanged. No new math.",
+      "notes": "Real. Low severity correct (opt-in precision aid). The only refinement: findCandleAt is currently a private function in tooltip.ts, so the fix must export/relocate it rather than call it cross-module.",
+      "files": [
+        "packages/chart-core/src/chart-core.ts",
+        "packages/chart-core/src/layers/tooltip.ts",
+        "packages/chart-core/src/layers/crosshair.ts"
+      ],
+      "effort": "M",
+      "dimension": "interaction"
+    },
+    {
+      "id": "COVERAGE-1",
+      "title": "Indicators not searchable by acronym/alias (\"EMA\", \"BB\", \"RSI\", \"DMI\" fail)",
+      "severity": "high",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. In indicators-dialog.tsx the matches() predicate (lines 254-258) tests only e.label, e.desc and the group name as lowercase substrings. The EMA catalog row is label \"Exponential MA\" / desc \"Exponential moving average.\" / group \"Moving Averages\" — none contain the substring \"ema\". Keltner's desc \"EMA ± ATR channels\" (line 124) lowercases to \"ema ± atr channels\", which DOES contain \"ema\", so typing \"EMA\" returns ONLY Keltner Channels — exactly as the brief captured. \"BB\"/\"BBands\" never hit \"Bollinger Bands\"/\"bollinger\" (no adjacent \"bb\"); \"DMI\" never hits \"ADX / DMI\" (its desc/label both lack \"dmi\") wait— label is \"ADX / DMI\" which DOES contain \"dmi\", but \"%R\"/\"WPR\" miss Williams, \"STOCH\" misses Stochastic, \"KC\"/\"DC\"/\"SAR\"/\"ST\" all miss. No aliases?: string[] field exists anywhere in registry.ts (verified by grep).",
+      "tvBehavior": "TradingView indexes every study by full name AND acronym; typing EMA/BB/MACD/ATR/RSI jumps straight to the match. Acronym search is the primary power-user add path.",
+      "gap": "No acronym/alias/synonym index in either search path. The headline \"EMA\"->only-Keltner symptom is real, plus BB->Bollinger, %R->Williams, KC->Keltner, SAR->Parabolic SAR, ST->Supertrend, STOCH->Stochastic, AVWAP/VWAP-sigma are unreachable by the names traders type.",
+      "fixRefined": "Add optional `aliases?: string[]` to `IndicatorSpec` in registry.ts (alongside `description` at line 35) and populate per entry (e.g. bollinger:['bb','bbands'], williams_r:['%r','wpr'], stochastic:['stoch'], keltner:['kc'], donchian:['dc'], psar:['sar'], supertrend:['st'], cci/mfi/obv/cmf/vwap/rsi/macd/atr/adx as their own acronyms). In indicators-dialog.tsx, resolve each classic Entry's aliases via INDICATOR_LOOKUP[e.type]?.aliases (already imported, line 11) and extend matches() (line 254) with `(aliases?.some(a => a.includes(lower) || lower.includes(a)) ?? false)`. Mirror the same alias lookup in indicator-panel.tsx IndicatorPickerList filter (lines 191-193). NOTE: the right-rail picker already lowercases the query (line 190) and matches s.type, so \"EMA\" DOES find EMA there today — the candidate's claim that the right rail misses \"EMA\" unless typed lowercase is WRONG; the real right-rail gap is acronyms that aren't the type string (BB, %R, KC, etc.). The dialog is the one with the headline \"EMA\"->only-Keltner failure.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "apps/web/features/terminal/indicators-dialog.tsx",
+        "apps/web/features/terminal/indicator-panel.tsx"
+      ],
+      "effort": "M",
+      "notes": "Core gap is real and high-value (matches the live brief verbatim). Refined: corrected the candidate's inaccurate right-rail \"EMA misses\" claim (query is lowercased at line 190), and noted \"DMI\" actually already matches because the catalog label is literally \"ADX / DMI\". Severity stays high — acronym search is the primary add path and the EMA case is a genuine dead-end.",
+      "dimension": "coverage"
+    },
+    {
+      "id": "COVERAGE-2",
+      "title": "No unified Moving Average entry with MA-type dropdown; DEMA/TEMA coded but unreachable; VWMA missing",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed on all points. registry.ts has four separate MA entries: sma(39-50), ema(51-61), wma(62-69), hma(70-77); no `maType` enum input exists anywhere. ma.ts exports working dema(96-105), tema(107-117) and rma/Wilder(119-133). runner.ts has live `case 'dema'`(92) and `case 'tema'`(97) branches — but neither dema nor tema has a registry entry, so both are unreachable from the UI (the dialog CATALOG Moving Averages group lists only sma/ema/wma/hma, lines 113-116). vwma confirmed absent from volume.ts (grep: only vwap/obv/cmf/volumeOscillator/rvol/vwapBands/initialBalance exported) and has no runner case.",
+      "tvBehavior": "TradingView ships one \"Moving Average\" study with a TYPE dropdown (SMA/EMA/WMA/RMA/VWMA + DEMA/TEMA) that recomputes in place, rather than a study per flavour.",
+      "gap": "Users can't switch MA type in place, and two already-computed types (DEMA, TEMA) plus VWMA/RMA are absent from the picker despite the math existing (DEMA/TEMA even have runner cases wired).",
+      "fixRefined": "Lowest-risk additive path: add `dema` and `tema` IndicatorSpec entries to INDICATOR_REGISTRY (mirror the `ema` entry at lines 51-61: length int default 21 + sourceInput(), overlay) — zero runner work since cases 'dema'/'tema' already exist (runner.ts:92-101) — and add both to the Moving Averages group in indicators-dialog.tsx CATALOG (lines 111-118). For VWMA, add `vwma(values, volumes, length)` to ma.ts and a `case 'vwma'` in runner.ts reading candle.volume (no fabricated data). Optionally a true TV-style single `moving_average` spec with a maType enum dispatching in one runner case to the existing ma.ts fns, keeping the four legacy entries intact.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "packages/indicators/src/runner.ts",
+        "packages/indicators/src/ma.ts",
+        "apps/web/features/terminal/indicators-dialog.tsx"
+      ],
+      "effort": "M",
+      "notes": "Real. DEMA/TEMA being computable-but-unreachable is the most concrete, lowest-effort sub-part (S on its own — just two registry rows + two catalog rows, no math/runner change). VWMA is the only piece needing new math. Severity medium is fair: it's missing coverage, not broken behavior.",
+      "dimension": "coverage"
+    },
+    {
+      "id": "COVERAGE-3",
+      "title": "No Offset input on MAs/overlays",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. grep for \"offset\" across packages/indicators/src returns nothing. No registry entry has an offset input; neither priceFromCandle/pricesFromCandles (ma.ts:5-21) nor the runner MA cases (runner.ts:72-101) apply any index shift. Output arrays are strictly 1:1 with candles, so there is no plumbing to displace a series.",
+      "tvBehavior": "Every TradingView MA (and most overlays) exposes an Offset input shifting the plotted line N bars left/right — standard for displaced MAs and forward projection.",
+      "gap": "Displaced moving averages are impossible; experienced traders expect Offset on any MA.",
+      "fixRefined": "Add an `offsetInput()` helper in registry.ts (type 'int', default 0, min -500, max 500) alongside sourceInput() (line 355) and include it on the sma/ema/wma/hma specs (and any new MA entry). In runner.ts add a small shiftSeries(values, offset) post-step in the MA case branches (lines 72-101) using numberInput(inputs.offset, 0). Default 0 preserves today's output. Confine to overlay MAs first; the chart layer already plots index-aligned arrays so a pre-shifted array works.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "packages/indicators/src/runner.ts"
+      ],
+      "effort": "M",
+      "notes": "Real but genuinely a nice-to-have for most users; low is the right severity (candidate already had it low). Effort M is slightly generous — adding the input + a shift helper is closer to S, but threading it through all MA cases and verifying right-shift padding behavior justifies M.",
+      "dimension": "coverage"
+    },
+    {
+      "id": "COVERAGE-4",
+      "title": "Input metadata incomplete/inconsistent — missing min/max on most numeric inputs; no per-input tooltip",
+      "severity": "medium",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. IndicatorInputSpec (registry.ts:9-18) has min/max/step but NO tooltip/description field (grep confirms the only \"tooltip\" in src is the comment on the indicator-level `description` at line 34). Bounds are uneven: only sma.length and ema.length carry min:1,max:500 (lines 45,57); wma.length/hma.length/bollinger.length/keltner.*/adx.length/atr.length/cci/mfi/williams_r/stochastic periods have NO min/max/step; rsi.length has min:2 but no max (line 84). The editor (indicator-panel.tsx:288-300) passes input.min/input.max straight to the number input, so absent bounds = unbounded field; numberInput in runner.ts (288-295) does NOT clamp, so length 0/negative yields a blank/garbage series. Note: the editor DOES already supply a step fallback (line 290: input.step ?? (float?0.1:1)), so the 'no step' part is mitigated in the UI even where the spec omits step.",
+      "tvBehavior": "TradingView inputs carry sensible min/max/step plus a hover tooltip per input; the settings dialog enforces bounds and shows help text.",
+      "gap": "Inconsistent/absent bounds let users enter invalid params (length 0/negative -> empty series); no per-input help. A noticeable quality gap vs TV's guided inputs.",
+      "fixRefined": "In registry.ts: (1) add optional `tooltip?: string` to IndicatorInputSpec (lines 9-18) and populate it for common inputs (Length, Source, Multiplier, Fast/Slow/Signal); (2) backfill min/max/step on every numeric input lacking them (lengths min 1, multipliers min 0.1 step 0.1, periods min 1). In indicator-panel.tsx IndicatorEditor (lines 283-302) render input.tooltip as a title=/help line and clamp onChange to min/max before calling onChange (line 296). Optionally add a min-floor in runner.ts numberInput (line 288). Pure metadata + small UI tweak; touches no working math or defaults.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "apps/web/features/terminal/indicator-panel.tsx",
+        "packages/indicators/src/runner.ts"
+      ],
+      "effort": "M",
+      "notes": "Real. Minor correction to the candidate: the editor already has a step fallback, so the practical gap is min/max bounds + tooltips, not step. Severity medium is defensible because unbounded length lets a user silently blank an indicator; could be argued low since most users never type 0, but the no-clamp + blank-series outcome is a real correctness/UX rough edge.",
+      "dimension": "coverage"
+    },
+    {
+      "id": "COVERAGE-5",
+      "title": "Source input missing on Bollinger (TV exposes it)",
+      "severity": "low",
+      "isReal": true,
+      "confidence": "high",
+      "scBehavior": "Confirmed. sourceInput() (registry.ts:355-371) is attached only to sma/ema/wma/hma/rsi/macd/roc. The bollinger spec (registry.ts:168-177) has NO source input. The runner's case 'bollinger' (runner.ts:156-168) passes only length+multiplier, and bollinger() in volatility.ts hardcodes the series via `const closes = candles.map((c) => c.close)` (line 48) with no source option. So Bollinger cannot be computed on hl2/typical price.",
+      "tvBehavior": "TradingView Bollinger Bands defaults to close but is source-selectable (close/open/hl2/hlc3/ohlc4...). Single-series studies expose a Source dropdown.",
+      "gap": "Bollinger (the most-used band study) can't be computed on hl2/typical price as TV allows. Minor but a real coverage gap.",
+      "fixRefined": "Add sourceInput() to the bollinger spec (registry.ts:172). Thread `source: (inputs.source as PriceSource) ?? 'close'` through case 'bollinger' (runner.ts:156). Extend BollingerOptions (volatility.ts:32-35) with optional `source?: PriceSource` and replace the hardcoded `candles.map((c) => c.close)` (line 48) with pricesFromCandles(candles, opts.source ?? 'close') (already importable from ./ma). Default 'close' preserves current output. Scope to Bollinger only — leave HLC-defined studies (CCI/Williams/MFI) without Source, matching TV.",
+      "files": [
+        "packages/indicators/src/registry.ts",
+        "packages/indicators/src/runner.ts",
+        "packages/indicators/src/volatility.ts"
+      ],
+      "effort": "S",
+      "notes": "Real and cleanly additive; the existing pricesFromCandles helper (ma.ts:17) makes the volatility.ts change trivial. Low severity is correct — it's a single-study refinement. Candidate's mention of 'Stochastic legitimately takes a source on TV' is debatable (TV Stochastic is HLC-based and does not expose Source), so the fix is correctly scoped to Bollinger only.",
+      "dimension": "coverage"
+    }
+  ],
+  "allVerifiedCount": 64,
+  "realCount": 64
+}
