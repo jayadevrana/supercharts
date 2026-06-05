@@ -15,11 +15,13 @@ export const DialogContent = forwardRef<
 >(function DialogContent({ className, children, ...rest }, ref) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm data-[state=open]:animate-fade-in" />
+      {/* No backdrop blur — a light dim so the chart behind stays visible while you adjust a
+          setting (you can watch a colour / line change live). Smooth macOS-style fade. */}
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/35 data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out" />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface shadow-floating data-[state=open]:animate-slide-up',
+          'fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface shadow-floating data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out',
           className,
         )}
         {...rest}
