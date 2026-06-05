@@ -1,16 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Plus, Settings2, Trash2, Eye, EyeOff, LineChart, ChevronUp, ChevronDown, Copy } from 'lucide-react';
 import { INDICATOR_REGISTRY, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
 import type { IndicatorInstance } from '@supercharts/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Badge } from '@/components/ui/badge';
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { nanoid } from './nanoid';
 import { nextIndicatorName } from './indicator-manager-util';
+import { indicatorInputSummary, legendColor } from './indicator-legend-util';
+
+/** Where an instance renders, as a manager group heading. */
+function groupLabelFor(spec: IndicatorSpec | undefined): string {
+  return spec?.pane === 'overlay' ? 'On price' : 'Lower panes';
+}
 
 interface Props {
   pane: PaneState;
@@ -94,23 +99,46 @@ export function IndicatorPanel({ pane }: Props) {
         {active.map((inst, idx) => {
           const spec = INDICATOR_LOOKUP[inst.type];
           if (!spec) return null;
+          // Lightweight group heading inserted when the group changes vs the previous row —
+          // iterates the flat `active` order so the up/down chevrons' index stays correct.
+          const group = groupLabelFor(spec);
+          const prevSpec = idx > 0 ? INDICATOR_LOOKUP[active[idx - 1]!.type] : undefined;
+          const showHeader = idx === 0 || group !== groupLabelFor(prevSpec);
+          const fullName = inst.name || spec.label;
+          const summary = indicatorInputSummary(spec, inst);
           return (
+            <Fragment key={inst.id}>
+              {showHeader ? (
+                <div className="px-1 pt-1.5 text-[9px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70">
+                  {group}
+                </div>
+              ) : null}
             <div
-              key={inst.id}
               className="rounded-md border border-border bg-surface-sunken/60 px-2 py-1.5"
             >
               <div className="flex items-center justify-between">
                 <div className="flex min-w-0 items-center gap-2">
                   <button
                     onClick={() => updateIndicator(pane.id, inst.id, { visible: !inst.visible })}
-                    className="text-muted-foreground hover:text-foreground"
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    title={inst.visible ? 'Hide' : 'Show'}
+                    aria-label={inst.visible ? 'Hide indicator' : 'Show indicator'}
                   >
                     {inst.visible ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
                   </button>
-                  <span className="truncate font-medium text-foreground">{inst.name || spec.label}</span>
-                  <Badge tone={spec.pane === 'overlay' ? 'muted' : 'accent'} className="text-[8px]">
-                    {spec.pane}
-                  </Badge>
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-[3px]"
+                    style={{ backgroundColor: legendColor(spec, inst) }}
+                    aria-hidden
+                  />
+                  <div className="min-w-0">
+                    <span className="block truncate font-medium text-foreground" title={fullName}>
+                      {fullName}
+                    </span>
+                    {summary ? (
+                      <span className="block truncate text-[10px] text-muted-foreground">{summary}</span>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="flex items-center gap-0.5">
                   <Button
@@ -168,6 +196,7 @@ export function IndicatorPanel({ pane }: Props) {
                 </div>
               </div>
             </div>
+            </Fragment>
           );
         })}
       </div>
