@@ -136,6 +136,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const updateIndicator = useTerminalStore((s) => s.updateIndicator);
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
   const addIndicator = useTerminalStore((s) => s.addIndicator);
+  const reorderIndicator = useTerminalStore((s) => s.reorderIndicator);
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
   const toggleSmcOverlay = useTerminalStore((s) => s.toggleSmcOverlay);
   const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
@@ -1517,6 +1518,16 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
               }}
               onSettings={(id) => requestIndicatorSettings(id)}
               onRemove={(id) => removeIndicator(pane.id, id)}
+              onReorder={(id, dir) => reorderIndicator(pane.id, id, dir)}
+              onResetDefaults={(id) => {
+                const inst = pane.classicIndicators.find((i) => i.id === id);
+                const spec = inst ? INDICATOR_LOOKUP[inst.type] : undefined;
+                if (!spec) return;
+                updateIndicator(pane.id, id, {
+                  inputs: Object.fromEntries(spec.inputs.map((i) => [i.key, i.default])),
+                  style: { ...spec.style },
+                });
+              }}
             />
           ) : null}
         </div>
