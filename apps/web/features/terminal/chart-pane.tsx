@@ -45,6 +45,7 @@ import type {
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
 import { runScript, type RunResult } from '@supercharts/script-lang';
 import { SubPaneIndicators, type SubPaneView } from './sub-pane-indicators';
+import { ENTRY_INDEX, INDICATOR_DND_MIME, buildInstance } from './indicators-dialog';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IndicatorLegend } from './indicator-legend';
 import { SymbolStatusLine } from './symbol-status-line';
@@ -134,6 +135,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const setPulseResult = useTerminalStore((s) => s.setPulseResult);
   const updateIndicator = useTerminalStore((s) => s.updateIndicator);
   const removeIndicator = useTerminalStore((s) => s.removeIndicator);
+  const addIndicator = useTerminalStore((s) => s.addIndicator);
+  const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
+  const toggleSmcOverlay = useTerminalStore((s) => s.toggleSmcOverlay);
   const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
   const setDataWindow = useTerminalStore((s) => s.setDataWindow);
   const rightRailTab = useTerminalStore((s) => s.rightRailTab);
@@ -154,6 +158,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const [subTick, setSubTick] = useState(0);
   // Collapse toggle for the on-chart indicator legend (the symbol status line stays visible).
   const [legendCollapsed, setLegendCollapsed] = useState(false);
+  // True while an indicator row from the browser dialog is dragged over this chart (drag-to-add, M6).
+  const [dndOver, setDndOver] = useState(false);
 
   // Initial mount: create chart, load historical, subscribe.
   useEffect(() => {
@@ -1449,7 +1455,37 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           </span>
         </div>
       </div>
-      <div data-testid="chart-container" className="relative min-h-0 min-w-0 flex-1">
+      <div
+        data-testid="chart-container"
+        className="relative min-h-0 min-w-0 flex-1"
+        onDragOver={(ev) => {
+          // Allow dropping only indicator rows dragged from the browser dialog (M6).
+          if (!ev.dataTransfer.types.includes(INDICATOR_DND_MIME)) return;
+          ev.preventDefault();
+          ev.dataTransfer.dropEffect = 'copy';
+          if (!dndOver) setDndOver(true);
+        }}
+        onDragLeave={(ev) => {
+          // Only clear when the cursor actually leaves the container (not on inner-child crossings).
+          if (!ev.currentTarget.contains(ev.relatedTarget as Node | null)) setDndOver(false);
+        }}
+        onDrop={(ev) => {
+          const id = ev.dataTransfer.getData(INDICATOR_DND_MIME);
+          setDndOver(false);
+          if (!id) return;
+          ev.preventDefault();
+          const entry = ENTRY_INDEX.get(id);
+          if (!entry) return;
+          if (entry.kind === 'overlay') {
+            if (!pane.overlays[entry.key]) togglePaneOverlay(pane.id, entry.key);
+          } else if (entry.kind === 'smc') {
+            if (!pane.smc[entry.key]) toggleSmcOverlay(pane.id, entry.key);
+          } else {
+            const spec = INDICATOR_LOOKUP[entry.type];
+            if (spec) addIndicator(pane.id, buildInstance(spec));
+          }
+        }}
+      >
         <canvas
           data-testid="chart-canvas"
           ref={canvasRef}
@@ -1534,6 +1570,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           <DomLadderPanel bids={domBook.bids} asks={domBook.asks} hasData={pane.symbol.startsWith('BINANCE:')} />
         ) : null}
         {pane.overlays.openInterest ? <OpenInterestPanel data={oiData} loading={oiLoading} /> : null}
+        {dndOver ? (
+          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-md border-2 border-dashed border-accent/70 bg-accent/10">
+            <span className="rounded-md bg-surface-raised/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-floating">
+              Drop to add to this chart
+            </span>
+          </div>
+        ) : null}
       </div>
       <SubPaneIndicators
         candles={candleBufRef.current}

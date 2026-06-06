@@ -48,7 +48,7 @@ const entryId = (e: Entry): string => (e.kind === 'classic' ? e.type : e.key);
  * and render empty rather than fabricating anything.
  */
 
-type Entry =
+export type Entry =
   | { kind: 'overlay'; key: keyof PaneState['overlays']; label: string; desc: string; orderflow?: boolean; aliases?: string[] }
   | { kind: 'smc'; key: keyof PaneState['smc']; label: string; desc: string; orderflow?: boolean; aliases?: string[] }
   | { kind: 'classic'; type: string; label: string; desc: string; aliases?: string[] };
@@ -161,7 +161,7 @@ const CATALOG: Group[] = [
   },
 ];
 
-function buildInstance(spec: IndicatorSpec): IndicatorInstance {
+export function buildInstance(spec: IndicatorSpec): IndicatorInstance {
   return {
     id: `${spec.type}_${nanoid().slice(0, 6)}`,
     type: spec.type,
@@ -173,6 +173,16 @@ function buildInstance(spec: IndicatorSpec): IndicatorInstance {
     locked: false,
   };
 }
+
+/** MIME set when dragging an indicator row from this dialog onto the chart (drag-to-add, M6). */
+export const INDICATOR_DND_MIME = 'application/x-sc-indicator';
+
+/** Stable entry-id → Entry, so a drop target (the chart pane) can resolve a dragged indicator. */
+export const ENTRY_INDEX: ReadonlyMap<string, Entry> = (() => {
+  const m = new Map<string, Entry>();
+  for (const g of CATALOG) for (const e of g.items) m.set(entryId(e), e);
+  return m;
+})();
 
 export function IndicatorsDialog() {
   const [open, setOpen] = useState(false);
@@ -256,11 +266,7 @@ export function IndicatorsDialog() {
   }, [pane]);
 
   const lower = q.trim().toLowerCase();
-  const byId = useMemo(() => {
-    const m = new Map<string, Entry>();
-    for (const g of CATALOG) for (const e of g.items) m.set(entryId(e), e);
-    return m;
-  }, []);
+  const byId = ENTRY_INDEX;
 
   const matches = (e: Entry, group: string): boolean =>
     !lower ||
@@ -391,6 +397,12 @@ export function IndicatorsDialog() {
                         data-rowkey={key}
                         role="button"
                         tabIndex={0}
+                        draggable
+                        onDragStart={(ev) => {
+                          // Drag-to-add (M6): the chart pane resolves this id via ENTRY_INDEX on drop.
+                          ev.dataTransfer.setData(INDICATOR_DND_MIME, entryId(e));
+                          ev.dataTransfer.effectAllowed = 'copy';
+                        }}
                         onClick={() => toggle(e)}
                         onKeyDown={(ev) => {
                           if (ev.key === 'Enter' || ev.key === ' ') {
