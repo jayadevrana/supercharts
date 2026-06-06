@@ -790,7 +790,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     if (!core) return;
     const layer = core.getLayer<MaCrossLayer>('ma-cross');
     if (!layer) return;
-    const target = paneAlerts[0];
+    // Only ma_cross alerts drive this on-chart MA line; indicator-condition alerts (M5) don't.
+    const target = paneAlerts.find((a) => a.type === 'ma_cross');
     if (!target || candleBufRef.current.length === 0) {
       layer.setOptions({ enabled: false });
       layer.setFrame(null);

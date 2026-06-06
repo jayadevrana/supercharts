@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import type { AppDB } from '../db';
 import { getUser } from '../auth';
-import type { AlertDefinition, AlertEvent, Candle, Interval, MaCrossAlertConfig } from '@supercharts/types';
+import type { AlertDefinition, AlertEvent, Candle, IndicatorAlertConfig, Interval, MaCrossAlertConfig } from '@supercharts/types';
 import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG, getCatalogSymbol } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
@@ -67,13 +67,42 @@ const maCrossConfigSchema = z.object({
     .optional(),
 });
 
-const alertCreateSchema = z.object({
-  symbol: z.string().min(1),
-  interval: z.string().refine((v) => INTERVAL_SET.has(v as Interval)),
-  type: z.literal('ma_cross'),
-  enabled: z.boolean().default(true),
-  config: maCrossConfigSchema,
+/**
+ * Indicator-condition alert config (M5). Conditions/specs are validated loosely (matching the
+ * recipe routes' `z.array(z.unknown())` convention) — the chart sends well-formed SignalConditions;
+ * the engine reuses the shared evaluator which tolerates bad refs (returns false, never throws).
+ */
+const indicatorAlertConfigSchema = z.object({
+  logic: z.enum(['all', 'any']).default('all'),
+  conditions: z.array(z.record(z.unknown())).min(1).max(8),
+  indicatorSpecs: z.array(z.record(z.unknown())).optional(),
+  side: z.enum(['buy', 'sell']).default('buy'),
+  label: z.string().min(1).max(80),
+  delivery: z.object({
+    web: z.boolean().default(true),
+    telegram: z.boolean().default(false),
+    telegramBotId: z.string().optional(),
+    paper: z.boolean().optional(),
+  }),
+  timezone: z.string().min(2).max(40).default('UTC'),
 });
+
+const alertCreateSchema = z.discriminatedUnion('type', [
+  z.object({
+    symbol: z.string().min(1),
+    interval: z.string().refine((v) => INTERVAL_SET.has(v as Interval)),
+    type: z.literal('ma_cross'),
+    enabled: z.boolean().default(true),
+    config: maCrossConfigSchema,
+  }),
+  z.object({
+    symbol: z.string().min(1),
+    interval: z.string().refine((v) => INTERVAL_SET.has(v as Interval)),
+    type: z.literal('indicator'),
+    enabled: z.boolean().default(true),
+    config: indicatorAlertConfigSchema,
+  }),
+]);
 
 const alertUpdateSchema = z.object({
   symbol: z.string().min(1).optional(),
@@ -123,18 +152,20 @@ function rowToAlert(r: {
   id: string; userId: string; symbol: string; interval: string; type: string; config: string;
   enabled: number; lastFiredAt: number | null; createdAt: number; updatedAt: number;
 }): AlertDefinition {
-  return {
+  const base = {
     id: r.id,
     userId: r.userId,
     symbol: r.symbol,
     interval: r.interval as Interval,
-    type: r.type as 'ma_cross',
     enabled: r.enabled === 1,
-    config: JSON.parse(r.config) as MaCrossAlertConfig,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
     lastFiredAt: r.lastFiredAt ?? undefined,
   };
+  if (r.type === 'indicator') {
+    return { ...base, type: 'indicator', config: JSON.parse(r.config) as IndicatorAlertConfig };
+  }
+  return { ...base, type: 'ma_cross', config: JSON.parse(r.config) as MaCrossAlertConfig };
 }
 
 export function alertRoutes(
@@ -186,17 +217,19 @@ export function alertRoutes(
         now,
         now,
       );
-    const alert: AlertDefinition = {
+    const base = {
       id,
       userId: user.id,
       symbol: parsed.data.symbol,
       interval: parsed.data.interval as Interval,
-      type: 'ma_cross',
       enabled: parsed.data.enabled,
-      config: parsed.data.config as MaCrossAlertConfig,
       createdAt: now,
       updatedAt: now,
     };
+    const alert: AlertDefinition =
+      parsed.data.type === 'indicator'
+        ? { ...base, type: 'indicator', config: parsed.data.config as IndicatorAlertConfig }
+        : { ...base, type: 'ma_cross', config: parsed.data.config as MaCrossAlertConfig };
     if (alert.enabled) engine.subscribe(alert);
     return alert;
   });
@@ -756,10 +789,11 @@ export function alertRoutes(
       return { alertId: r.alertId, side: r.side, unrealizedPct: marked.unrealizedPct ?? 0 };
     });
     const metaRows = db.raw
-      .prepare(`SELECT id, symbol_id as symbol, interval, config FROM alerts WHERE user_id = ?`)
-      .all(user.id) as { id: string; symbol: string; interval: string; config: string }[];
+      .prepare(`SELECT id, symbol_id as symbol, interval, type, config FROM alerts WHERE user_id = ?`)
+      .all(user.id) as { id: string; symbol: string; interval: string; type: string; config: string }[];
     const meta = new Map<string, AlertMeta>();
     for (const m of metaRows) {
+      if (m.type !== 'ma_cross') continue; // attribution signatures are MA-recipe specific
       try {
         meta.set(m.id, { symbol: m.symbol, interval: m.interval, config: JSON.parse(m.config) as MaCrossAlertConfig });
       } catch {
@@ -1339,12 +1373,13 @@ function gatherStatReport(userId: string, db: AppDB, ctx: IngestionContext, peri
     )
     .all(userId, windowStart, windowEnd) as { alertId: string; pnlPercent: number }[];
   const metaRows = db.raw
-    .prepare(`SELECT id, symbol_id as symbol, interval, config, enabled FROM alerts WHERE user_id = ?`)
-    .all(userId) as { id: string; symbol: string; interval: string; config: string; enabled: number }[];
+    .prepare(`SELECT id, symbol_id as symbol, interval, type, config, enabled FROM alerts WHERE user_id = ?`)
+    .all(userId) as { id: string; symbol: string; interval: string; type: string; config: string; enabled: number }[];
   const meta = new Map<string, ReportAlertMeta>();
   let activeAlerts = 0;
   for (const m of metaRows) {
     if (m.enabled) activeAlerts += 1;
+    if (m.type !== 'ma_cross') continue; // report meta is MA-recipe specific
     try {
       meta.set(m.id, { symbol: m.symbol, interval: m.interval, config: JSON.parse(m.config) as MaCrossAlertConfig });
     } catch {

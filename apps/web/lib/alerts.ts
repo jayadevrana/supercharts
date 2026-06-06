@@ -2,6 +2,7 @@ import { api } from './api';
 import type {
   AlertDefinition,
   AlertEvent,
+  IndicatorAlertConfig,
   Interval,
   MaCrossAlertConfig,
   PaperPortfolio,
@@ -450,6 +451,24 @@ export async function runSizerPreview(
 }
 
 export async function createAlert(payload: AlertCreatePayload): Promise<AlertDefinition> {
+  return api<AlertDefinition>('/alerts', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export interface IndicatorAlertCreatePayload {
+  symbol: string;
+  interval: Interval;
+  type: 'indicator';
+  enabled: boolean;
+  config: IndicatorAlertConfig;
+}
+
+/** Create an indicator-condition alert (M5) — launched from an indicator's settings. */
+export async function createIndicatorAlert(
+  payload: IndicatorAlertCreatePayload,
+): Promise<AlertDefinition> {
   return api<AlertDefinition>('/alerts', {
     method: 'POST',
     body: JSON.stringify(payload),

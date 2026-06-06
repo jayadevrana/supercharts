@@ -3,7 +3,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Plus, Settings2, Trash2, Eye, EyeOff, LineChart, ChevronUp, ChevronDown, Copy } from 'lucide-react';
 import { INDICATOR_REGISTRY, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
-import type { IndicatorInstance } from '@supercharts/types';
+import type { IndicatorInstance, Interval, TelegramBot } from '@supercharts/types';
+import { createIndicatorAlert, fetchTelegramBots } from '@/lib/alerts';
+import { toast } from '@/components/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -207,6 +209,8 @@ export function IndicatorPanel({ pane }: Props) {
         <IndicatorEditor
           inst={editingInst}
           spec={editingSpec}
+          symbol={pane.symbol}
+          interval={pane.interval}
           onChange={(patch) => updateIndicator(pane.id, editingInst.id, patch)}
           onClose={() => setEditing(null)}
         />
@@ -257,11 +261,15 @@ function IndicatorPickerList({ onPick }: { onPick: (spec: IndicatorSpec) => void
 function IndicatorEditor({
   inst,
   spec,
+  symbol,
+  interval,
   onChange,
   onClose,
 }: {
   inst: IndicatorInstance;
   spec: IndicatorSpec;
+  symbol: string;
+  interval: string;
   onChange: (patch: Partial<IndicatorInstance>) => void;
   onClose: () => void;
 }) {
@@ -290,6 +298,7 @@ function IndicatorEditor({
           <TabsList className="mb-3 w-full">
             <TabsTrigger value="inputs" className="flex-1">Inputs</TabsTrigger>
             <TabsTrigger value="style" className="flex-1">Style</TabsTrigger>
+            <TabsTrigger value="alert" className="flex-1">Alert</TabsTrigger>
             <TabsTrigger value="about" className="flex-1">About</TabsTrigger>
           </TabsList>
 
@@ -413,6 +422,10 @@ function IndicatorEditor({
             </div>
           </TabsContent>
 
+          <TabsContent value="alert">
+            <IndicatorAlertTab inst={inst} spec={spec} symbol={symbol} interval={interval} onClose={onClose} />
+          </TabsContent>
+
           <TabsContent value="about">
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="text-sm font-medium text-foreground">{spec.label}</div>
@@ -428,6 +441,175 @@ function IndicatorEditor({
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Create-alert-from-indicator (M5). Builds a single indicator_compare condition (this plot vs a
+ * level) and POSTs an `indicator`-type alert. Reuses the alert engine + Telegram delivery — no MT5
+ * order is placed, and the live ma_cross alerts are untouched.
+ */
+function IndicatorAlertTab({
+  inst,
+  spec,
+  symbol,
+  interval,
+  onClose,
+}: {
+  inst: IndicatorInstance;
+  spec: IndicatorSpec;
+  symbol: string;
+  interval: string;
+  onClose: () => void;
+}) {
+  const [channel, setChannel] = useState(spec.channels[0] ?? 'value');
+  const [operator, setOperator] = useState<'<' | '>' | 'crosses_above' | 'crosses_below'>('crosses_below');
+  const [level, setLevel] = useState('30');
+  const [side, setSide] = useState<'buy' | 'sell'>('buy');
+  const [telegram, setTelegram] = useState(false);
+  const [botId, setBotId] = useState('');
+  const [bots, setBots] = useState<TelegramBot[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    fetchTelegramBots()
+      .then((b) => {
+        if (alive) setBots(b.filter((x) => x.enabled));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const opLabel = (o: string): string =>
+    o === 'crosses_above' ? 'crosses above' : o === 'crosses_below' ? 'crosses below' : o === '<' ? '<' : '>';
+
+  const create = async (): Promise<void> => {
+    const value = Number(level);
+    if (!Number.isFinite(value)) {
+      toast({ title: 'Enter a numeric level', tone: 'error' });
+      return;
+    }
+    const chanPart = channel === 'value' ? '' : `${channel} `;
+    const label = `${inst.name || spec.label} ${chanPart}${opLabel(operator)} ${value}`.trim();
+    setBusy(true);
+    try {
+      await createIndicatorAlert({
+        symbol,
+        interval: interval as Interval,
+        type: 'indicator',
+        enabled: true,
+        config: {
+          logic: 'all',
+          conditions: [
+            { type: 'indicator_compare', indicator: inst.id, channel, operator, right: { kind: 'constant', value } },
+          ],
+          indicatorSpecs: [inst],
+          side,
+          label,
+          delivery: { web: true, telegram, telegramBotId: telegram && botId ? botId : undefined },
+          timezone: 'UTC',
+        },
+      });
+      toast({ title: 'Alert created', description: label });
+      onClose();
+    } catch (e) {
+      toast({ title: 'Could not create alert', description: e instanceof Error ? e.message : String(e), tone: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2.5">
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Fire a signal when this indicator&apos;s plot meets a level — on each closed{' '}
+        <span className="text-foreground">{interval}</span> bar of{' '}
+        <span className="text-foreground">{symbol.split(':')[1] ?? symbol}</span>. Reuses the alert engine; no MT5 order.
+      </p>
+      <div className="grid grid-cols-3 gap-2">
+        <label className="block">
+          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Plot</div>
+          <select
+            value={channel}
+            onChange={(e) => setChannel(e.target.value)}
+            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+          >
+            {spec.channels.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Condition</div>
+          <select
+            value={operator}
+            onChange={(e) => setOperator(e.target.value as typeof operator)}
+            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+          >
+            <option value="crosses_below">crosses below</option>
+            <option value="crosses_above">crosses above</option>
+            <option value="<">less than</option>
+            <option value=">">greater than</option>
+          </select>
+        </label>
+        <label className="block">
+          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Level</div>
+          <input
+            type="number"
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+          />
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Label as</div>
+          <select
+            value={side}
+            onChange={(e) => setSide(e.target.value as 'buy' | 'sell')}
+            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+          >
+            <option value="buy">🟢 Buy</option>
+            <option value="sell">🔴 Sell</option>
+          </select>
+        </label>
+        <div className="flex items-center justify-between gap-2 self-end rounded-md px-1 py-1.5">
+          <span className="text-[11px] text-foreground">Send to Telegram</span>
+          <Switch checked={telegram} onCheckedChange={setTelegram} />
+        </div>
+      </div>
+      {telegram ? (
+        <label className="block">
+          <div className="mb-0.5 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Bot</div>
+          <select
+            value={botId}
+            onChange={(e) => setBotId(e.target.value)}
+            className="h-7 w-full rounded-md border border-border bg-surface-sunken px-2 text-xs"
+          >
+            <option value="">First enabled bot</option>
+            {bots.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+          {bots.length === 0 ? (
+            <div className="mt-1 text-[10px] text-warn">No Telegram bots yet — add one in Alerts → Telegram.</div>
+          ) : null}
+        </label>
+      ) : null}
+      <div className="flex justify-end pt-1">
+        <Button size="sm" className="h-7 px-3" disabled={busy} onClick={create}>
+          {busy ? 'Creating…' : 'Create alert'}
+        </Button>
+      </div>
+    </div>
   );
 }
 

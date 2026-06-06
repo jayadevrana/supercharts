@@ -1096,6 +1096,7 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   };
 
   const handleTogglePaper = async () => {
+    if (alert.type !== 'ma_cross') return; // paper-toggle via PUT is ma_cross-only
     const next = !alert.config.delivery.paper;
     try {
       await updateAlert(alert.id, {
@@ -1146,7 +1147,10 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
     }
   };
   const handleDelete = async () => {
-    if (!window.confirm(`Delete alert "${alert.config.labels.buy}/${alert.config.labels.sell}" on ${formatSymbolLabel(alert.symbol)}?`)) return;
+    const desc = alert.type === 'ma_cross'
+      ? `${alert.config.labels.buy}/${alert.config.labels.sell}`
+      : alert.config.label;
+    if (!window.confirm(`Delete alert "${desc}" on ${formatSymbolLabel(alert.symbol)}?`)) return;
     setBusy(true);
     try {
       await deleteAlert(alert.id);
@@ -1166,16 +1170,27 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
           <Badge tone={alert.enabled ? 'bull' : 'muted'}>{alert.enabled ? 'LIVE' : 'PAUSED'}</Badge>
           <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             {alert.interval} ·{' '}
-            {alert.config.crossWith
-              ? `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) × ${alert.config.crossWith.type.toUpperCase()}(${alert.config.crossWith.length})`
-              : `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) ${alert.config.ma.source}`}
+            {alert.type === 'ma_cross'
+              ? alert.config.crossWith
+                ? `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) × ${alert.config.crossWith.type.toUpperCase()}(${alert.config.crossWith.length})`
+                : `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) ${alert.config.ma.source}`
+              : 'indicator'}
           </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
-          <span>🟢 {alert.config.labels.buy}</span>
-          <span>·</span>
-          <span>🔴 {alert.config.labels.sell}</span>
-          <span>·</span>
+          {alert.type === 'ma_cross' ? (
+            <>
+              <span>🟢 {alert.config.labels.buy}</span>
+              <span>·</span>
+              <span>🔴 {alert.config.labels.sell}</span>
+              <span>·</span>
+            </>
+          ) : (
+            <>
+              <span>{alert.config.side === 'buy' ? '🟢' : '🔴'} {alert.config.label}</span>
+              <span>·</span>
+            </>
+          )}
           <span>{alert.config.timezone}</span>
           {alert.config.delivery.telegram ? <Badge tone="accent">telegram</Badge> : null}
           {alert.config.delivery.web ? <Badge tone="muted">web</Badge> : null}
@@ -1922,8 +1937,9 @@ function OptimizerModal({
                   </thead>
                   <tbody>
                     {result.combos.map((c, i) => {
-                      const cur = alert.config;
+                      const cur = alert.type === 'ma_cross' ? alert.config : null;
                       const isCurrent =
+                        !!cur &&
                         c.config.ma.length === cur.ma.length &&
                         c.config.crossWith?.length === cur.crossWith?.length;
                       return (
@@ -2021,12 +2037,16 @@ function BacktestModal({
             Backtest · {formatSymbolLabel(alert.symbol)} · {alert.interval}
           </DialogTitle>
           <p className="text-xs text-muted-foreground">
-            {alert.config.crossWith
-              ? `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) × ${alert.config.crossWith.type.toUpperCase()}(${alert.config.crossWith.length})`
-              : `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) on ${alert.config.ma.source}`}
-            {alert.config.rsiFilter
-              ? ` · RSI(${alert.config.rsiFilter.length}) ≤${alert.config.rsiFilter.buyBelow} / ≥${alert.config.rsiFilter.sellAbove}`
-              : ''}
+            {alert.type === 'ma_cross' ? (
+              <>
+                {alert.config.crossWith
+                  ? `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) × ${alert.config.crossWith.type.toUpperCase()}(${alert.config.crossWith.length})`
+                  : `${alert.config.ma.type.toUpperCase()}(${alert.config.ma.length}) on ${alert.config.ma.source}`}
+                {alert.config.rsiFilter
+                  ? ` · RSI(${alert.config.rsiFilter.length}) ≤${alert.config.rsiFilter.buyBelow} / ≥${alert.config.rsiFilter.sellAbove}`
+                  : ''}
+              </>
+            ) : null}
           </p>
         </DialogHeader>
         <div className="px-5 pb-4 text-xs">

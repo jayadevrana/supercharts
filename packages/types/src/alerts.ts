@@ -1,4 +1,6 @@
 import type { Interval } from './market';
+import type { SignalCondition, SignalConditionLogic } from './trading';
+import type { IndicatorInstance } from './chart';
 
 /**
  * MA cross alert: fires when the chosen price source crosses the moving average from
@@ -101,20 +103,63 @@ export interface MaCrossAlertConfig {
   };
 }
 
-export interface AlertDefinition {
+/**
+ * Indicator-condition alert (parity M5 / INC-14): fires a Telegram/web signal when a set of
+ * plot/price conditions hold on a CLOSED bar. Reuses the signal-recipe `SignalCondition` union so
+ * the chart's indicator plots can drive an alert — WITHOUT any MT5 order (that's the Strategy
+ * Builder's job). Additive to the proven `ma_cross` path; legacy rows never carry this shape.
+ */
+export interface IndicatorAlertConfig {
+  /** Fire when *all* or *any* conditions hold (matches SignalRecipe semantics). */
+  logic: SignalConditionLogic;
+  conditions: SignalCondition[];
+  /**
+   * Indicator instance specs the conditions reference, so the engine computes with the user's
+   * tuned params (lengths/sources) rather than registry defaults. The condition's `indicator`
+   * field is an `IndicatorInstance.id`.
+   */
+  indicatorSpecs?: IndicatorInstance[];
+  /** Side label baked onto each fire (buy/sell) — cosmetic, mirrors the ma_cross labels. */
+  side: 'buy' | 'sell';
+  /** Short human label, e.g. "RSI(14) crosses below 30". */
+  label: string;
+  delivery: {
+    web: boolean;
+    telegram: boolean;
+    telegramBotId?: string;
+    paper?: boolean;
+  };
+  /** IANA timezone for the formatted timestamp in the Telegram message. */
+  timezone: string;
+}
+
+interface AlertBase {
   id: string;
   userId: string;
-  /** "ma_cross" — we intentionally version this so future detectors don't collide. */
-  type: 'ma_cross';
   symbol: string;
   interval: Interval;
   enabled: boolean;
-  config: MaCrossAlertConfig;
   createdAt: number;
   updatedAt: number;
   /** Set after the first fire so the UI can show "last fired at …". */
   lastFiredAt?: number;
 }
+
+/** MA-crossover alert (the original, proven detector). */
+export interface MaCrossAlertDefinition extends AlertBase {
+  /** "ma_cross" — we intentionally version this so future detectors don't collide. */
+  type: 'ma_cross';
+  config: MaCrossAlertConfig;
+}
+
+/** Indicator-condition alert (M5). */
+export interface IndicatorAlertDefinition extends AlertBase {
+  type: 'indicator';
+  config: IndicatorAlertConfig;
+}
+
+/** Discriminated on `type`. Existing code constructs `ma_cross` members unchanged. */
+export type AlertDefinition = MaCrossAlertDefinition | IndicatorAlertDefinition;
 
 export interface AlertEvent {
   id: string;

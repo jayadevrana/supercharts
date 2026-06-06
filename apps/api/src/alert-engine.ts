@@ -2,13 +2,17 @@ import type {
   AlertDefinition,
   AlertEvent,
   Candle,
+  IndicatorAlertConfig,
+  IndicatorAlertDefinition,
   Interval,
   MaCrossAlertConfig,
+  MaCrossAlertDefinition,
 } from '@supercharts/types';
 import type { IngestionContext } from '@supercharts/ingestion';
 import { INTERVAL_MS } from '@supercharts/types';
 import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart-core/pure';
 import { nanoid } from 'nanoid';
+import { collectIndicatorRefs, evaluateConditionSet } from './signal-eval';
 import type { AppDB } from './db';
 import {
   sendTelegramMessage,
@@ -83,20 +87,22 @@ export class AlertEngine {
       createdAt: number; updatedAt: number;
     }>;
     for (const row of rows) {
-      if (row.type !== 'ma_cross') continue;
-      const alert: AlertDefinition = {
+      const base = {
         id: row.id,
         userId: row.userId,
         symbol: row.symbol,
         interval: row.interval as Interval,
-        type: 'ma_cross',
         enabled: row.enabled === 1,
-        config: JSON.parse(row.config) as MaCrossAlertConfig,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
         lastFiredAt: row.lastFiredAt ?? undefined,
       };
-      this.subscribe(alert);
+      if (row.type === 'ma_cross') {
+        this.subscribe({ ...base, type: 'ma_cross', config: JSON.parse(row.config) as MaCrossAlertConfig });
+      } else if (row.type === 'indicator') {
+        this.subscribe({ ...base, type: 'indicator', config: JSON.parse(row.config) as IndicatorAlertConfig });
+      }
+      // Unknown types are ignored — forward-compatible with future detectors.
     }
   }
 
@@ -113,7 +119,8 @@ export class AlertEngine {
     // Backfill history + seed the watermark BEFORE wiring the listener so we never
     // replay pre-existing crosses as live alerts (the cold-start flood bug). Until
     // init resolves, no candle events are processed for this alert.
-    void this.initSubscription(alert);
+    if (alert.type === 'indicator') void this.initIndicatorSubscription(alert);
+    else void this.initSubscription(alert);
   }
 
   /**
@@ -125,7 +132,7 @@ export class AlertEngine {
    *      Yahoo poll emitted a batch of recent bars and each replayed as a "live" cross.
    *   3. Wire the candle listener.
    */
-  private async initSubscription(alert: AlertDefinition): Promise<void> {
+  private async initSubscription(alert: MaCrossAlertDefinition): Promise<void> {
     const longestMa = Math.max(alert.config.ma.length, alert.config.crossWith?.length ?? 0);
     const want = Math.max(longestMa * 3 + 50, 150);
     try {
@@ -195,8 +202,8 @@ export class AlertEngine {
     for (const id of this.subs.keys()) this.unsubscribe(id);
   }
 
-  /** Run the detector for one just-closed candle. */
-  private async evaluate(alert: AlertDefinition, justClosed: Candle): Promise<void> {
+  /** Run the MA-cross detector for one just-closed candle. */
+  private async evaluate(alert: MaCrossAlertDefinition, justClosed: Candle): Promise<void> {
     // Need enough closed candles for BOTH legs to warm up. Size off the longer of the
     // fast/slow MA lengths — using only ma.length under-fed the slow EMA on dual-MA
     // alerts with a long slow leg (e.g. EMA(50)/EMA(200)) and produced garbage crosses.
@@ -399,6 +406,147 @@ export class AlertEngine {
     }
   }
 
+  /* ─── Indicator-condition alerts (M5) ─── */
+
+  /** Per-subscription init for an indicator alert — backfill, watermark, listen. Mirrors the
+   *  ma_cross init but sizes history off the largest referenced indicator length. */
+  private async initIndicatorSubscription(alert: IndicatorAlertDefinition): Promise<void> {
+    const lengths = (alert.config.indicatorSpecs ?? []).flatMap((s) =>
+      Object.values(s.inputs).filter((v): v is number => typeof v === 'number'),
+    );
+    const maxLen = lengths.length ? Math.max(...lengths) : 50;
+    const want = Math.max(maxLen * 3 + 50, 200);
+    try {
+      const have = this.ctx.candleStore.query(alert.symbol, alert.interval, undefined, undefined, want);
+      if (have.length < want) {
+        const provider = this.resolveProvider(alert.symbol);
+        if (provider) {
+          const now = Date.now();
+          const stepMs = INTERVAL_MS[alert.interval] ?? 60_000;
+          const bars = await provider.fetchHistoricalCandles(
+            alert.symbol,
+            alert.interval,
+            now - want * stepMs,
+            now,
+            want,
+          );
+          for (const c of bars) this.ctx.candleStore.upsert(alert.symbol, alert.interval, c);
+        }
+      }
+    } catch (err) {
+
+      console.warn('[alert-engine] indicator backfill failed, seeding from cache only', { alertId: alert.id, err });
+    }
+    if (!this.wanted.has(alert.id)) return;
+    const recent = this.ctx.candleStore.query(alert.symbol, alert.interval, undefined, undefined, 2);
+    const newestOpen = recent.length ? recent[recent.length - 1]!.openTime : 0;
+    alert.lastFiredAt = Math.max(alert.lastFiredAt ?? 0, newestOpen);
+    const off = this.ctx.bus.onSymbol('candle', alert.symbol, (e) => {
+      if (e.interval !== alert.interval) return;
+      if (!e.data.isClosed) return;
+      if (alert.lastFiredAt !== undefined && e.data.openTime <= alert.lastFiredAt) return;
+      this.evaluateIndicator(alert, e.data).catch((err) => {
+
+        console.error('[alert-engine] indicator evaluate failed', { alertId: alert.id, err });
+      });
+    });
+    this.subs.set(alert.id, { alert, off });
+  }
+
+  /** Evaluate an indicator alert's condition set on one just-closed candle; deliver on a fire. */
+  private async evaluateIndicator(alert: IndicatorAlertDefinition, justClosed: Candle): Promise<void> {
+    const cfg = alert.config;
+    const recent = this.ctx.candleStore.query(alert.symbol, alert.interval, undefined, undefined, 500);
+    if (recent.length < 2) return;
+    if (recent[recent.length - 1]!.openTime !== justClosed.openTime) recent.push(justClosed);
+
+    // Reuse the shared evaluator (same code the MT5 recipe runner uses) + @supercharts/indicators.
+    const refs = collectIndicatorRefs(cfg.conditions);
+    if (!evaluateConditionSet(cfg.conditions, cfg.logic, recent, refs, cfg.indicatorSpecs)) return;
+
+    const price = justClosed.close;
+    const event: AlertEvent = {
+      id: nanoid(),
+      alertId: alert.id,
+      userId: alert.userId,
+      side: cfg.side,
+      symbol: alert.symbol,
+      interval: alert.interval,
+      barTime: justClosed.openTime,
+      price,
+      // No MA value for an indicator alert — store the close so the events table stays uniform.
+      maValue: price,
+      label: cfg.label,
+      firedAt: Date.now(),
+      telegram: cfg.delivery.telegram ? null : 'disabled',
+    };
+
+    try {
+      this.db.raw
+        .prepare(
+          `INSERT INTO alert_events
+             (id, alert_id, user_id, side, symbol, interval, bar_time, price, ma_value, label, fired_at, telegram)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          event.id, event.alertId, event.userId, event.side, event.symbol, event.interval,
+          event.barTime, event.price, event.maValue, event.label, event.firedAt, event.telegram ?? null,
+        );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/UNIQUE constraint/i.test(msg)) return; // already fired for this bar
+      throw err;
+    }
+    alert.lastFiredAt = event.barTime;
+    this.db.raw
+      .prepare('UPDATE alerts SET last_fired_at = ?, updated_at = ? WHERE id = ?')
+      .run(event.barTime, Date.now(), alert.id);
+
+    if (cfg.delivery.paper) this.bookPaperTrade(alert, event);
+    if (cfg.delivery.web) this.broadcast(alert.userId, event);
+
+    if (cfg.delivery.telegram) {
+      const botCfg = this.resolveTelegramBot(alert.userId, cfg.delivery.telegramBotId);
+      if (!botCfg || botCfg.enabled !== 1) {
+        this.markTelegram(event.id, 'disabled');
+        return;
+      }
+      try {
+        await this.telegram({ botToken: botCfg.botToken, chatId: botCfg.chatId, text: formatIndicatorTelegramMessage(event, cfg) });
+        this.markTelegram(event.id, 'sent');
+      } catch (err) {
+        this.markTelegram(event.id, 'failed', err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
+  /** 3-tier Telegram bot resolution: explicit bot id → first enabled bot → legacy singleton. */
+  private resolveTelegramBot(
+    userId: string,
+    botId?: string,
+  ): { botToken: string; chatId: string; enabled: number } | undefined {
+    let cfg: { botToken: string; chatId: string; enabled: number } | undefined;
+    if (botId) {
+      cfg = this.db.raw
+        .prepare('SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots WHERE id = ? AND user_id = ?')
+        .get(botId, userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    if (!cfg) {
+      cfg = this.db.raw
+        .prepare(
+          `SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots
+           WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+        )
+        .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    if (!cfg) {
+      cfg = this.db.raw
+        .prepare('SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_configs WHERE user_id = ?')
+        .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    return cfg;
+  }
+
   private markTelegram(eventId: string, status: 'sent' | 'failed' | 'disabled', errorMsg?: string): void {
     this.db.raw
       .prepare('UPDATE alert_events SET telegram = ?, telegram_error = ? WHERE id = ?')
@@ -468,6 +616,20 @@ function formatTelegramMessage(event: AlertEvent, cfg: MaCrossAlertConfig): stri
     lines.push(`<i>RSI(${cfg.rsiFilter.length}) = ${event.rsiValue.toFixed(1)} · gate ${threshold}</i>`);
   }
   return lines.join('\n');
+}
+
+/** Telegram copy for an indicator-condition alert (M5). Mirrors the ma_cross layout. */
+function formatIndicatorTelegramMessage(event: AlertEvent, cfg: IndicatorAlertConfig): string {
+  const side = event.side === 'buy' ? '🟢 BUY' : '🔴 SELL';
+  const symbol = formatSymbolPretty(event.symbol);
+  const price = formatPrice(event.price);
+  const when = formatTime(event.barTime, cfg.timezone);
+  return [
+    `<b>${side}</b> · ${escapeHtml(cfg.label)}`,
+    `<b>${escapeHtml(symbol)}</b>  @  <code>${price}</code>`,
+    `Triggered ${escapeHtml(when)}`,
+    `<i>indicator alert · ${event.interval}</i>`,
+  ].join('\n');
 }
 
 function formatSymbolPretty(id: string): string {
