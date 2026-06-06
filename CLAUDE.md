@@ -109,8 +109,8 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 - [x] **INC-6** TradingView-style symbol status line (OHLC + change) + legend double-click/collapse `46a27a2`
 - [x] **INC-7 + INC-8 (= M4b)** tabbed settings modal + real style controls
 - [x] **INC-14 (= M5)** create-alert-from-indicator — discriminated `AlertDefinition` union + shared `signal-eval.ts` + settings-modal **Alert** tab
-- [x] **INC-13 (legend ⋯ menu)** per-row overflow menu on the on-chart legend — Settings · Move up · Move down · Reset to defaults · Remove (Radix Popover, reuses `reorderIndicator`/`updateIndicator`). Move-to-pane (paneId-live) is the remaining INC-13 piece.
-- [ ] Remaining (recommended order): INC-13b move-to-pane (paneId-live sub-pane sharing) · INC-4 Data Window per-plot colour/names · INC-15 chart context-menu staples · INC-12 log/percent/auto scale modes · INC-5 surface Pulse/SMC/STS in Data Window · INC-2 browser fast-path · INC-10 coverage (DEMA/TEMA/VWMA) · INC-9 per-plot toggles · INC-16 pane resize · INC-17 drag-reorder/legend-drag · INC-18 interaction feel
+- [x] **INC-13 (legend ⋯ menu + move-to-pane)** per-row overflow menu — Settings · Move up · Move down · Reset to defaults · **Move to ▸ New pane / Merge into <pane>** · Remove. paneId is now LIVE: `sub-pane-indicators` groups visible sub-pane indicators by `inst.paneId` into shared panes (one SVG, shared auto-scale, combined header), and "Move to" rewrites `inst.paneId` via the existing `updateIndicator` — INC-11 alignment preserved. Browser-verified: MFI + MACD merged into one pane, then splittable to New pane.
+- [ ] Remaining (recommended order): INC-4 Data Window per-plot colour/names · INC-15 chart context-menu staples · INC-12 log/percent/auto scale modes · INC-5 surface Pulse/SMC/STS in Data Window · INC-2 browser fast-path · INC-10 coverage (DEMA/TEMA/VWMA) · INC-9 per-plot toggles · INC-16 pane resize · INC-17 drag-reorder/legend-drag · INC-18 interaction feel
 
 **Phase 6 done**; **Phase 3 COMPLETE**; Phase 4 · #16–#17 done. **Active focus: the indicator-system MISSION above** (roadmap Phase 4 · #18 is deferred).
 

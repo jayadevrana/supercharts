@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type MouseEvent as ReactMouseEvent } from 'react';
-import { ArrowUp, ArrowDown, Eye, EyeOff, MoreHorizontal, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, Eye, EyeOff, LayoutPanelTop, MoreHorizontal, RotateCcw, Settings2, Trash2, X } from 'lucide-react';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import type { LegendRow } from './indicator-legend-util';
 
@@ -16,6 +16,10 @@ interface Props {
   onReorder: (id: string, dir: 'up' | 'down') => void;
   /** Reset this instance's inputs + style back to the registry defaults. */
   onResetDefaults: (id: string) => void;
+  /** Panes this instance can move to (sub-pane indicators only); empty → no "Move to" section. */
+  moveTargets?: (id: string) => { paneId: string; label: string }[];
+  /** Reassign this instance's paneId (INC-13b move-to-pane). */
+  onMoveToPane?: (id: string, paneId: string) => void;
 }
 
 /**
@@ -44,8 +48,11 @@ function LegendRowItem({
   onRemove,
   onReorder,
   onResetDefaults,
+  moveTargets,
+  onMoveToPane,
 }: { row: LegendRow } & Props) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const targets = menuOpen && moveTargets ? moveTargets(r.id) : [];
   const stop = (fn: () => void) => (e: ReactMouseEvent) => {
     e.stopPropagation();
     fn();
@@ -109,6 +116,22 @@ function LegendRowItem({
             <MenuItem icon={<ArrowUp className="h-3.5 w-3.5" />} label="Move up" onClick={act(() => onReorder(r.id, 'up'))} />
             <MenuItem icon={<ArrowDown className="h-3.5 w-3.5" />} label="Move down" onClick={act(() => onReorder(r.id, 'down'))} />
             <MenuItem icon={<RotateCcw className="h-3.5 w-3.5" />} label="Reset to defaults" onClick={act(() => onResetDefaults(r.id))} />
+            {targets.length > 0 && onMoveToPane ? (
+              <>
+                <div className="my-1 h-px bg-border" />
+                <div className="px-2 pb-0.5 pt-1 text-[9px] uppercase tracking-[0.14em] text-muted-foreground/70">
+                  Move to
+                </div>
+                {targets.map((t) => (
+                  <MenuItem
+                    key={t.paneId}
+                    icon={<LayoutPanelTop className="h-3.5 w-3.5" />}
+                    label={t.label}
+                    onClick={act(() => onMoveToPane(r.id, t.paneId))}
+                  />
+                ))}
+              </>
+            ) : null}
             <div className="my-1 h-px bg-border" />
             <MenuItem
               icon={<Trash2 className="h-3.5 w-3.5" />}

@@ -1528,6 +1528,27 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
                   style: { ...spec.style },
                 });
               }}
+              moveTargets={(id) => {
+                // Only sub-pane indicators move panes (overlays live on price). Offer a fresh pane
+                // plus a "merge into" for every other distinct sub-pane group.
+                const inst = pane.classicIndicators.find((i) => i.id === id);
+                const spec = inst ? INDICATOR_LOOKUP[inst.type] : undefined;
+                if (!inst || !spec || spec.pane !== 'sub') return [];
+                const cur = inst.paneId || inst.type;
+                const out: { paneId: string; label: string }[] = [{ paneId: `sp_${id}`, label: 'New pane' }];
+                const seen = new Set<string>([cur]);
+                for (const o of pane.classicIndicators) {
+                  if (o.id === id) continue;
+                  const os = INDICATOR_LOOKUP[o.type];
+                  if (!os || os.pane !== 'sub') continue;
+                  const pid = o.paneId || o.type;
+                  if (seen.has(pid)) continue;
+                  seen.add(pid);
+                  out.push({ paneId: pid, label: `Merge into ${o.name || os.label}` });
+                }
+                return out;
+              }}
+              onMoveToPane={(id, paneId) => updateIndicator(pane.id, id, { paneId })}
             />
           ) : null}
         </div>

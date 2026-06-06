@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import type { Candle, IndicatorInstance } from '@supercharts/types';
 import { computeAll, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
-import { formatIndicatorValue } from './indicator-legend-util';
+import { formatIndicatorValue, legendColor } from './indicator-legend-util';
 
 /**
  * The chart's live time→x projection, mirrored from ChartCore.getTimeProjection(). Lets each
@@ -31,17 +31,27 @@ interface Props {
 const HEIGHT = 80;
 
 export function SubPaneIndicators({ candles, indicators, view, hoverTime }: Props) {
-  const visible = useMemo(
-    () => indicators.filter((i) => i.visible && INDICATOR_LOOKUP[i.type]?.pane === 'sub'),
-    [indicators],
-  );
-  if (visible.length === 0 || candles.length === 0 || !view || view.plotWidth <= 0 || view.pxPerMs <= 0) {
+  // Group visible sub-pane indicators by paneId (INC-13b): same pane → stacked in one shared
+  // sub-pane with a shared Y scale; "Move to pane" in the legend just rewrites inst.paneId.
+  const groups = useMemo(() => {
+    const m = new Map<string, IndicatorInstance[]>();
+    for (const inst of indicators) {
+      if (!inst.visible || INDICATOR_LOOKUP[inst.type]?.pane !== 'sub') continue;
+      const key = inst.paneId || inst.type;
+      const arr = m.get(key);
+      if (arr) arr.push(inst);
+      else m.set(key, [inst]);
+    }
+    return [...m.entries()];
+  }, [indicators]);
+
+  if (groups.length === 0 || candles.length === 0 || !view || view.plotWidth <= 0 || view.pxPerMs <= 0) {
     return null;
   }
   return (
     <div className="border-t border-border/60 bg-surface/60">
-      {visible.map((inst) => (
-        <SubPaneRow key={inst.id} candles={candles} inst={inst} view={view} hoverTime={hoverTime} />
+      {groups.map(([paneId, insts]) => (
+        <SubPaneGroup key={paneId} candles={candles} insts={insts} view={view} hoverTime={hoverTime} />
       ))}
     </div>
   );
@@ -66,25 +76,39 @@ function indexAtTime(candles: Candle[], t: number): number {
   return res;
 }
 
-function SubPaneRow({
+interface Computed {
+  inst: IndicatorInstance;
+  spec: IndicatorSpec;
+  channels: Map<string, number[]>;
+}
+
+/** One sub-pane: every indicator sharing this paneId, overlaid on a shared auto-scale. */
+function SubPaneGroup({
   candles,
-  inst,
+  insts,
   view,
   hoverTime,
 }: {
   candles: Candle[];
-  inst: IndicatorInstance;
+  insts: IndicatorInstance[];
   view: SubPaneView;
   hoverTime: number | null;
 }) {
-  const spec = INDICATOR_LOOKUP[inst.type];
-  const channels = useMemo(() => {
-    const inputs = Object.fromEntries(
-      (spec?.inputs ?? []).map((i) => [i.key, inst.inputs[i.key] ?? i.default]),
-    );
-    return computeAll(inst.type, candles, inputs);
-  }, [candles, inst.type, inst.inputs, spec]);
-  if (!spec) return null;
+  // Compute every member's channels once; memoised on the member set + their inputs so panning
+  // (which re-renders with the same candles array) never recomputes the TA.
+  const sig = insts.map((i) => `${i.id}:${JSON.stringify(i.inputs)}`).join('|');
+  const computed = useMemo<Computed[]>(() => {
+    const out: Computed[] = [];
+    for (const inst of insts) {
+      const spec = INDICATOR_LOOKUP[inst.type];
+      if (!spec) continue;
+      const inputs = Object.fromEntries((spec.inputs ?? []).map((i) => [i.key, inst.inputs[i.key] ?? i.default]));
+      out.push({ inst, spec, channels: computeAll(inst.type, candles, inputs) });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candles, sig]);
+  if (computed.length === 0) return null;
 
   const { fromTime, toTime, rightTime, pxPerMs, plotWidth, totalWidth } = view;
   const timeToX = (t: number): number => plotWidth - (rightTime - t) * pxPerMs;
@@ -98,24 +122,23 @@ function SubPaneRow({
     if (i < i0) i0 = i;
     if (i > i1) i1 = i;
   }
-  if (i1 < 0) {
-    // Nothing in the window (panned off the data) — render an empty, labelled pane.
-    return <EmptyRow spec={spec} inst={inst} />;
-  }
+  if (i1 < 0) return <EmptyGroup computed={computed} />;
   i0 = Math.max(0, i0 - 1);
   i1 = Math.min(candles.length - 1, i1 + 1);
 
-  // Y scale across all channels within the visible window only (auto-scales like TradingView).
+  // Shared Y scale across EVERY channel of EVERY member, visible window only.
   let min = Infinity;
   let max = -Infinity;
-  for (const ch of spec.channels) {
-    const arr = channels.get(ch);
-    if (!arr) continue;
-    for (let i = i0; i <= i1; i++) {
-      const v = arr[i];
-      if (v == null || Number.isNaN(v)) continue;
-      if (v < min) min = v;
-      if (v > max) max = v;
+  for (const { spec, channels } of computed) {
+    for (const ch of spec.channels) {
+      const arr = channels.get(ch);
+      if (!arr) continue;
+      for (let i = i0; i <= i1; i++) {
+        const v = arr[i];
+        if (v == null || Number.isNaN(v)) continue;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
     }
   }
   if (!Number.isFinite(min) || !Number.isFinite(max)) {
@@ -128,79 +151,85 @@ function SubPaneRow({
   }
   const yScale = (HEIGHT - 12) / (max - min);
   const yFor = (v: number): number => HEIGHT - 6 - (v - min) * yScale;
-  const colorFor = (channel: string): string => {
-    const k = channel === 'value' ? 'color' : `${channel}Color`;
-    return String(inst.style[k] ?? spec.style[k] ?? spec.style.color ?? '#42a5f5');
-  };
 
   const barDur = candles[i1]!.closeTime - candles[i1]!.openTime || 1;
   const barPx = Math.max(1, pxPerMs * barDur * 0.7);
 
-  // Value at the crosshair candle (latest in-window when not hovering) for the pane header.
   const hoverIdx = hoverTime != null ? Math.min(Math.max(indexAtTime(candles, hoverTime), i0), i1) : i1;
-  const primaryCh = spec.channels[0] ?? 'value';
-  const hoverVal = channels.get(primaryCh)?.[hoverIdx];
   const crosshairX = hoverTime != null ? timeToX(hoverTime) : null;
   const showCrosshair = crosshairX != null && crosshairX >= 0 && crosshairX <= plotWidth;
 
   return (
     <div className="px-0 py-1">
-      <div className="flex items-center justify-between px-2 text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
-        <span>{inst.name || spec.label}</span>
-        <span className="tabular-nums">
-          {paramsLabel(inst)}
-          {hoverVal != null && Number.isFinite(hoverVal) ? (
-            <span className="ml-2 normal-case text-foreground">{formatIndicatorValue(hoverVal)}</span>
-          ) : null}
-        </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-2 text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+        {computed.map(({ inst, spec, channels }) => {
+          const v = channels.get(spec.channels[0] ?? 'value')?.[hoverIdx];
+          return (
+            <span key={inst.id} className="inline-flex items-center gap-1">
+              <span className="h-1.5 w-1.5 rounded-[2px]" style={{ backgroundColor: legendColor(spec, inst) }} aria-hidden />
+              <span>{inst.name || spec.label}</span>
+              <span className="tabular-nums normal-case">{paramsLabel(inst)}</span>
+              {v != null && Number.isFinite(v) ? (
+                <span className="tabular-nums normal-case text-foreground">{formatIndicatorValue(v)}</span>
+              ) : null}
+            </span>
+          );
+        })}
       </div>
       <svg viewBox={`0 0 ${totalWidth} ${HEIGHT}`} className="block h-[80px] w-full" preserveAspectRatio="none">
-        {hasBand(inst.type) ? <BandRefs inst={inst} spec={spec} yFor={yFor} width={plotWidth} /> : null}
+        {computed.length === 1 && hasBand(computed[0]!.inst.type) ? (
+          <BandRefs inst={computed[0]!.inst} spec={computed[0]!.spec} yFor={yFor} width={plotWidth} />
+        ) : null}
         {showCrosshair ? (
           <line x1={crosshairX} x2={crosshairX} y1={0} y2={HEIGHT} stroke="rgba(255,255,255,0.22)" strokeWidth={1} />
         ) : null}
-        {spec.channels.map((ch) => {
-          const arr = channels.get(ch);
-          if (!arr) return null;
-          if (ch === 'histogram') {
+        {computed.map(({ inst, spec, channels }) => {
+          const colorFor = (channel: string): string => {
+            const k = channel === 'value' ? 'color' : `${channel}Color`;
+            return String(inst.style[k] ?? spec.style[k] ?? spec.style.color ?? '#42a5f5');
+          };
+          return spec.channels.map((ch) => {
+            const arr = channels.get(ch);
+            if (!arr) return null;
+            if (ch === 'histogram') {
+              return (
+                <g key={`${inst.id}-${ch}`}>
+                  {rangeIndices(i0, i1).map((i) => {
+                    const v = arr[i];
+                    if (v == null || Number.isNaN(v)) return null;
+                    const x = timeToX(midOf(candles[i]!));
+                    const zero = yFor(0);
+                    const y = yFor(v);
+                    const h = Math.abs(zero - y);
+                    return (
+                      <rect
+                        key={i}
+                        x={x - barPx / 2}
+                        y={Math.min(zero, y)}
+                        width={barPx}
+                        height={Math.max(1, h)}
+                        fill={
+                          v >= 0
+                            ? String(inst.style.histogramPositive ?? spec.style.histogramPositive ?? '#26a69a')
+                            : String(inst.style.histogramNegative ?? spec.style.histogramNegative ?? '#ef5350')
+                        }
+                        opacity={0.85}
+                      />
+                    );
+                  })}
+                </g>
+              );
+            }
             return (
-              <g key={ch}>
-                {rangeIndices(i0, i1).map((i) => {
-                  const v = arr[i];
-                  if (v == null || Number.isNaN(v)) return null;
-                  const x = timeToX(midOf(candles[i]!));
-                  const zero = yFor(0);
-                  const y = yFor(v);
-                  const h = Math.abs(zero - y);
-                  return (
-                    <rect
-                      key={i}
-                      x={x - barPx / 2}
-                      y={Math.min(zero, y)}
-                      width={barPx}
-                      height={Math.max(1, h)}
-                      fill={
-                        v >= 0
-                          ? String(inst.style.histogramPositive ?? spec.style.histogramPositive ?? '#26a69a')
-                          : String(inst.style.histogramNegative ?? spec.style.histogramNegative ?? '#ef5350')
-                      }
-                      opacity={0.85}
-                    />
-                  );
-                })}
-              </g>
+              <path
+                key={`${inst.id}-${ch}`}
+                d={buildPath(candles, arr, i0, i1, timeToX, yFor)}
+                fill="none"
+                stroke={colorFor(ch)}
+                strokeWidth={ch === spec.channels[0] ? 1.5 : 1}
+              />
             );
-          }
-          const path = buildPath(candles, arr, i0, i1, timeToX, yFor);
-          return (
-            <path
-              key={ch}
-              d={path}
-              fill="none"
-              stroke={colorFor(ch)}
-              strokeWidth={ch === spec.channels[0] ? 1.5 : 1}
-            />
-          );
+          });
         })}
         <text x={plotWidth + 4} y={11} className="fill-current text-[9px] text-muted-foreground" fontFamily="ui-monospace">
           {max.toFixed(precisionFor(max, min))}
@@ -213,17 +242,15 @@ function SubPaneRow({
   );
 }
 
-function EmptyRow({ spec, inst }: { spec: IndicatorSpec | undefined; inst: IndicatorInstance }) {
-  if (!spec) return null;
+function EmptyGroup({ computed }: { computed: Computed[] }) {
   return (
     <div className="px-2 py-1">
-      <div className="flex items-center justify-between text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
-        <span>{inst.name || spec.label}</span>
-        <span className="tabular-nums">{paramsLabel(inst)}</span>
+      <div className="flex flex-wrap gap-x-3 text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
+        {computed.map(({ inst, spec }) => (
+          <span key={inst.id}>{inst.name || spec.label}</span>
+        ))}
       </div>
-      <div className="flex h-[72px] items-center justify-center text-[10px] text-muted-foreground/60">
-        No data in view
-      </div>
+      <div className="flex h-[72px] items-center justify-center text-[10px] text-muted-foreground/60">No data in view</div>
     </div>
   );
 }
