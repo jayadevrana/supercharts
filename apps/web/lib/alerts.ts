@@ -136,10 +136,27 @@ export async function runBacktest(id: string): Promise<BacktestResponse> {
 
 /* ────── Optimizer ────── */
 
+export type OptimizeObjective = 'profit' | 'accuracy' | 'balanced';
+
+export interface ComboMetrics {
+  expectancyPct: number;
+  profitFactorCapped: number;
+  qualityScore: number;
+  rank: number;
+  robustness: {
+    neighboursChecked: number;
+    neighbourPassFraction: number;
+    flags: string[];
+    tone: 'green' | 'amber' | 'red';
+  };
+}
+
 export interface OptimizerCombo {
   config: MaCrossAlertConfig;
   summary: BacktestSummary;
   score: number;
+  /** Present in peak-performance mode. */
+  metrics?: ComboMetrics;
 }
 
 export interface OptimizeResponse {
@@ -149,17 +166,35 @@ export interface OptimizeResponse {
   barsTested: number;
   evaluated: number;
   qualifying: number;
+  /* Peak-performance extras (present when an objective was sent). */
+  objective?: OptimizeObjective | 'legacy';
+  appliedMinTrades?: number;
+  filtered?: {
+    belowMinTrades: number;
+    belowWinRate: number;
+    nonPositiveExpectancy: number;
+    exceededMaxDd: number;
+    degeneratePf: number;
+    zeroLoss: number;
+  };
+  floor?: { minWinRate?: number; passed: number; bestWinRate: number };
+  note?: string;
   combos: OptimizerCombo[];
 }
 
-export async function runOptimize(
-  id: string,
-  body: {
-    topN?: number;
-    minTrades?: number;
-    ddPenalty?: number;
-  } = {},
-): Promise<OptimizeResponse> {
+export interface OptimizeBody {
+  topN?: number;
+  minTrades?: number;
+  ddPenalty?: number;
+  objective?: OptimizeObjective;
+  minWinRate?: number;
+  minProfitFactor?: number;
+  maxDdPct?: number;
+  requirePositiveExpectancy?: boolean;
+  requireLosingTrade?: boolean;
+}
+
+export async function runOptimize(id: string, body: OptimizeBody = {}): Promise<OptimizeResponse> {
   return api<OptimizeResponse>(`/alerts/${id}/optimize`, {
     method: 'POST',
     body: JSON.stringify(body),

@@ -88,6 +88,7 @@ import {
   type BacktestResponse,
   type OptimizeResponse,
   type OptimizerCombo,
+  type OptimizeObjective,
   type SizerPreviewBody,
   type SizerPreviewResponse,
   type WalkForwardResponse,
@@ -1042,9 +1043,7 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
   const [backtest, setBacktest] = useState<BacktestResponse | null>(null);
   const [btOpen, setBtOpen] = useState(false);
   const [btRunning, setBtRunning] = useState(false);
-  const [optResult, setOptResult] = useState<OptimizeResponse | null>(null);
   const [optOpen, setOptOpen] = useState(false);
-  const [optRunning, setOptRunning] = useState(false);
   const [wfResult, setWfResult] = useState<WalkForwardResponse | null>(null);
   const [wfOpen, setWfOpen] = useState(false);
   const [wfRunning, setWfRunning] = useState(false);
@@ -1062,20 +1061,6 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       setBtOpen(false);
     } finally {
       setBtRunning(false);
-    }
-  };
-
-  const handleOptimize = async () => {
-    setOptRunning(true);
-    setOptOpen(true);
-    try {
-      const r = await runOptimize(alert.id, { topN: 12, minTrades: 8 });
-      setOptResult(r);
-    } catch (err) {
-      toast({ title: 'Optimize failed', description: String(err), tone: 'error' });
-      setOptOpen(false);
-    } finally {
-      setOptRunning(false);
     }
   };
 
@@ -1218,16 +1203,12 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       <Button
         size="sm"
         variant="ghost"
-        disabled={busy || optRunning}
-        onClick={handleOptimize}
-        title="Optimize parameters"
+        disabled={busy}
+        onClick={() => setOptOpen(true)}
+        title="Peak performance — best settings"
         className="px-2"
       >
-        {optRunning ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : (
-          <Sliders className="h-3.5 w-3.5 text-accent" />
-        )}
+        <Sliders className="h-3.5 w-3.5 text-accent" />
       </Button>
       <Button
         size="sm"
@@ -1283,8 +1264,6 @@ function AlertRow({ alert, onChange }: { alert: AlertDefinition; onChange: () =>
       <OptimizerModal
         open={optOpen}
         onOpenChange={setOptOpen}
-        running={optRunning}
-        result={optResult}
         alert={alert}
         onApply={handleApplyCombo}
       />
@@ -1881,129 +1860,263 @@ function WalkForwardModal({
 
 /* ────────────────────────────────────────────────────────── Optimizer modal */
 
+const OBJECTIVES: { key: OptimizeObjective; label: string; help: string }[] = [
+  { key: 'profit', label: '💰 Profit', help: 'Ranked by total return (most money first).' },
+  { key: 'accuracy', label: '🎯 Accuracy', help: 'Ranked by win rate, then per-trade expectancy.' },
+  { key: 'balanced', label: '⚖️ Balanced', help: 'Risk-adjusted blend of return, edge, drawdown & hit-rate.' },
+];
+
+function fmtMoney(n: number): string {
+  const sign = n < 0 ? '−' : '+';
+  const a = Math.abs(n);
+  const body = a >= 1e6 ? `$${(a / 1e6).toFixed(2)}M` : a >= 1e3 ? `$${(a / 1e3).toFixed(1)}K` : `$${a.toFixed(0)}`;
+  return sign + body;
+}
+
+/**
+ * Peak Performance — finds the best parameter settings for this MA-cross strategy on REAL candles.
+ * Pick an objective (profit / accuracy / balanced) + an accuracy floor; the server grid-sweeps,
+ * backtests each combo for real, applies robustness guards, and returns the ranked top-10. $ is
+ * derived client-side from the real % return × your account size — never fabricated, never ranked on.
+ */
 function OptimizerModal({
   open,
   onOpenChange,
-  running,
-  result,
   alert,
   onApply,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  running: boolean;
-  result: OptimizeResponse | null;
   alert: AlertDefinition;
   onApply: (combo: OptimizerCombo) => void | Promise<void>;
 }) {
-  const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  const [objective, setObjective] = useState<OptimizeObjective>('balanced');
+  const [minWinPct, setMinWinPct] = useState(0);
+  const [accountSize, setAccountSize] = useState(10000);
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<OptimizeResponse | null>(null);
+
+  useEffect(() => {
+    try {
+      const v = Number(localStorage.getItem('sc.optAccountSize.v1'));
+      if (Number.isFinite(v) && v > 0) setAccountSize(v);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const run = async (obj: OptimizeObjective = objective, minWin: number = minWinPct): Promise<void> => {
+    setRunning(true);
+    try {
+      const r = await runOptimize(alert.id, {
+        objective: obj,
+        minWinRate: minWin > 0 ? minWin / 100 : undefined,
+        topN: 10,
+      });
+      setResult(r);
+    } catch (err) {
+      toast({ title: 'Could not find peak settings', description: String(err), tone: 'error' });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open && !result && !running) void run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const setSize = (v: number): void => {
+    setAccountSize(v);
+    try {
+      localStorage.setItem('sc.optAccountSize.v1', String(v));
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const fmtPct = (n: number): string => `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+  const objHelp = OBJECTIVES.find((o) => o.key === objective)?.help ?? '';
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sliders className="h-4 w-4 text-accent" />
-            Optimize · {formatSymbolLabel(alert.symbol)} · {alert.interval}
+            Peak Performance · {formatSymbolLabel(alert.symbol)} · {alert.interval}
           </DialogTitle>
           <p className="text-xs text-muted-foreground">
-            Grid sweep over fast/slow MA lengths. Ranked by Sharpe − 0.02 × Max-DD.
-            Click <strong>Apply</strong> to overwrite this alert with the chosen combo.
+            Real backtest of every fast/slow MA setting on the last available candles. {objHelp}
           </p>
         </DialogHeader>
-        <div className="px-5 pb-4 text-xs">
-          {running || !result ? (
+        <div className="space-y-3 px-5 pb-4 text-xs">
+          {/* Controls */}
+          <div className="flex flex-wrap items-end gap-x-5 gap-y-3">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Optimise for</div>
+              <div className="inline-flex rounded-md border border-border bg-surface-sunken p-0.5">
+                {OBJECTIVES.map((o) => (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => {
+                      setObjective(o.key);
+                      void run(o.key, minWinPct);
+                    }}
+                    className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      objective === o.key ? 'bg-surface-raised text-foreground' : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="min-w-[180px]">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                Min win rate ≥ <span className="text-foreground">{minWinPct}%</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={90}
+                step={5}
+                value={minWinPct}
+                onChange={(e) => setMinWinPct(Number(e.target.value))}
+                onPointerUp={() => void run()}
+                className="w-full accent-accent"
+              />
+            </div>
+            <label className="block">
+              <div className="mb-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Account size</div>
+              <div className="flex items-center gap-1">
+                <span className="text-muted-foreground">$</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1000}
+                  value={accountSize}
+                  onChange={(e) => setSize(Math.max(0, Number(e.target.value) || 0))}
+                  className="h-7 w-28 rounded-md border border-border bg-surface-sunken px-2 text-xs tabular-nums"
+                />
+              </div>
+            </label>
+            <Button size="sm" className="h-8 px-3" onClick={() => void run()} disabled={running}>
+              {running ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : null}
+              Find peak settings
+            </Button>
+          </div>
+
+          {running && !result ? (
             <div className="flex h-40 items-center justify-center text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
-          ) : (
+          ) : result ? (
             <>
-              <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                {result.evaluated} combos evaluated · {result.qualifying} qualified · {result.barsTested} bars
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                {result.evaluated} settings tested · {result.qualifying} qualified
+                {result.appliedMinTrades ? ` · ≥${result.appliedMinTrades} trades` : ''}
+                {result.barsTested ? ` · ${result.barsTested} bars` : ''}
               </div>
-              <div className="max-h-[420px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
-                <table className="w-full text-[11px] tabular-nums">
-                  <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                    <tr>
-                      <th className="px-2 py-1 text-left">Config</th>
-                      <th className="px-2 py-1 text-right">Trades</th>
-                      <th className="px-2 py-1 text-right">Win %</th>
-                      <th className="px-2 py-1 text-right">Return</th>
-                      <th className="px-2 py-1 text-right">Max DD</th>
-                      <th className="px-2 py-1 text-right">Sharpe</th>
-                      <th className="px-2 py-1 text-right">PF</th>
-                      <th className="px-2 py-1 text-right">Score</th>
-                      <th className="px-2 py-1"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.combos.map((c, i) => {
-                      const cur = alert.type === 'ma_cross' ? alert.config : null;
-                      const isCurrent =
-                        !!cur &&
-                        c.config.ma.length === cur.ma.length &&
-                        c.config.crossWith?.length === cur.crossWith?.length;
-                      return (
-                        <tr
-                          key={i}
-                          className={`border-t border-border/40 ${
-                            isCurrent ? 'bg-accent/10' : ''
-                          }`}
-                        >
-                          <td className="px-2 py-1.5">
-                            <span className="font-semibold">
-                              {c.config.ma.type.toUpperCase()}({c.config.ma.length}) ×{' '}
-                              {c.config.crossWith?.type.toUpperCase()}({c.config.crossWith?.length})
-                            </span>
-                            {isCurrent ? (
-                              <Badge tone="accent" className="ml-2">current</Badge>
-                            ) : null}
-                          </td>
-                          <td className="px-2 py-1 text-right">{c.summary.trades}</td>
-                          <td className="px-2 py-1 text-right">
-                            {(c.summary.winRate * 100).toFixed(0)}%
-                          </td>
-                          <td
-                            className={`px-2 py-1 text-right ${
-                              c.summary.totalReturnPct >= 0 ? 'text-bull' : 'text-bear'
-                            }`}
-                          >
-                            {fmtPct(c.summary.totalReturnPct)}
-                          </td>
-                          <td className="px-2 py-1 text-right text-bear">
-                            -{c.summary.maxDrawdownPct.toFixed(1)}%
-                          </td>
-                          <td className="px-2 py-1 text-right">{c.summary.sharpe.toFixed(2)}</td>
-                          <td className="px-2 py-1 text-right">
-                            {Number.isFinite(c.summary.profitFactor)
-                              ? c.summary.profitFactor.toFixed(2)
-                              : '∞'}
-                          </td>
-                          <td className="px-2 py-1 text-right font-semibold">
-                            {c.score.toFixed(2)}
-                          </td>
-                          <td className="px-2 py-1 text-right">
-                            <Button
-                              size="sm"
-                              variant={isCurrent ? 'ghost' : 'subtle'}
-                              onClick={() => void onApply(c)}
-                              disabled={isCurrent}
-                              className="h-6 px-2 text-[10px]"
-                            >
-                              {isCurrent ? 'Active' : 'Apply'}
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-3 text-[10px] text-muted-foreground">
-                Score = Sharpe − 0.02 × Max-DD%. Grid is fixed in v1; walk-forward + custom
-                ranges land in Phase 1 #4.
+              {result.note ? (
+                <div className="rounded-md border border-warn/40 bg-warn/10 px-2 py-1.5 text-[11px] text-warn">
+                  {result.note}
+                </div>
+              ) : null}
+              {result.combos.length > 0 ? (
+                <div className="max-h-[400px] overflow-y-auto rounded-md border border-border/70 scroll-thin">
+                  <table className="w-full text-[11px] tabular-nums">
+                    <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                      <tr>
+                        <th className="px-2 py-1 text-left">#</th>
+                        <th className="px-2 py-1 text-left">Setting</th>
+                        <th className="px-2 py-1 text-right">Profit</th>
+                        <th className="px-2 py-1 text-right">Win %</th>
+                        <th className="px-2 py-1 text-right">Trades</th>
+                        <th className="px-2 py-1 text-right">Max DD</th>
+                        <th className="px-2 py-1 text-right">PF</th>
+                        <th className="px-2 py-1 text-right">Exp/trade</th>
+                        <th className="px-2 py-1 text-left">Quality</th>
+                        <th className="px-2 py-1"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.combos.map((c, i) => {
+                        const cur = alert.type === 'ma_cross' ? alert.config : null;
+                        const isCurrent =
+                          !!cur && c.config.ma.length === cur.ma.length && c.config.crossWith?.length === cur.crossWith?.length;
+                        const m = c.metrics;
+                        const dollars = (accountSize * c.summary.totalReturnPct) / 100;
+                        const tone = m?.robustness.tone ?? 'green';
+                        const chip =
+                          tone === 'red' ? 'bg-bear/15 text-bear' : tone === 'amber' ? 'bg-warn/15 text-warn' : 'bg-bull/15 text-bull';
+                        const flag = m?.robustness.flags[0] ?? (tone === 'green' ? 'robust' : '');
+                        return (
+                          <tr key={i} className={`border-t border-border/40 ${isCurrent ? 'bg-accent/10' : ''}`}>
+                            <td className="px-2 py-1.5 text-left font-semibold text-muted-foreground">{m?.rank ?? i + 1}</td>
+                            <td className="px-2 py-1.5">
+                              <span className="font-semibold">
+                                {c.config.ma.type.toUpperCase()}({c.config.ma.length}) × {c.config.crossWith?.type.toUpperCase()}(
+                                {c.config.crossWith?.length})
+                              </span>
+                              {c.config.rsiFilter ? (
+                                <span className="ml-1 text-muted-foreground">
+                                  RSI {c.config.rsiFilter.buyBelow}/{c.config.rsiFilter.sellAbove}
+                                </span>
+                              ) : null}
+                              {isCurrent ? <Badge tone="accent" className="ml-2">current</Badge> : null}
+                            </td>
+                            <td className={`px-2 py-1 text-right font-semibold ${dollars >= 0 ? 'text-bull' : 'text-bear'}`}>
+                              {fmtMoney(dollars)}
+                              <span className="block text-[9px] font-normal opacity-80">{fmtPct(c.summary.totalReturnPct)}</span>
+                            </td>
+                            <td className="px-2 py-1 text-right">{(c.summary.winRate * 100).toFixed(0)}%</td>
+                            <td className="px-2 py-1 text-right">{c.summary.trades}</td>
+                            <td className="px-2 py-1 text-right text-bear">-{c.summary.maxDrawdownPct.toFixed(1)}%</td>
+                            <td className="px-2 py-1 text-right" title={Number.isFinite(c.summary.profitFactor) ? '' : 'No losing trades — capped; likely overfit/small sample'}>
+                              {Number.isFinite(c.summary.profitFactor) ? c.summary.profitFactor.toFixed(2) : '∞*'}
+                            </td>
+                            <td className={`px-2 py-1 text-right ${(m?.expectancyPct ?? 0) >= 0 ? '' : 'text-bear'}`}>
+                              {m ? `${m.expectancyPct >= 0 ? '+' : ''}${m.expectancyPct.toFixed(2)}%` : '—'}
+                            </td>
+                            <td className="px-2 py-1">
+                              {flag ? (
+                                <span
+                                  className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${chip}`}
+                                  title={m?.robustness.flags.join(' · ') || 'no robustness concerns'}
+                                >
+                                  {flag}
+                                </span>
+                              ) : null}
+                            </td>
+                            <td className="px-2 py-1 text-right">
+                              <Button
+                                size="sm"
+                                variant={isCurrent ? 'ghost' : 'subtle'}
+                                onClick={() => void onApply(c)}
+                                disabled={isCurrent}
+                                className="h-6 px-2 text-[10px]"
+                              >
+                                {isCurrent ? 'Active' : 'Apply'}
+                              </Button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                Hypothetical on <span className="text-foreground">${accountSize.toLocaleString('en-US')}</span> — compounded, NO
+                fees / slippage / leverage / SL-TP / position sizing (v1 trade model). Numbers are a real backtest on the last{' '}
+                {result.barsTested ?? '—'} closed candles of {formatSymbolLabel(alert.symbol)} {alert.interval}. After{' '}
+                <strong>Apply</strong>, the chart redraws that setting&apos;s actual BUY/SELL crossover labels so you can verify
+                the signals before trusting capital. ∞* = no losing trades (capped, usually overfit).
               </p>
             </>
-          )}
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
