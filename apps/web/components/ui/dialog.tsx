@@ -13,6 +13,11 @@ export const DialogContent = forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(function DialogContent({ className, children, ...rest }, ref) {
+  // `cn` is plain clsx (no tailwind-merge), so a duplicated `max-w-*` would NOT override the
+  // base one — whichever lands later in the generated CSS wins, which left every wide dialog
+  // (Alerts, Peak Performance, the PulseScript editor, …) clamped to max-w-lg / 512px. Only emit
+  // the default width when the caller didn't supply its own max-width, so overrides actually win.
+  const hasMaxW = /(?:^|\s)(?:sm:|md:|lg:|xl:|2xl:)?max-w-/.test(className ?? '');
   return (
     <DialogPrimitive.Portal>
       {/* No backdrop blur — a light dim so the chart behind stays visible while you adjust a
@@ -21,7 +26,8 @@ export const DialogContent = forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 w-[92vw] max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface shadow-floating data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out',
+          'fixed left-1/2 top-1/2 z-50 w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-border bg-surface shadow-floating data-[state=open]:animate-dialog-in data-[state=closed]:animate-dialog-out',
+          !hasMaxW && 'max-w-lg',
           className,
         )}
         {...rest}

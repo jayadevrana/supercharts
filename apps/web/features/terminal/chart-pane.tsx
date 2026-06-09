@@ -126,6 +126,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const resolvedTheme = useMemo(() => (theme === 'dark' ? DARK_THEME : LIGHT_THEME), [theme]);
   const drawTool = useTerminalStore((s) => s.drawTool);
   const setDrawTool = useTerminalStore((s) => s.setDrawTool);
+  const backtestPreview = useTerminalStore((s) => s.backtestPreview);
   const syncCrosshair = useTerminalStore((s) => s.syncCrosshair);
   const setCrosshairTime = useTerminalStore((s) => s.setCrosshairTime);
   const externalCrosshairTime = useTerminalStore((s) => s.crosshairTime);
@@ -797,9 +798,33 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     if (!core) return;
     const layer = core.getLayer<MaCrossLayer>('ma-cross');
     if (!layer) return;
+    const haveCandles = candleBufRef.current.length > 0;
+
+    // A Strategy-Tester run pinned to THIS pane plots its own BUY/SELL on the real candles
+    // (so the client can eyeball the exact entries the backtest used). It always renders —
+    // it's an explicit user action — and overrides the alert-driven line below.
+    const preview = backtestPreview && backtestPreview.paneId === pane.id ? backtestPreview : null;
+    if (preview && haveCandles) {
+      const result = computeMaCross(candleBufRef.current, {
+        type: preview.maType,
+        length: preview.fast,
+        source: 'close',
+        crossWith: { type: preview.maType, length: preview.slow },
+      });
+      layer.setOptions({
+        enabled: true, buyLabel: 'BUY', sellLabel: 'SELL',
+        lineColor: '#f5d524', slowLineColor: '#7c9cff', lineWidth: 1.6,
+        buyColor: '#22c55e', sellColor: '#ef4444',
+      });
+      layer.setFrame(result);
+      return;
+    }
+
     // Only ma_cross alerts drive this on-chart MA line; indicator-condition alerts (M5) don't.
+    // The "Signals" Layers toggle hides them (undefined on persisted panes → treated as shown).
+    const showSignals = pane.overlays.maSignals !== false;
     const target = paneAlerts.find((a) => a.type === 'ma_cross');
-    if (!target || candleBufRef.current.length === 0) {
+    if (!target || !haveCandles || !showSignals) {
       layer.setOptions({ enabled: false });
       layer.setFrame(null);
       return;
@@ -821,9 +846,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       sellColor: target.config.style?.sellColor ?? '#ef4444',
     });
     layer.setFrame(result);
-     
+
   }, [
     paneAlerts,
+    backtestPreview,
+    pane.id,
+    pane.overlays.maSignals,
     candleBufRef.current.length,
     candleBufRef.current[candleBufRef.current.length - 1]?.close,
   ]);

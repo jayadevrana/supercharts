@@ -565,6 +565,12 @@ function OverlaysTab({ pane }: { pane: PaneState }) {
           checked={pane.overlays.economicEvents}
           onChange={() => onToggle('economicEvents')}
         />
+        <OverlayRow
+          label="MA-cross signals"
+          description="BUY/SELL labels from a matching alert or Strategy-Tester run — turn off to declutter"
+          checked={pane.overlays.maSignals !== false}
+          onChange={() => onToggle('maSignals')}
+        />
       </div>
       <Separator />
       <StsSettingsBlock pane={pane} />

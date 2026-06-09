@@ -5,6 +5,11 @@ import { ChartPane } from './chart-pane';
 
 export function ChartGrid() {
   const { panes, layout, activePaneId, setActivePane } = useTerminalStore();
+  // Defensive: if the persisted/active id no longer matches any pane (e.g. after a layout
+  // change), fall back to the first pane so EXACTLY ONE pane is always active. Otherwise
+  // `getTool` / drawing would silently no-op with no active pane — looking like "drawing
+  // tools don't work" even though the engine is fine.
+  const activeId = panes.some((p) => p.id === activePaneId) ? activePaneId : panes[0]?.id;
   return (
     <div
       data-testid="chart-layout"
@@ -36,7 +41,7 @@ export function ChartGrid() {
           >
             <ChartPane
               pane={p}
-              active={p.id === activePaneId}
+              active={p.id === activeId}
               onClick={() => setActivePane(p.id)}
             />
           </div>

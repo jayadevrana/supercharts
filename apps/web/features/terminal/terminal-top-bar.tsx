@@ -31,6 +31,7 @@ import { IndicatorsDialog } from './indicators-dialog';
 import { CodeTerminalDialog } from './code-terminal-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
 import { ImportCsvDialog } from './import-csv-dialog';
+import { BacktestDialog } from './backtest-dialog';
 import { WebhooksDialog } from './webhooks-dialog';
 import { BroadcastDialog } from './broadcast-dialog';
 import type { ChartType, Interval } from '@supercharts/types';
@@ -192,6 +193,7 @@ export function TerminalTopBar() {
       <LayoutPicker />
       <IndicatorsDialog />
       <CodeTerminalDialog />
+      <BacktestDialog />
       <ImportCsvDialog />
       <div className="ml-auto flex items-center gap-2">
         <BroadcastDialog />

@@ -522,6 +522,61 @@ export function alertRoutes(
     };
   });
 
+  /* ─── Standalone backtest (no alert needed) ─── */
+  // Strategy Tester: backtest an MA-cross config on ANY chart symbol/interval on demand,
+  // so the user can verify a setup before wiring an alert. Reuses the exact same
+  // runMaCrossBacktest as the live alerts + optimizer — real candles only, never synthetic.
+  fastify.post('/api/backtest', async (req, reply) => {
+    getUser(req, db); // demo-scoped; no persistence, pure compute
+    const body = (req.body ?? {}) as {
+      symbol?: string;
+      interval?: string;
+      ma?: { type?: 'sma' | 'ema'; length?: number; source?: 'open' | 'high' | 'low' | 'close' };
+      crossWith?: { type?: 'sma' | 'ema'; length?: number };
+      rsiFilter?: { length: number; buyBelow: number; sellAbove: number };
+    };
+    const symbol = String(body.symbol ?? '').trim();
+    const interval = String(body.interval ?? '').trim() as Interval;
+    if (!symbol || !interval) {
+      reply.code(400);
+      return { error: 'symbol_and_interval_required' };
+    }
+    const fastLen = Math.max(1, Math.round(body.ma?.length ?? 9));
+    const slowLen = Math.max(fastLen + 1, Math.round(body.crossWith?.length ?? 21));
+    const config: MaCrossAlertConfig = {
+      ma: { type: body.ma?.type ?? 'ema', length: fastLen, source: body.ma?.source ?? 'close' },
+      crossWith: { type: body.crossWith?.type ?? body.ma?.type ?? 'ema', length: slowLen },
+      labels: { buy: 'BUY', sell: 'SELL' },
+      delivery: { web: true, telegram: false },
+      timezone: 'UTC',
+      ...(body.rsiFilter ? { rsiFilter: body.rsiFilter } : {}),
+    };
+
+    const desired = 1000;
+    let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+          candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          console.warn('[backtest] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+    const result = runMaCrossBacktest(candles, config, interval);
+    return { symbol, interval, config, barsTested: candles.length, ...result };
+  });
+
   /* ─── Position sizer preview ─── */
   // Backtests the alert to derive Kelly inputs (win rate, avg win/loss), reads the
   // latest ATR from the candle store, then returns lot sizes for each supported

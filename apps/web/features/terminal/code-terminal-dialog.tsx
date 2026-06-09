@@ -209,9 +209,9 @@ export function CodeTerminalDialog() {
           </div>
         </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px] gap-0">
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px] gap-0">
           {/* Editor */}
-          <div className="min-h-0 overflow-hidden border-r border-border">
+          <div className="min-h-0 min-w-0 overflow-hidden border-r border-border">
             <CodeMirror
               value={draft}
               onChange={(v: string) => setDraft(v)}

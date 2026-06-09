@@ -76,6 +76,8 @@ export interface PaneState {
     signalsTrendScore: boolean;
     /** Economic calendar: high/medium-impact macro events as vertical markers. */
     economicEvents: boolean;
+    /** MA-cross BUY/SELL labels from a matching alert (or a backtest preview). Default on. */
+    maSignals: boolean;
   };
   /** SMC / order-flow indicator toggles. Each maps 1:1 to a SmcLayer flag. */
   smc: {
@@ -132,6 +134,9 @@ interface TerminalStore {
   panes: PaneState[];
   activePaneId: string;
   drawTool: string | null;
+  /** A Strategy-Tester run pinned to a pane's chart so its BUY/SELL plot on real candles. */
+  backtestPreview: { paneId: string; maType: 'sma' | 'ema'; fast: number; slow: number } | null;
+  setBacktestPreview: (v: { paneId: string; maType: 'sma' | 'ema'; fast: number; slow: number } | null) => void;
   showLeftRail: boolean;
   showRightRail: boolean;
   showBottomPanel: boolean;
@@ -235,6 +240,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       openInterest: false,
       signalsTrendScore: false,
       economicEvents: false,
+      maSignals: true,
     },
     smc: {
       fvg: false,
@@ -304,6 +310,8 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   layout: initialLayout,
   panes: panesForCount(initialLayout.paneCount),
   activePaneId: 'p0',
+  backtestPreview: null,
+  setBacktestPreview: (v) => set({ backtestPreview: v }),
   drawTool: null,
   showLeftRail: true,
   showRightRail: true,
