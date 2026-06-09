@@ -5,6 +5,7 @@ import { TerminalTopBar } from '@/features/terminal/terminal-top-bar';
 import { LeftRail } from '@/features/terminal/left-rail';
 import { RightRail } from '@/features/terminal/right-rail';
 import { ChartGrid } from '@/features/terminal/chart-grid';
+import { PulseEditorPanel } from '@/features/terminal/pulse-editor-panel';
 import { ReplayBar } from '@/features/terminal/replay-bar';
 import { useTerminalStore } from '@/features/terminal/terminal-store';
 import { useMT5Store } from '@/features/terminal/mt5-store';
@@ -37,6 +38,7 @@ export default function TerminalPage() {
         {showLeftRail ? <LeftRail /> : null}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ChartGrid />
+          <PulseEditorPanel />
         </main>
         {showRightRail ? <RightRail /> : null}
         <ReplayBar />

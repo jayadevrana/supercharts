@@ -8,6 +8,7 @@ import {
   AlarmClock,
   BellRing,
   ChevronDown,
+  Code2,
   Cog,
   Crosshair,
   History,
@@ -28,7 +29,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Badge } from '@/components/ui/badge';
 import { useWSStatus } from '@/lib/ws-client';
 import { IndicatorsDialog } from './indicators-dialog';
-import { CodeTerminalDialog } from './code-terminal-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
 import { ImportCsvDialog } from './import-csv-dialog';
 import { BacktestDialog } from './backtest-dialog';
@@ -100,6 +100,8 @@ export function TerminalTopBar() {
     setSyncCrosshair,
     replayMode,
     setReplayMode,
+    showBottomPanel,
+    setShowBottomPanel,
   } = useTerminalStore();
   const active = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
   const [saving, setSaving] = useState(false);
@@ -192,7 +194,15 @@ export function TerminalTopBar() {
       </Select>
       <LayoutPicker />
       <IndicatorsDialog />
-      <CodeTerminalDialog />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => setShowBottomPanel(!showBottomPanel)}
+        title="PulseScript editor (Pine Editor)"
+        className={`gap-1 hover:text-foreground ${showBottomPanel ? 'text-accent' : 'text-muted-foreground'}`}
+      >
+        <Code2 className="h-3.5 w-3.5" /> Script
+      </Button>
       <BacktestDialog />
       <ImportCsvDialog />
       <div className="ml-auto flex items-center gap-2">
