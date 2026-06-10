@@ -604,6 +604,115 @@ export function alertRoutes(
     };
   });
 
+  /* ─── Standalone optimizer: MetaTrader-style parameter sweep (no alert needed) ─── */
+  // Sweeps fast×slow MA settings over the ACTIVE chart's symbol/interval — a real backtest
+  // per combination — and ranks the full qualifying pool by the chosen objective
+  // (profit / accuracy / balanced) with the same hard filters + robustness flags as the
+  // per-alert Peak Performance endpoint. Default grid ≈ 1000+ combinations; ranges are
+  // MetaTrader-style {from, step, to} per parameter, capped server-side.
+  fastify.post('/api/optimize', async (req, reply) => {
+    getUser(req, db); // pure compute, nothing persisted
+    const body = (req.body ?? {}) as {
+      symbol?: string;
+      interval?: string;
+      maType?: 'sma' | 'ema';
+      objective?: 'profit' | 'accuracy' | 'balanced';
+      minWinRate?: number;
+      topN?: number;
+      fastRange?: { from?: number; step?: number; to?: number };
+      slowRange?: { from?: number; step?: number; to?: number };
+      commissionPct?: number;
+      slippagePct?: number;
+      stopLossPct?: number;
+      takeProfitPct?: number;
+    };
+    const symbol = String(body.symbol ?? '').trim();
+    const interval = String(body.interval ?? '').trim() as Interval;
+    if (!symbol || !interval) {
+      reply.code(400);
+      return { error: 'symbol_and_interval_required' };
+    }
+
+    // MetaTrader-style start/step/stop → an explicit length array. Defaults give a
+    // fast 2..35 ×1 / slow 5..110 ×3 grid ≈ 1048 valid (slow > fast) combinations.
+    const expand = (r: { from?: number; step?: number; to?: number } | undefined, d: { from: number; step: number; to: number }): number[] => {
+      const from = Math.max(1, Math.round(Number(r?.from ?? d.from)));
+      const step = Math.max(1, Math.round(Number(r?.step ?? d.step)));
+      const to = Math.min(500, Math.max(from, Math.round(Number(r?.to ?? d.to))));
+      const out: number[] = [];
+      for (let v = from; v <= to; v += step) out.push(v);
+      return out;
+    };
+    const fastLengths = expand(body.fastRange, { from: 2, step: 1, to: 35 });
+    const slowLengths = expand(body.slowRange, { from: 5, step: 3, to: 110 });
+    const comboCount = fastLengths.reduce(
+      (acc, f) => acc + slowLengths.filter((s) => s > f).length,
+      0,
+    );
+    if (comboCount === 0) {
+      reply.code(400);
+      return { error: 'empty_grid', message: 'No valid combinations — slow must exceed fast somewhere in the ranges.' };
+    }
+    if (comboCount > 5000) {
+      reply.code(400);
+      return { error: 'grid_too_large', message: `${comboCount} combinations exceeds the 5000 cap — raise the step sizes.`, comboCount };
+    }
+
+    const base: MaCrossAlertConfig = {
+      ma: { type: body.maType ?? 'ema', length: 9, source: 'close' },
+      crossWith: { type: body.maType ?? 'ema', length: 21 },
+      labels: { buy: 'BUY', sell: 'SELL' },
+      delivery: { web: true, telegram: false },
+      timezone: 'UTC',
+    };
+
+    const desired = 1000;
+    let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+          candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          console.warn('[optimize] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+
+    const pct = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    const sweep: OptimizeRequest = {
+      objective: body.objective ?? 'balanced',
+      minWinRate: typeof body.minWinRate === 'number' && body.minWinRate > 0 ? body.minWinRate : undefined,
+      topN: Math.min(50, Math.max(1, Math.round(body.topN ?? 20))),
+      fastLengths,
+      slowLengths,
+      commissionPct: pct(body.commissionPct),
+      slippagePct: pct(body.slippagePct),
+      stopLossPct: pct(body.stopLossPct),
+      takeProfitPct: pct(body.takeProfitPct),
+    };
+    const started = Date.now();
+    const result = runOptimizer(candles, base, interval, sweep);
+    return {
+      symbol,
+      interval,
+      maType: base.ma.type,
+      barsTested: candles.length,
+      sweepMs: Date.now() - started,
+      ...result,
+    };
+  });
+
   /* ─── Strategy backtest: PulseScript → Strategy Tester (TradingView model) ─── */
   // Runs the user's PulseScript over real candles SERVER-SIDE (same sandbox the chart
   // uses: loop caps + wall-clock timeout), takes its `mark buy` / `mark sell` output as

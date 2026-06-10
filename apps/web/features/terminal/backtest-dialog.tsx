@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FlaskConical, Play, Loader2, LineChart, EyeOff, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react';
+import { FlaskConical, Play, Loader2, LineChart, EyeOff, TrendingUp, TrendingDown, ChevronRight, Trophy, Check } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -60,6 +60,31 @@ interface BacktestResponse {
   summary: BacktestSummary;
 }
 
+/** One pass of the standalone optimizer sweep (POST /api/optimize). */
+interface OptimizeCombo {
+  config: { ma: { type: string; length: number }; crossWith?: { length: number } };
+  summary: BacktestSummary;
+  metrics?: {
+    expectancyPct: number;
+    profitFactorCapped: number;
+    qualityScore: number;
+    rank: number;
+    robustness: { flags: string[]; tone: 'green' | 'amber' | 'red' };
+  };
+}
+interface OptimizeResponse {
+  symbol: string;
+  interval: string;
+  maType: string;
+  barsTested: number;
+  sweepMs: number;
+  evaluated: number;
+  qualifying: number;
+  combos: OptimizeCombo[];
+  note?: string;
+  floor?: { minWinRate: number; passed: number; bestWinRate: number };
+}
+
 const fmtPct = (n: number, dp = 1): string => `${n >= 0 ? '+' : ''}${n.toFixed(dp)}%`;
 const fmtPf = (n: number): string => (Number.isFinite(n) ? n.toFixed(2) : '∞');
 const fmtMoney = (n: number): string => {
@@ -95,6 +120,60 @@ export function BacktestDialog() {
   const [slippage, setSlippage] = useState('');
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
+
+  // Optimizer mode — MetaTrader-style parameter sweep over the active chart.
+  const [mode, setMode] = useState<'test' | 'optimize'>('test');
+  const [objective, setObjective] = useState<'profit' | 'accuracy' | 'balanced'>('balanced');
+  const [minWinPct, setMinWinPct] = useState(0);
+  const [fastRange, setFastRange] = useState({ from: 2, step: 1, to: 35 });
+  const [slowRange, setSlowRange] = useState({ from: 5, step: 3, to: 110 });
+  const [optRunning, setOptRunning] = useState(false);
+  const [optResult, setOptResult] = useState<OptimizeResponse | null>(null);
+  const [optError, setOptError] = useState<string | null>(null);
+
+  const comboEstimate = (() => {
+    let n = 0;
+    for (let f = fastRange.from; f <= fastRange.to; f += Math.max(1, fastRange.step))
+      for (let sl = slowRange.from; sl <= slowRange.to; sl += Math.max(1, slowRange.step)) if (sl > f) n += 1;
+    return n;
+  })();
+
+  const runOptimize = async (obj = objective, minWin = minWinPct): Promise<void> => {
+    setOptRunning(true);
+    setOptError(null);
+    try {
+      const r = await api<OptimizeResponse>('/optimize', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbol: pane.symbol,
+          interval: pane.interval,
+          maType,
+          objective: obj,
+          minWinRate: minWin > 0 ? minWin / 100 : undefined,
+          topN: 20,
+          fastRange,
+          slowRange,
+          ...realismBody,
+        }),
+      });
+      setOptResult(r);
+    } catch (err) {
+      setOptResult(null);
+      setOptError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOptRunning(false);
+    }
+  };
+
+  /** Adopt a swept setting: load it into single-test mode and plot its signals on the chart. */
+  const useCombo = (c: OptimizeCombo): void => {
+    const f = c.config.ma.length;
+    const sl = c.config.crossWith?.length ?? f * 2;
+    setFast(f);
+    setSlow(sl);
+    setBacktestPreview({ paneId: pane.id, maType, fast: f, slow: sl });
+    toast({ title: `Using ${maType.toUpperCase()} ${f}×${sl}`, description: 'Signals plotted on the chart — run a single test to see the full trade list.', tone: 'success' });
+  };
 
   const parsePct = (s: string): number | undefined => {
     const v = parseFloat(s);
@@ -158,8 +237,28 @@ export function BacktestDialog() {
           {plottedHere ? <Badge tone="accent" className="text-[9px]">plotted on chart</Badge> : null}
         </DialogHeader>
 
+        {/* Mode tabs — single test vs the MetaTrader-style sweep. */}
+        <div className="flex border-b border-border">
+          {(
+            [
+              ['test', 'Single test', <Play key="i" className="h-3 w-3" />],
+              ['optimize', `Optimizer · ${comboEstimate.toLocaleString()} combinations`, <Trophy key="i" className="h-3 w-3" />],
+            ] as const
+          ).map(([m, label, icon]) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`flex items-center gap-1.5 px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+                mode === m ? 'border-b-2 border-accent text-accent' : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {icon} {label}
+            </button>
+          ))}
+        </div>
+
         {/* Controls */}
-        <div className="flex flex-wrap items-end gap-3 border-b border-border px-4 py-3">
+        <div className={`flex-wrap items-end gap-3 border-b border-border px-4 py-3 ${mode === 'test' ? 'flex' : 'hidden'}`}>
           <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             MA type
             <Select value={maType} onValueChange={(v) => setMaType(v as 'ema' | 'sma')}>
@@ -186,6 +285,80 @@ export function BacktestDialog() {
             {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
             Run backtest
           </Button>
+        </div>
+
+        {/* Optimizer controls — MetaTrader-style from/step/to per parameter. */}
+        <div className={`flex-wrap items-end gap-3 border-b border-border px-4 py-3 ${mode === 'optimize' ? 'flex' : 'hidden'}`}>
+          <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            MA type
+            <Select value={maType} onValueChange={(v) => setMaType(v as 'ema' | 'sma')}>
+              <SelectTrigger className="h-8 w-20 text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ema">EMA</SelectItem>
+                <SelectItem value="sma">SMA</SelectItem>
+              </SelectContent>
+            </Select>
+          </label>
+          {(
+            [
+              ['Fast', fastRange, setFastRange],
+              ['Slow', slowRange, setSlowRange],
+            ] as const
+          ).map(([label, range, set]) => (
+            <div key={label} className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{label} · from / step / to</span>
+              <div className="flex gap-1">
+                {(['from', 'step', 'to'] as const).map((k) => (
+                  <Input
+                    key={k}
+                    type="number"
+                    min={1}
+                    value={range[k]}
+                    onChange={(e) => set({ ...range, [k]: Math.max(1, Math.round(+e.target.value || 1)) })}
+                    className="h-8 w-16 text-xs"
+                  />
+                ))}
+              </div>
+            </div>
+          ))}
+          <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Optimise for
+            <div className="flex overflow-hidden rounded-md border border-border">
+              {(
+                [
+                  ['profit', '💰 Profit'],
+                  ['accuracy', '🎯 Accuracy'],
+                  ['balanced', '⚖️ Balanced'],
+                ] as const
+              ).map(([o, label]) => (
+                <button
+                  key={o}
+                  onClick={() => { setObjective(o); if (optResult) void runOptimize(o); }}
+                  className={`px-2.5 py-1.5 text-xs transition-colors ${objective === o ? 'bg-accent/20 font-medium text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </label>
+          <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+            Min win rate ≥ {minWinPct}%
+            <input
+              type="range"
+              min={0}
+              max={90}
+              step={5}
+              value={minWinPct}
+              onChange={(e) => setMinWinPct(+e.target.value)}
+              onPointerUp={() => { if (optResult) void runOptimize(); }}
+              className="h-8 w-28 accent-[hsl(var(--accent))]"
+            />
+          </label>
+          <Button size="sm" className="h-8 gap-1.5" onClick={() => void runOptimize()} disabled={optRunning || comboEstimate === 0 || comboEstimate > 5000}>
+            {optRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trophy className="h-3.5 w-3.5" />}
+            Find best settings
+          </Button>
+          {comboEstimate > 5000 ? <span className="text-[10px] text-bear">Over the 5000-combination cap — raise the steps.</span> : null}
         </div>
 
         {/* Realism — optional fees / slippage / SL-TP. All blank = off = the plain v1 model. */}
@@ -230,7 +403,18 @@ export function BacktestDialog() {
 
         {/* Results */}
         <div className="min-h-0 flex-1 overflow-auto scroll-thin p-4">
-          {!s ? (
+          {mode === 'optimize' ? (
+            <OptimizerResults
+              result={optResult}
+              error={optError}
+              running={optRunning}
+              account={account}
+              maType={maType}
+              symbol={pane.symbol}
+              interval={pane.interval}
+              onUse={useCombo}
+            />
+          ) : !s ? (
             <div className="flex h-40 items-center justify-center text-center text-xs text-muted-foreground">
               Set the fast/slow MA and press <span className="mx-1 font-medium text-foreground">Run backtest</span> to test {maType.toUpperCase()} {fast}×{slow} on {formatSymbolLabel(pane.symbol)} {pane.interval}.
             </div>
@@ -323,6 +507,117 @@ export function BacktestDialog() {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function OptimizerResults({
+  result,
+  error,
+  running,
+  account,
+  maType,
+  symbol,
+  interval,
+  onUse,
+}: {
+  result: OptimizeResponse | null;
+  error: string | null;
+  running: boolean;
+  account: number;
+  maType: string;
+  symbol: string;
+  interval: string;
+  onUse: (c: OptimizeCombo) => void;
+}) {
+  if (running && !result) {
+    return (
+      <div className="flex h-40 items-center justify-center gap-2 text-xs text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Backtesting every combination on real candles…
+      </div>
+    );
+  }
+  if (error) {
+    return <div className="rounded-lg border border-bear/40 bg-bear/10 p-3 text-xs text-bear">{error}</div>;
+  }
+  if (!result) {
+    return (
+      <div className="flex h-40 items-center justify-center text-center text-xs text-muted-foreground">
+        Set the from/step/to ranges and press <span className="mx-1 font-medium text-foreground">Find best settings</span> — every combination is a real backtest of {formatSymbolLabel(symbol)} {interval}, ranked by your objective.
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span className="font-semibold text-foreground">{result.evaluated.toLocaleString()} combinations tested</span>
+        <span>· {result.qualifying} qualified</span>
+        <span>· {result.barsTested} real candles</span>
+        <span>· {result.sweepMs} ms</span>
+      </div>
+      {result.note ? <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-200">{result.note}</div> : null}
+      {result.combos.length > 0 ? (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <table className="w-full text-left text-[11px]">
+            <thead className="bg-surface-raised/60 text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
+              <tr>
+                <th className="px-2 py-1.5">#</th>
+                <th className="px-2 py-1.5">Setting</th>
+                <th className="px-2 py-1.5 text-right">Profit</th>
+                <th className="px-2 py-1.5 text-right">Win %</th>
+                <th className="px-2 py-1.5 text-right">Trades</th>
+                <th className="px-2 py-1.5 text-right">Max DD</th>
+                <th className="px-2 py-1.5 text-right">PF</th>
+                <th className="px-2 py-1.5">Quality</th>
+                <th className="px-2 py-1.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {result.combos.map((c) => {
+                const cs = c.summary;
+                const m = c.metrics;
+                const tone = m?.robustness.tone ?? 'amber';
+                return (
+                  <tr key={`${c.config.ma.length}-${c.config.crossWith?.length}`} className="border-t border-border/60">
+                    <td className="px-2 py-1 text-muted-foreground">{m?.rank}</td>
+                    <td className="px-2 py-1 font-medium text-foreground">{maType.toUpperCase()} {c.config.ma.length}×{c.config.crossWith?.length}</td>
+                    <td className={`px-2 py-1 text-right tabular-nums font-medium ${cs.totalReturnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+                      {fmtMoney((cs.totalReturnPct / 100) * account)}
+                      <span className="ml-1 text-[9px] text-muted-foreground">{fmtPct(cs.totalReturnPct)}</span>
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">{(cs.winRate * 100).toFixed(0)}%</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">{cs.trades}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-bear">-{cs.maxDrawdownPct.toFixed(1)}%</td>
+                    <td className="px-2 py-1 text-right tabular-nums">{m ? m.profitFactorCapped.toFixed(2) : fmtPf(cs.profitFactor)}</td>
+                    <td className="px-2 py-1">
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${
+                          tone === 'green' ? 'bg-bull/15 text-bull' : tone === 'red' ? 'bg-bear/15 text-bear' : 'bg-amber-500/15 text-amber-300'
+                        }`}
+                        title={m?.robustness.flags.join(' · ')}
+                      >
+                        {m?.robustness.flags[0] ?? '—'}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 text-right">
+                      <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-[10px]" onClick={() => onUse(c)}>
+                        <Check className="h-3 w-3" /> Use
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border bg-surface-raised/40 p-4 text-center text-xs text-muted-foreground">
+          No combination met the filters{result.floor ? ` (best win rate seen: ${(result.floor.bestWinRate * 100).toFixed(0)}%)` : ''} — lower the win-rate floor or widen the ranges.
+        </div>
+      )}
+      <p className="leading-relaxed text-[10px] text-muted-foreground/70">
+        Every row is a real backtest of the last {result.barsTested} closed candles of {formatSymbolLabel(symbol)} {interval} — same trade model as the single test (and your Realism settings apply here too). Flashy settings with too few trades, no losing trade, deep drawdown or a lone-spike neighbourhood are filtered or flagged, not celebrated. <strong>Use</strong> loads a setting into Single test and plots its BUY/SELL on the chart so you can verify the entries. Past performance ≠ future results.
+      </p>
+    </div>
   );
 }
 
