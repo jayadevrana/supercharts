@@ -20,6 +20,7 @@ import { SmcLayer } from './layers/smc';
 import { IndicatorsLayer } from './layers/indicators';
 import { MaCrossLayer } from './layers/ma-cross';
 import { EconomicEventsLayer } from './layers/economic-events';
+import { fitTarget, isNearRange, rangesOverlap, smoothStep, type PriceRange } from './price-fit';
 
 export interface ChartCoreOptions {
   canvas: HTMLCanvasElement;
@@ -66,6 +67,10 @@ const INERTIA_DECAY_PER_FRAME = 0.95;
 const INERTIA_STOP_SPEED = 0.02;
 /** Duration of one eased wheel-zoom tween; rapid wheel events retarget it instead of stacking. */
 const WHEEL_ZOOM_MS = 120;
+/** Time constant of the smoothed price auto-fit (≈63% of the gap closed every tau). */
+const PRICE_FIT_TAU_MS = 100;
+/** Cumulative vertical drag (px) past which the user takes manual control of the price scale. */
+const MANUAL_PRICE_DRAG_PX = 12;
 
 export class ChartCore {
   readonly canvas: HTMLCanvasElement;
@@ -106,6 +111,18 @@ export class ChartCore {
   private wheelZoomRafId = 0;
   /** In-flight wheel-zoom tween. Rapid wheel events retarget this object rather than stacking. */
   private wheelZoom: { fromPxPerMs: number; toPxPerMs: number; anchorX: number; start: number } | null = null;
+  /**
+   * TradingView-style price auto-fit. While true the price axis follows the visible candles
+   * (smoothed) through pans, flings and data updates. A deliberate vertical chart drag or a
+   * price-axis drag hands the user manual control; double-click re-arms auto.
+   */
+  private priceAutoFit = true;
+  /** Target of the in-flight smoothed price fit (null when idle). Retargeted, never stacked. */
+  private priceFitTarget: PriceRange | null = null;
+  /** Last frame timestamp of the fit animation (0 = first frame after idle). */
+  private priceFitLastT = 0;
+  /** Cumulative vertical drag of the current pan gesture (manual-override detector). */
+  private gestureDy = 0;
 
   constructor(opts: ChartCoreOptions) {
     this.opts = opts;
@@ -219,7 +236,15 @@ export class ChartCore {
       // Fit the price scale AFTER the time scale is settled, so we measure the window that's
       // actually about to be drawn. Fitting first used a stale visible range — invisible on
       // live symbols (ticks refit it) but sticky for static data like CSV imports.
-      this.fitPriceScaleToVisible();
+      if (this.priceAutoFit) {
+        // Smoothed: backfill/snapshot refits morph instead of hard-cutting (the
+        // animate-vs-snap guard still snaps a fresh load across orders of magnitude).
+        this.fitPriceScaleToVisible(true);
+      } else {
+        // Manual range is respected — unless the new data doesn't intersect it at all
+        // (the chart would render blank), in which case auto-fit re-arms and snaps.
+        this.refitIfDataInvisible();
+      }
     }
     this.markDirty();
   }
@@ -235,6 +260,9 @@ export class ChartCore {
     }
     if (c.openTime === last.openTime) {
       arr[arr.length - 1] = c;
+      // Intra-bar tick: if the forming bar pushes beyond the fitted range, ease the axis
+      // out to keep it in view (visible-window scan → no-op while panned into history).
+      if (this.priceAutoFit) this.fitPriceScaleToVisible(true);
       this.markDirty();
       return false;
     }
@@ -244,6 +272,10 @@ export class ChartCore {
         const barDur = c.closeTime - c.openTime || this.timeScale.state.barDurationMs;
         this.timeScale.state.rightTime = c.closeTime + barDur * 6;
       }
+      // In auto-fit the axis breathes with the live bar (smoothed). When the user has
+      // panned into history the new bar isn't in the visible window, so this is a no-op
+      // — it can never yank the view back to realtime.
+      if (this.priceAutoFit) this.fitPriceScaleToVisible(true);
       this.markDirty();
       return true;
     }
@@ -414,7 +446,9 @@ export class ChartCore {
     this.timeScale.state.width = this.geometry.pricePane.width;
     this.priceScale.state.height = this.geometry.pricePane.height;
     this.volumeScale.state.height = this.geometry.volumePane.height;
-    this.fitPriceScaleToVisible();
+    // Layout reflow refits instantly (no easing) and respects a manually pinned scale —
+    // price↔y stays proportional through the height change either way.
+    if (this.priceAutoFit) this.fitPriceScaleToVisible();
     this.markDirty();
   }
 
@@ -453,13 +487,18 @@ export class ChartCore {
       this.stopInertia();
       this.finishWheelZoom();
       this.panSamples.length = 0;
+      this.gestureDy = 0;
       cvs.setPointerCapture(e.pointerId);
       const rect = cvs.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       const suppressed = this.opts.shouldSuppressPan?.() ?? false;
-      if (x >= this.geometry.axisPane.x) priceAxisDrag = true;
-      else if (y >= this.geometry.timeAxisPane.y) timeAxisDrag = true;
+      if (x >= this.geometry.axisPane.x) {
+        priceAxisDrag = true;
+        // Grabbing the price axis is an explicit "I'll scale this myself" (TV semantics).
+        this.priceAutoFit = false;
+        this.priceFitTarget = null;
+      } else if (y >= this.geometry.timeAxisPane.y) timeAxisDrag = true;
       else if (!suppressed) {
         dragging = true;
         this.panSamples.push({ t: performance.now(), x, y });
@@ -475,7 +514,19 @@ export class ChartCore {
       const y = e.clientY - rect.top;
       if (dragging) {
         this.timeScale.pan(x - lastX);
-        this.priceScale.pan(y - lastY);
+        if (this.priceAutoFit) {
+          // Auto-fit: the axis follows the candles through the pan (smoothed). A
+          // deliberate vertical drag (cumulative |dy| past a small dead zone — horizontal
+          // jitter cancels out) hands the user manual control mid-gesture, TV-style.
+          this.gestureDy += y - lastY;
+          if (Math.abs(this.gestureDy) > MANUAL_PRICE_DRAG_PX) {
+            this.priceAutoFit = false;
+            this.priceFitTarget = null;
+          } else {
+            this.fitPriceScaleToVisible(true);
+          }
+        }
+        if (!this.priceAutoFit) this.priceScale.pan(y - lastY);
         this.autoFollow = false;
         this.scheduleRangeChange();
         const now = performance.now();
@@ -490,6 +541,7 @@ export class ChartCore {
       } else if (timeAxisDrag) {
         const factor = 1 + (x - lastX) * 0.005;
         this.timeScale.zoomAroundX(this.geometry.pricePane.width / 2, factor);
+        if (this.priceAutoFit) this.fitPriceScaleToVisible(true);
         this.scheduleRangeChange();
       } else {
         // Hover → crosshair update.
@@ -527,7 +579,9 @@ export class ChartCore {
       // case a draw tool was armed mid-gesture.
       if (wasPanning && !(this.opts.shouldSuppressPan?.() ?? false)) {
         const v = this.releaseVelocity();
-        if (v) this.startInertia(v.vx, v.vy);
+        // In auto-fit the gesture never panned price, so the fling is horizontal-only —
+        // the smoothed fit supplies the vertical motion.
+        if (v) this.startInertia(v.vx, this.priceAutoFit ? 0 : v.vy);
       }
       this.panSamples.length = 0;
     };
@@ -543,6 +597,7 @@ export class ChartCore {
       this.stopInertia();
       this.cancelWheelZoom();
       this.autoFollow = true;
+      this.priceAutoFit = true; // dblclick re-arms auto-scale (TV semantics)
       const candles = this.frame.candles;
       if (candles.length > 0) {
         const last = candles[candles.length - 1]!;
@@ -551,7 +606,8 @@ export class ChartCore {
         // 120 bars default span
         this.timeScale.state.pxPerMs = this.timeScale.state.width / Math.max(1, 120 * barDur);
         this.timeScale.state.barWidth = barDur * this.timeScale.state.pxPerMs;
-        this.fitPriceScaleToVisible();
+        // Eased re-fit: the reset glides into place instead of hard-cutting.
+        this.fitPriceScaleToVisible(true);
         this.scheduleRangeChange();
         this.markDirty();
       }
@@ -652,6 +708,8 @@ export class ChartCore {
       lastT = now;
       this.timeScale.pan(vx * dt);
       this.priceScale.pan(vy * dt);
+      // Auto-fit keeps the axis tracking the candles for the whole glide.
+      if (this.priceAutoFit) this.fitPriceScaleToVisible(true);
       const decay = Math.pow(INERTIA_DECAY_PER_FRAME, dt / (1000 / 60));
       vx *= decay;
       vy *= decay;
@@ -689,7 +747,9 @@ export class ChartCore {
     // zoomAroundX divides pxPerMs by the factor and re-anchors rightTime, so the time
     // under the cursor stays pinned for the whole tween.
     if (stepFactor !== 1) this.timeScale.zoomAroundX(anim.anchorX, stepFactor);
-    this.fitPriceScaleToVisible();
+    // Per-frame refit is already continuous — snap, no second smoothing on top.
+    // A manually pinned scale (priceAutoFit off) is respected.
+    if (this.priceAutoFit) this.fitPriceScaleToVisible();
     this.scheduleRangeChange();
     this.markDirty();
     if (t < 1) {
@@ -711,7 +771,7 @@ export class ChartCore {
     const stepFactor = this.timeScale.state.pxPerMs / anim.toPxPerMs;
     if (stepFactor !== 1) {
       this.timeScale.zoomAroundX(anim.anchorX, stepFactor);
-      this.fitPriceScaleToVisible();
+      if (this.priceAutoFit) this.fitPriceScaleToVisible();
       this.scheduleRangeChange();
       this.markDirty();
     }
@@ -746,7 +806,8 @@ export class ChartCore {
     };
   }
 
-  private fitPriceScaleToVisible(): void {
+  /** Min/max price of the candles inside the visible time window (null when none). */
+  private visiblePriceExtent(): { lo: number; hi: number } | null {
     const { fromTime, toTime } = this.timeScale.visibleRange();
     let lo = Infinity;
     let hi = -Infinity;
@@ -755,8 +816,61 @@ export class ChartCore {
       if (k.low < lo) lo = k.low;
       if (k.high > hi) hi = k.high;
     }
-    if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo === hi) return;
-    this.priceScale.fit(lo, hi, 0.08);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo === hi) return null;
+    return { lo, hi };
+  }
+
+  /**
+   * Fit the price scale to the visible candles. `animate: true` glides toward the target
+   * (smoothed in `loop()`, retargeted by repeated calls — pans/flings/live ticks);
+   * `animate: false` snaps. A target far from the current range (fresh load, order-of-
+   * magnitude jump) always snaps — see `isNearRange`.
+   */
+  private fitPriceScaleToVisible(animate = false): void {
+    const ext = this.visiblePriceExtent();
+    if (!ext) return;
+    const target = fitTarget(ext.lo, ext.hi, 0.08);
+    const current: PriceRange = { min: this.priceScale.state.priceMin, max: this.priceScale.state.priceMax };
+    if (!animate || !isNearRange(current, target)) {
+      this.priceScale.state.priceMin = target.min;
+      this.priceScale.state.priceMax = target.max;
+      this.priceFitTarget = null;
+      this.priceFitLastT = 0;
+      return;
+    }
+    if (!this.priceFitTarget) this.priceFitLastT = 0; // starting from idle → fresh dt baseline
+    this.priceFitTarget = target;
+    this.markDirty();
+  }
+
+  /**
+   * Manual-mode guard for data swaps: if the incoming candles don't intersect the pinned
+   * range at all the chart would render blank, so auto-fit re-arms and snaps into view.
+   */
+  private refitIfDataInvisible(): void {
+    const ext = this.visiblePriceExtent();
+    if (!ext) return;
+    const current: PriceRange = { min: this.priceScale.state.priceMin, max: this.priceScale.state.priceMax };
+    if (rangesOverlap(current, { min: ext.lo, max: ext.hi })) return;
+    this.priceAutoFit = true;
+    this.fitPriceScaleToVisible(false);
+  }
+
+  /** Advance the smoothed price fit one frame (called from `loop()`). */
+  private advancePriceFit(now: number): void {
+    const target = this.priceFitTarget;
+    if (!target) return;
+    const dt = this.priceFitLastT ? Math.min(now - this.priceFitLastT, 50) : 1000 / 60;
+    this.priceFitLastT = now;
+    const current: PriceRange = { min: this.priceScale.state.priceMin, max: this.priceScale.state.priceMax };
+    const { next, done } = smoothStep(current, target, dt, PRICE_FIT_TAU_MS);
+    this.priceScale.state.priceMin = next.min;
+    this.priceScale.state.priceMax = next.max;
+    if (done) {
+      this.priceFitTarget = null;
+      this.priceFitLastT = 0;
+    }
+    this.markDirty();
   }
 
   private scheduleRangeChange(): void {
@@ -771,7 +885,9 @@ export class ChartCore {
     this.dirty = true;
   }
 
-  private loop = (): void => {
+  private loop = (now?: number): void => {
+    // Smoothed price fit runs inside the existing render loop — no extra rAF chain.
+    if (this.priceFitTarget) this.advancePriceFit(now ?? performance.now());
     if (this.dirty) {
       this.dirty = false;
       this.render();
