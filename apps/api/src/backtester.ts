@@ -184,9 +184,49 @@ export function runMaCrossBacktest(
   // results stay byte-identical; realism ON takes the extended walk.
   const realism = normalizeRealism(options);
   const trades: BacktestTrade[] = realism
-    ? buildRealismTrades(candles, config, gated, rsiVals, realism)
-    : buildLegacyTrades(candles, config, gated, rsiVals);
+    ? buildRealismTrades(candles, config.ma.source, gated, rsiVals, realism)
+    : buildLegacyTrades(candles, config.ma.source, gated, rsiVals);
 
+  return buildResult(trades, interval);
+}
+
+/**
+ * Strategy-signal backtester — the PulseScript Strategy Tester core. Takes an arbitrary
+ * ordered list of {bar index, side} entry signals (e.g. a script's `mark buy` / `mark sell`
+ * output) and runs the EXACT same trade model as the MA-cross backtester: enter at the
+ * signal bar's close, exit + flip on the next opposite signal, ignore same-side re-entries,
+ * close at end-of-data; optional realism layer (commission / slippage / SL / TP) identical
+ * to `runMaCrossBacktest`'s. Fills use the bar CLOSE (marks may carry a label price like
+ * the bar low — that's where the label draws, not where an order would fill).
+ */
+export interface StrategySignal {
+  index: number;
+  side: 'buy' | 'sell';
+}
+
+export function runSignalBacktest(
+  candles: ReadonlyArray<Candle>,
+  signals: ReadonlyArray<StrategySignal>,
+  interval: string,
+  options?: BacktestRealismOptions,
+): BacktestResult {
+  if (candles.length === 0) return emptyResult();
+  const gated: GatedCross[] = signals
+    .filter((s) => Number.isInteger(s.index) && s.index >= 0 && s.index < candles.length)
+    .slice()
+    .sort((a, b) => a.index - b.index);
+  if (gated.length === 0) return emptyResult();
+
+  const realism = normalizeRealism(options);
+  const trades: BacktestTrade[] = realism
+    ? buildRealismTrades(candles, 'close', gated, null, realism)
+    : buildLegacyTrades(candles, 'close', gated, null);
+
+  return buildResult(trades, interval);
+}
+
+/** Equity compounding + summary stats shared by every backtest entry point. */
+function buildResult(trades: BacktestTrade[], interval: string): BacktestResult {
   // Compound equity from a base of 100.
   const equity: BacktestEquityPoint[] = [];
   let cur = 100;
@@ -252,7 +292,7 @@ interface GatedCross {
  */
 function buildLegacyTrades(
   candles: ReadonlyArray<Candle>,
-  config: MaCrossAlertConfig,
+  source: MaCrossAlertConfig['ma']['source'],
   gated: ReadonlyArray<GatedCross>,
   rsiVals: Float64Array | null,
 ): BacktestTrade[] {
@@ -263,7 +303,7 @@ function buildLegacyTrades(
     const bar = candles[c.index];
     if (!bar) continue;
     if (open && open.side === c.side) continue; // ignore re-entries
-    const price = pickSource(bar, config.ma.source);
+    const price = pickSource(bar, source);
     if (open) {
       // Opposite cross — close the prior trade.
       const entry = candles[open.entryIdx]!;
@@ -287,14 +327,15 @@ function buildLegacyTrades(
       side: c.side,
       entryIdx: c.index,
       entryPrice: price,
-      rsi: config.rsiFilter && rsiVals ? rsiVals[c.index] : undefined,
+      // rsiVals is non-null only when the caller configured an RSI filter.
+      rsi: rsiVals ? rsiVals[c.index] : undefined,
     };
   }
 
   // Close any still-open position at the last candle to keep stats honest.
   if (open) {
     const last = candles[candles.length - 1]!;
-    const lastPrice = pickSource(last, config.ma.source);
+    const lastPrice = pickSource(last, source);
     const entry = candles[open.entryIdx]!;
     const pnl =
       open.side === 'buy'
@@ -331,7 +372,7 @@ function buildLegacyTrades(
  */
 function buildRealismTrades(
   candles: ReadonlyArray<Candle>,
-  config: MaCrossAlertConfig,
+  source: MaCrossAlertConfig['ma']['source'],
   gated: ReadonlyArray<GatedCross>,
   rsiVals: Float64Array | null,
   r: ActiveRealism,
@@ -394,7 +435,7 @@ function buildRealismTrades(
       const c = gated[gi]!;
       gi += 1;
       if (open && open.side === c.side) continue; // ignore re-entries (matches v1)
-      const raw = pickSource(bar, config.ma.source);
+      const raw = pickSource(bar, source);
       if (open) {
         close(open, i, raw, 'cross');
         open = null;
@@ -417,7 +458,7 @@ function buildRealismTrades(
               ? entryFill * (1 + r.takeProfitPct / 100)
               : entryFill * (1 - r.takeProfitPct / 100)
             : undefined,
-        rsi: config.rsiFilter && rsiVals ? rsiVals[i] : undefined,
+        rsi: rsiVals ? rsiVals[i] : undefined,
       };
     }
   }
@@ -425,7 +466,7 @@ function buildRealismTrades(
   // Close any still-open position at the last candle to keep stats honest.
   if (open) {
     const lastIdx = candles.length - 1;
-    close(open, lastIdx, pickSource(candles[lastIdx]!, config.ma.source), 'end');
+    close(open, lastIdx, pickSource(candles[lastIdx]!, source), 'end');
   }
   return trades;
 }

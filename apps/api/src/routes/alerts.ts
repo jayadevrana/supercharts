@@ -8,7 +8,8 @@ import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS, SYMBOL_CATALOG, getCatalogSym
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
-import { runMaCrossBacktest } from '../backtester';
+import { runMaCrossBacktest, runSignalBacktest } from '../backtester';
+import { runScript } from '@supercharts/script-lang';
 import { runOptimizer, type OptimizeRequest } from '../optimizer';
 import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
 import { previewSizing, latestAtr } from '../position-sizer';
@@ -598,6 +599,104 @@ export function alertRoutes(
       config,
       barsTested: candles.length,
       // Echo the applied realism layer so the client can label the run honestly.
+      ...(realism ? { realism } : {}),
+      ...result,
+    };
+  });
+
+  /* ─── Strategy backtest: PulseScript → Strategy Tester (TradingView model) ─── */
+  // Runs the user's PulseScript over real candles SERVER-SIDE (same sandbox the chart
+  // uses: loop caps + wall-clock timeout), takes its `mark buy` / `mark sell` output as
+  // entry signals, and feeds them through the SAME signal backtester the MA-cross path
+  // uses. The marks the user sees on the chart ARE the entries being tested — nothing
+  // is fabricated, and a script error comes back as a line-numbered 400.
+  fastify.post('/api/backtest/script', async (req, reply) => {
+    getUser(req, db); // demo-scoped; pure compute, no persistence
+    const body = (req.body ?? {}) as {
+      symbol?: string;
+      interval?: string;
+      source?: string;
+      inputs?: Record<string, number | boolean | string>;
+      commissionPct?: number;
+      slippagePct?: number;
+      stopLossPct?: number;
+      takeProfitPct?: number;
+    };
+    const symbol = String(body.symbol ?? '').trim();
+    const interval = String(body.interval ?? '').trim() as Interval;
+    const source = typeof body.source === 'string' ? body.source : '';
+    if (!symbol || !interval) {
+      reply.code(400);
+      return { error: 'symbol_and_interval_required' };
+    }
+    if (!source.trim()) {
+      reply.code(400);
+      return { error: 'empty_script' };
+    }
+
+    const pct = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    const commissionPct = pct(body.commissionPct);
+    const slippagePct = pct(body.slippagePct);
+    const stopLossPct = pct(body.stopLossPct);
+    const takeProfitPct = pct(body.takeProfitPct);
+    const realism =
+      commissionPct != null || slippagePct != null || stopLossPct != null || takeProfitPct != null
+        ? { commissionPct, slippagePct, stopLossPct, takeProfitPct }
+        : undefined;
+
+    const desired = 1000;
+    let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+          candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          console.warn('[backtest/script] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+
+    let run;
+    try {
+      run = runScript(source, candles, { inputs: body.inputs, timeoutMs: 2000 });
+    } catch (err) {
+      reply.code(400);
+      return { error: 'script_error', message: err instanceof Error ? err.message : String(err) };
+    }
+
+    const signals = run.marks
+      .filter((m): m is typeof m & { kind: 'buy' | 'sell' } => m.kind === 'buy' || m.kind === 'sell')
+      .map((m) => ({ index: m.bar, side: m.kind }));
+    if (signals.length === 0) {
+      reply.code(400);
+      return {
+        error: 'no_signals',
+        message:
+          'The script produced no `mark buy` / `mark sell` signals on this data — the Strategy Tester needs entry marks to trade.',
+      };
+    }
+
+    const result = runSignalBacktest(candles, signals, interval, realism);
+    return {
+      symbol,
+      interval,
+      barsTested: candles.length,
+      script: {
+        name: typeof run.meta.name === 'string' ? run.meta.name : 'Strategy',
+        buySignals: signals.filter((s) => s.side === 'buy').length,
+        sellSignals: signals.filter((s) => s.side === 'sell').length,
+      },
       ...(realism ? { realism } : {}),
       ...result,
     };

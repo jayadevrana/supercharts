@@ -808,7 +808,21 @@ class Interpreter {
     } else {
       const min = named.has('min') ? constNum(named.get('min'), -Infinity) : positional[2] ? constNum(positional[2], -Infinity) : undefined;
       const max = named.has('max') ? constNum(named.get('max'), Infinity) : positional[3] ? constNum(positional[3], Infinity) : undefined;
-      let dflt = constNum(positional[0], 0);
+      // A non-numeric default is ALWAYS a script mistake — usually the habit (from other
+      // platforms) of writing the title first. Guessing a default here silently changes
+      // every number the strategy produces, so fail loud with the correct signature.
+      let dflt = 0;
+      if (positional[0]) {
+        const v = this.evalExpr(positional[0], 0, null);
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          throw new RuntimeError(
+            `input.num default must be a number — the signature is input.num(default, title?, min:, max:), e.g. input.num(9, "Fast EMA", min: 2)`,
+            call.pos.line,
+            call.pos.col,
+          );
+        }
+        dflt = v;
+      }
       if (min != null) dflt = Math.max(dflt, min); // a default below its own min would otherwise outrank an identical override
       if (max != null) dflt = Math.min(dflt, max);
       def = { id: '', kind, title, default: dflt };

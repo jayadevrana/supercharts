@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, X, ChevronDown } from 'lucide-react';
+import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, ChevronDown, FlaskConical, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -20,6 +20,39 @@ interface SavedScript {
   name: string;
   source: string;
   updatedAt: number;
+}
+
+/** Result of POST /api/backtest/script — the script's marks backtested on real candles. */
+interface ScriptBacktest {
+  symbol: string;
+  interval: string;
+  barsTested: number;
+  script: { name: string; buySignals: number; sellSignals: number };
+  realism?: { commissionPct?: number; slippagePct?: number; stopLossPct?: number; takeProfitPct?: number };
+  trades: Array<{
+    side: 'buy' | 'sell';
+    entryTime: number;
+    entryPrice: number;
+    exitTime: number;
+    exitPrice: number;
+    bars: number;
+    pnlPercent: number;
+    exitReason?: 'cross' | 'stop' | 'target' | 'end';
+  }>;
+  equity: Array<{ time: number; equity: number; drawdown: number }>;
+  summary: {
+    trades: number;
+    wins: number;
+    losses: number;
+    winRate: number;
+    totalReturnPct: number;
+    maxDrawdownPct: number;
+    sharpe: number;
+    profitFactor: number;
+    avgWinPct: number;
+    avgLossPct: number;
+    avgBars: number;
+  };
 }
 
 // CodeMirror 6 is heavy + browser-only — lazy-load it so it never enters the SSR/initial bundle.
@@ -49,6 +82,15 @@ export function PulseEditorPanel() {
 
   const [draft, setDraft] = useState(pane.pulse.source);
   const [height, setHeight] = useState(DEFAULT_H);
+  // Right column: Console (run output + inputs) | Strategy Tester (backtest of the marks).
+  const [rightTab, setRightTab] = useState<'console' | 'tester'>('console');
+  const [btRunning, setBtRunning] = useState(false);
+  const [btResult, setBtResult] = useState<ScriptBacktest | null>(null);
+  const [btError, setBtError] = useState<string | null>(null);
+  const [commission, setCommission] = useState('');
+  const [slippage, setSlippage] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+  const [takeProfit, setTakeProfit] = useState('');
   const [saved, setSaved] = useState<SavedScript[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [currentName, setCurrentName] = useState('');
@@ -95,6 +137,42 @@ export function PulseEditorPanel() {
   const run = (): void => {
     setPulseSource(pane.id, draft);
     if (!pane.pulse.enabled) setPulseEnabled(pane.id, true);
+  };
+
+  // Strategy Tester: run THIS script server-side over real candles and backtest its
+  // mark buy/sell output (same trade model + realism layer as the MA-cross tester).
+  const runBacktest = async (): Promise<void> => {
+    setRightTab('tester');
+    setBtRunning(true);
+    setBtError(null);
+    // Also push the script to the chart so the user SEES the marks being traded.
+    run();
+    const pct = (s: string): number | undefined => {
+      const v = parseFloat(s);
+      return Number.isFinite(v) && v > 0 ? v : undefined;
+    };
+    try {
+      const r = await api<ScriptBacktest>('/backtest/script', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbol: pane.symbol,
+          interval: pane.interval,
+          source: draft,
+          inputs: pane.pulse.inputValues,
+          ...(pct(commission) != null ? { commissionPct: pct(commission) } : {}),
+          ...(pct(slippage) != null ? { slippagePct: pct(slippage) } : {}),
+          ...(pct(stopLoss) != null ? { stopLossPct: pct(stopLoss) } : {}),
+          ...(pct(takeProfit) != null ? { takeProfitPct: pct(takeProfit) } : {}),
+        }),
+      });
+      setBtResult(r);
+    } catch (err) {
+      setBtResult(null);
+      // The API returns line-numbered script errors as 400 {error, message} — show them verbatim.
+      setBtError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBtRunning(false);
+    }
   };
 
   const doSave = async (): Promise<void> => {
@@ -230,6 +308,9 @@ export function PulseEditorPanel() {
           <Button size="sm" className="gap-1" onClick={run}>
             <Play className="h-3.5 w-3.5" /> Run
           </Button>
+          <Button size="sm" variant="outline" className="gap-1" onClick={() => void runBacktest()} disabled={btRunning} title="Backtest this script's buy/sell marks on real candles">
+            {btRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />} Backtest
+          </Button>
           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground" onClick={() => setOpen(false)} title="Close editor">
             <ChevronDown className="h-4 w-4" />
           </Button>
@@ -248,21 +329,171 @@ export function PulseEditorPanel() {
             style={{ fontSize: 13 }}
           />
         </div>
-        <div className="flex min-h-0 flex-col gap-3 overflow-auto p-3 text-xs scroll-thin">
-          <ConsolePanel result={result} enabled={pane.pulse.enabled} />
-          <InputsPanel
-            inputs={result?.inputs ?? []}
-            values={pane.pulse.inputValues}
-            onChange={(id, v) => setPulseInput(pane.id, id, v)}
-          />
-          <p className="mt-auto leading-relaxed text-[10px] text-muted-foreground/70">
-            PulseScript is SuperCharts&apos; own language — <code>let</code>/<code>persist</code>,{' '}
-            <code>ema(close, n)</code>, <code>crossOver</code>, <code>draw line</code>, <code>mark buy</code>,{' '}
-            <code>input.num</code>. TA/math reuse the same engine as the chart&apos;s indicators.
-          </p>
+        <div className="flex min-h-0 flex-col text-xs">
+          {/* Right-column tabs — TradingView's Pine Editor / Strategy Tester split. */}
+          <div className="flex shrink-0 border-b border-border">
+            {(['console', 'tester'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setRightTab(t)}
+                className={`flex-1 px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+                  rightTab === t ? 'border-b-2 border-accent text-accent' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t === 'console' ? 'Console' : 'Strategy Tester'}
+              </button>
+            ))}
+          </div>
+          {rightTab === 'console' ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scroll-thin">
+              <ConsolePanel result={result} enabled={pane.pulse.enabled} />
+              <InputsPanel
+                inputs={result?.inputs ?? []}
+                values={pane.pulse.inputValues}
+                onChange={(id, v) => setPulseInput(pane.id, id, v)}
+              />
+              <p className="mt-auto leading-relaxed text-[10px] text-muted-foreground/70">
+                PulseScript is SuperCharts&apos; own language — <code>let</code>/<code>persist</code>,{' '}
+                <code>ema(close, n)</code>, <code>crossOver</code>, <code>draw line</code>, <code>mark buy</code>,{' '}
+                <code>input.num</code>. TA/math reuse the same engine as the chart&apos;s indicators.
+              </p>
+            </div>
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 scroll-thin">
+              {/* Realism layer — blank = OFF (plain model). */}
+              <div className="grid grid-cols-2 gap-1.5">
+                {(
+                  [
+                    ['Commission %/side', commission, setCommission],
+                    ['Slippage %', slippage, setSlippage],
+                    ['Stop loss %', stopLoss, setStopLoss],
+                    ['Take profit %', takeProfit, setTakeProfit],
+                  ] as const
+                ).map(([label, value, set]) => (
+                  <label key={label} className="flex flex-col gap-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    {label}
+                    <Input type="number" min={0} step="0.01" placeholder="off" value={value} onChange={(e) => set(e.target.value)} className="h-7 text-xs" />
+                  </label>
+                ))}
+              </div>
+              <Button size="sm" className="h-8 gap-1.5" onClick={() => void runBacktest()} disabled={btRunning}>
+                {btRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FlaskConical className="h-3.5 w-3.5" />}
+                Backtest on {formatSymbolLabel(pane.symbol)} · {pane.interval}
+              </Button>
+
+              {btError ? (
+                <div className="rounded-md border border-bear/40 bg-bear/10 p-2.5">
+                  <div className="mb-1 flex items-center gap-1.5 font-semibold text-bear">
+                    <TriangleAlert className="h-3.5 w-3.5" /> Backtest failed
+                  </div>
+                  <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-bear">{btError}</pre>
+                </div>
+              ) : null}
+
+              {btResult ? <TesterReport r={btResult} /> : !btError ? (
+                <div className="rounded-md border border-border bg-surface-raised/60 p-2.5 text-muted-foreground">
+                  Press <span className="font-medium text-foreground">Backtest</span> — your script&apos;s{' '}
+                  <code>mark buy</code> / <code>mark sell</code> become the entries: enter at the mark&apos;s
+                  bar close, exit + flip on the next opposite mark. The same marks render on the chart, so
+                  you can verify every trade against real candles.
+                </div>
+              ) : null}
+            </div>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+function TesterReport({ r }: { r: ScriptBacktest }) {
+  const s = r.summary;
+  const fmtPct = (n: number, dp = 1): string => `${n >= 0 ? '+' : ''}${n.toFixed(dp)}%`;
+  const eq = r.equity.map((p) => p.equity);
+  const stats: Array<[string, string, 'pos' | 'neg' | undefined]> = [
+    ['Net return', fmtPct(s.totalReturnPct, 2), s.totalReturnPct >= 0 ? 'pos' : 'neg'],
+    ['Win rate', `${(s.winRate * 100).toFixed(0)}% (${s.wins}W/${s.losses}L)`, undefined],
+    ['Trades', `${s.trades} · avg ${s.avgBars.toFixed(0)} bars`, undefined],
+    ['Profit factor', Number.isFinite(s.profitFactor) ? s.profitFactor.toFixed(2) : '∞', undefined],
+    ['Max drawdown', fmtPct(-s.maxDrawdownPct), 'neg'],
+    ['Sharpe', s.sharpe.toFixed(2), undefined],
+  ];
+  return (
+    <>
+      <div className="rounded-md border border-bull/40 bg-bull/10 p-2">
+        <div className="flex items-center gap-1.5 font-semibold text-bull">
+          <CheckCircle2 className="h-3.5 w-3.5" /> {r.script.name}
+        </div>
+        <div className="text-[10px] text-muted-foreground">
+          {r.barsTested} real candles · {r.script.buySignals} buy / {r.script.sellSignals} sell marks
+          {r.realism ? ' · realism on' : ''}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        {stats.map(([label, value, tone]) => (
+          <div key={label} className="rounded-md border border-border bg-surface-raised/40 px-2 py-1.5">
+            <div className="text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{label}</div>
+            <div className={`text-[11px] font-semibold tabular-nums ${tone === 'pos' ? 'text-bull' : tone === 'neg' ? 'text-bear' : 'text-foreground'}`}>{value}</div>
+          </div>
+        ))}
+      </div>
+      {eq.length >= 2 ? (
+        <div className="rounded-md border border-border bg-surface-raised/40 p-2">
+          <div className="mb-1 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">Equity (base 100)</div>
+          <svg viewBox="0 0 260 48" preserveAspectRatio="none" className="block h-12 w-full">
+            {(() => {
+              const min = Math.min(100, ...eq);
+              const max = Math.max(100, ...eq);
+              const span = max - min || 1;
+              const pts = eq.map((v, i) => `${(i / (eq.length - 1)) * 260},${48 - ((v - min) / span) * 48}`).join(' ');
+              const baseY = 48 - ((100 - min) / span) * 48;
+              const up = eq[eq.length - 1]! >= 100;
+              return (
+                <>
+                  <line x1={0} y1={baseY} x2={260} y2={baseY} stroke="currentColor" className="text-border" strokeWidth={1} strokeDasharray="3 3" />
+                  <polyline points={pts} fill="none" stroke="currentColor" className={up ? 'text-bull' : 'text-bear'} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                </>
+              );
+            })()}
+          </svg>
+        </div>
+      ) : null}
+      <div className="overflow-hidden rounded-md border border-border">
+        <table className="w-full text-left text-[10px]">
+          <thead className="bg-surface-raised/60 text-[8px] uppercase tracking-[0.1em] text-muted-foreground">
+            <tr>
+              <th className="px-1.5 py-1">Side</th>
+              <th className="px-1.5 py-1">Entry → Exit</th>
+              <th className="px-1.5 py-1 text-right">P&L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {r.trades.slice(-25).reverse().map((t, i) => (
+              <tr key={`${t.entryTime}-${i}`} className="border-t border-border/60">
+                <td className="px-1.5 py-0.5">
+                  <span className={`inline-flex items-center gap-0.5 ${t.side === 'buy' ? 'text-bull' : 'text-bear'}`}>
+                    {t.side === 'buy' ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
+                    {t.side === 'buy' ? 'L' : 'S'}
+                  </span>
+                  {t.exitReason && t.exitReason !== 'cross' ? (
+                    <span className="ml-1 rounded bg-muted px-1 text-[8px] uppercase text-muted-foreground">{t.exitReason}</span>
+                  ) : null}
+                </td>
+                <td className="px-1.5 py-0.5 tabular-nums text-muted-foreground">
+                  {new Date(t.entryTime).toLocaleDateString([], { month: 'short', day: 'numeric' })} → {new Date(t.exitTime).toLocaleDateString([], { month: 'short', day: 'numeric' })} · {t.bars}b
+                </td>
+                <td className={`px-1.5 py-0.5 text-right tabular-nums font-medium ${t.pnlPercent >= 0 ? 'text-bull' : 'text-bear'}`}>{fmtPct(t.pnlPercent, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="leading-relaxed text-[9px] text-muted-foreground/70">
+        Real backtest of your script&apos;s marks on the last {r.barsTested} closed candles. Entries fill at
+        the mark bar&apos;s close; exit + flip on the next opposite mark{r.realism ? '; SL/TP assume worst-case intrabar ordering' : ''}.
+        No fees/slippage unless set above. Compounded from base 100, no position sizing.
+      </p>
+    </>
   );
 }
 

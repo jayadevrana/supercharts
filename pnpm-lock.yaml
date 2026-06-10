@@ -68,6 +68,9 @@ importers:
       '@supercharts/market-data':
         specifier: workspace:*
         version: link:../../packages/market-data
+      '@supercharts/script-lang':
+        specifier: workspace:*
+        version: link:../../packages/script-lang
       '@supercharts/types':
         specifier: workspace:*
         version: link:../../packages/types

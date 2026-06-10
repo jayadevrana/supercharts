@@ -21,6 +21,7 @@
     "@supercharts/indicators": "workspace:*",
     "@supercharts/ingestion": "workspace:*",
     "@supercharts/market-data": "workspace:*",
+    "@supercharts/script-lang": "workspace:*",
     "@supercharts/types": "workspace:*",
     "fastify": "^5.1.0",
     "nanoid": "^5.0.7",
