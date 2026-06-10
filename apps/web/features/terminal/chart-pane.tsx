@@ -319,6 +319,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       if (e.key === 'Delete' || e.key === 'Backspace') {
         controller.deleteSelected();
       } else if (e.key === 'Escape') {
+        controller.cancelDraft();
         setDrawTool(null);
       }
     };

@@ -40,7 +40,16 @@ interface DraftState {
   points: ChartPoint[];
   style: DrawingStyle;
   textPrompt?: string;
+  /** Pixel position of the first pointerdown — used to tell a click from a drag. */
+  startX: number;
+  startY: number;
+  /** True once the first gesture ended as a CLICK: the draft stays live and follows the
+   *  cursor until a second click finalizes it (TradingView click-move-click placement). */
+  armed: boolean;
 }
+
+/** Pointer travel (px) below which a down→up gesture counts as a click, not a drag. */
+const CLICK_TOLERANCE_PX = 6;
 
 /**
  * Owns the drawing lifecycle on a ChartCore: creation by pointer, selection, drag, delete.
@@ -197,26 +206,61 @@ export class DrawingController {
     }
 
     if (TWO_POINT_TYPES.has(type)) {
+      // Two placement gestures, both supported (TradingView accepts both):
+      //   1. click-move-click — click anchors point A, the preview follows the cursor,
+      //      a second click drops point B. This is the gesture TV users reach for first.
+      //   2. press-drag-release — drag from A to B in one motion.
+      // A down→up with < CLICK_TOLERANCE_PX of travel is a click; finalizing on it would
+      // create an invisible zero-length drawing and silently eat the gesture (the original
+      // bug: "drawing tools don't work" for anyone who clicks instead of drags).
       if (e.type === 'pointerdown') {
+        if (this.draft?.armed) {
+          // Second click — drop point B and finalize.
+          this.draft.points[1] = { time: e.time, price: e.price };
+          this.finalizeDraft();
+          return;
+        }
         this.draft = {
           type,
           points: [{ time: e.time, price: e.price }, { time: e.time, price: e.price }],
           style: defaultStyle(type),
+          startX: e.x,
+          startY: e.y,
+          armed: false,
         };
       } else if (this.draft && e.type === 'pointermove') {
         this.draft.points[1] = { time: e.time, price: e.price };
         const provisional: DrawingObject = this.draftToDrawing(this.draft);
         this.core.setDrawings([...this.drawings, provisional]);
       } else if (this.draft && e.type === 'pointerup') {
+        const travel = Math.hypot(e.x - this.draft.startX, e.y - this.draft.startY);
+        if (travel < CLICK_TOLERANCE_PX) {
+          // It was a click — arm the draft and keep following the cursor until click #2.
+          this.draft.armed = true;
+          return;
+        }
+        // It was a drag — finalize at the release point.
         this.draft.points[1] = { time: e.time, price: e.price };
-        const drawing = this.draftToDrawing(this.draft);
-        this.drawings.push(drawing);
-        this.core.setDrawings(this.drawings);
-        void this.handlers.onCreate(drawing);
-        this.draft = null;
-        this.clearTool();
+        this.finalizeDraft();
       }
     }
+  }
+
+  private finalizeDraft(): void {
+    if (!this.draft) return;
+    const drawing = this.draftToDrawing(this.draft);
+    this.drawings.push(drawing);
+    this.core.setDrawings(this.drawings);
+    void this.handlers.onCreate(drawing);
+    this.draft = null;
+    this.clearTool();
+  }
+
+  /** Public — abort an in-progress placement (Escape) and erase the preview. */
+  cancelDraft(): void {
+    if (!this.draft) return;
+    this.draft = null;
+    this.core.setDrawings(this.drawings);
   }
 
   private draftToDrawing(d: DraftState): DrawingObject {
