@@ -51,6 +51,22 @@ export interface ChartPointerEvent {
   metaKey: boolean;
 }
 
+// ---- Interaction feel tuning (momentum pan + eased wheel zoom) ----
+/** Pointermove samples older than this stop contributing to the fling velocity. */
+const FLING_SAMPLE_WINDOW_MS = 120;
+/** If the pointer was held still this long before release, it's a positioning drag — no fling. */
+const FLING_RELEASE_STALE_MS = 80;
+/** Minimum release speed (px/ms) for inertia to kick in. */
+const FLING_MIN_SPEED = 0.08;
+/** Release speed cap (px/ms) so a wild throw doesn't launch the chart into orbit. */
+const FLING_MAX_SPEED = 3.5;
+/** Inertia velocity decay per 60Hz frame (normalized to real frame time). */
+const INERTIA_DECAY_PER_FRAME = 0.95;
+/** Inertia stops once speed falls under this epsilon (px/ms). */
+const INERTIA_STOP_SPEED = 0.02;
+/** Duration of one eased wheel-zoom tween; rapid wheel events retarget it instead of stacking. */
+const WHEEL_ZOOM_MS = 120;
+
 export class ChartCore {
   readonly canvas: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
@@ -82,6 +98,14 @@ export class ChartCore {
   private autoFollow = true;
   private rangeChangeTimer: ReturnType<typeof setTimeout> | null = null;
   private opts: ChartCoreOptions;
+  /** Recent pointermove samples while panning — used to derive the release (fling) velocity. */
+  private panSamples: Array<{ t: number; x: number; y: number }> = [];
+  /** rAF id of the momentum-pan loop (0 when idle). */
+  private inertiaRafId = 0;
+  /** rAF id of the eased wheel-zoom tween (0 when idle). */
+  private wheelZoomRafId = 0;
+  /** In-flight wheel-zoom tween. Rapid wheel events retarget this object rather than stacking. */
+  private wheelZoom: { fromPxPerMs: number; toPxPerMs: number; anchorX: number; start: number } | null = null;
 
   constructor(opts: ChartCoreOptions) {
     this.opts = opts;
@@ -136,6 +160,8 @@ export class ChartCore {
   destroy(): void {
     if (this.rafId) cancelAnimationFrame(this.rafId);
     if (this.firstLayoutRafId) cancelAnimationFrame(this.firstLayoutRafId);
+    this.stopInertia();
+    this.cancelWheelZoom();
     this.resizeObserver?.disconnect();
     for (const off of this.removeListeners) off();
     this.removeListeners = [];
@@ -402,17 +428,31 @@ export class ChartCore {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      this.stopInertia();
       const rect = cvs.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const factor = e.deltaY > 0 ? 1.15 : 1 / 1.15;
-      this.timeScale.zoomAroundX(x, factor);
-      this.fitPriceScaleToVisible();
+      // Eased zoom: tween pxPerMs toward the target over a short rAF animation instead of
+      // jumping. A rapid wheel burst retargets the SAME tween (compounding the target and
+      // restarting from the current value) so steps coalesce rather than stack.
+      const targetPxPerMs =
+        (this.wheelZoom ? this.wheelZoom.toPxPerMs : this.timeScale.state.pxPerMs) / factor;
+      this.wheelZoom = {
+        fromPxPerMs: this.timeScale.state.pxPerMs,
+        toPxPerMs: targetPxPerMs,
+        anchorX: x,
+        start: performance.now(),
+      };
       this.autoFollow = false;
-      this.scheduleRangeChange();
-      this.markDirty();
+      if (!this.wheelZoomRafId) this.wheelZoomRafId = requestAnimationFrame(this.wheelZoomStep);
     };
 
     const onPointerDown = (e: PointerEvent) => {
+      // A fresh gesture interrupts leftover motion: kill momentum pan, and snap a mid-flight
+      // wheel zoom to its target so the tween can't re-anchor under the new gesture.
+      this.stopInertia();
+      this.finishWheelZoom();
+      this.panSamples.length = 0;
       cvs.setPointerCapture(e.pointerId);
       const rect = cvs.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -420,7 +460,10 @@ export class ChartCore {
       const suppressed = this.opts.shouldSuppressPan?.() ?? false;
       if (x >= this.geometry.axisPane.x) priceAxisDrag = true;
       else if (y >= this.geometry.timeAxisPane.y) timeAxisDrag = true;
-      else if (!suppressed) dragging = true;
+      else if (!suppressed) {
+        dragging = true;
+        this.panSamples.push({ t: performance.now(), x, y });
+      }
       lastX = x;
       lastY = y;
       this.opts.onPointerEvent?.(this.toPointerEvent('pointerdown', e, x, y));
@@ -435,6 +478,11 @@ export class ChartCore {
         this.priceScale.pan(y - lastY);
         this.autoFollow = false;
         this.scheduleRangeChange();
+        const now = performance.now();
+        this.panSamples.push({ t: now, x, y });
+        while (this.panSamples.length > 0 && now - this.panSamples[0]!.t > FLING_SAMPLE_WINDOW_MS) {
+          this.panSamples.shift();
+        }
       } else if (priceAxisDrag) {
         // Drag stretches the price range.
         const factor = 1 + (y - lastY) * 0.005;
@@ -461,6 +509,7 @@ export class ChartCore {
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      const wasPanning = dragging;
       dragging = false;
       priceAxisDrag = false;
       timeAxisDrag = false;
@@ -473,6 +522,14 @@ export class ChartCore {
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
       this.opts.onPointerEvent?.(this.toPointerEvent('pointerup', e, x, y));
+      // Momentum pan: only after a real chart pan. Drawing gestures never set `dragging`
+      // (shouldSuppressPan gated the pointerdown); re-check suppression at release too in
+      // case a draw tool was armed mid-gesture.
+      if (wasPanning && !(this.opts.shouldSuppressPan?.() ?? false)) {
+        const v = this.releaseVelocity();
+        if (v) this.startInertia(v.vx, v.vy);
+      }
+      this.panSamples.length = 0;
     };
 
     const onLeave = () => {
@@ -482,7 +539,9 @@ export class ChartCore {
     };
 
     const onDblClick = () => {
-      // Reset auto-follow and fit to data.
+      // Reset auto-follow and fit to data. Any leftover motion would fight the reset.
+      this.stopInertia();
+      this.cancelWheelZoom();
       this.autoFollow = true;
       const candles = this.frame.candles;
       if (candles.length > 0) {
@@ -533,6 +592,138 @@ export class ChartCore {
       () => cvs.removeEventListener('pointerleave', onLeave),
       () => cvs.removeEventListener('dblclick', onDblClick),
     );
+  }
+
+  // ---- Momentum pan (inertia) ----
+
+  /**
+   * Time-weighted release velocity (px/ms) from the recent pan samples: longer segments
+   * count proportionally more and recent segments dominate (exp decay over ~50ms), so a
+   * single jittery move can't dictate the fling. Returns null when the gesture doesn't
+   * qualify (too slow, too stale, or not enough samples).
+   */
+  private releaseVelocity(): { vx: number; vy: number } | null {
+    const samples = this.panSamples;
+    if (samples.length < 2) return null;
+    const now = performance.now();
+    const last = samples[samples.length - 1]!;
+    // Held still before letting go → a positioning drag, not a fling.
+    if (now - last.t > FLING_RELEASE_STALE_MS) return null;
+    let vx = 0;
+    let vy = 0;
+    let wsum = 0;
+    for (let i = 1; i < samples.length; i++) {
+      const a = samples[i - 1]!;
+      const b = samples[i]!;
+      const dt = b.t - a.t;
+      if (dt <= 0 || now - b.t > FLING_SAMPLE_WINDOW_MS) continue;
+      const w = dt * Math.exp(-(now - b.t) / 50);
+      vx += ((b.x - a.x) / dt) * w;
+      vy += ((b.y - a.y) / dt) * w;
+      wsum += w;
+    }
+    if (wsum <= 0) return null;
+    vx /= wsum;
+    vy /= wsum;
+    const speed = Math.hypot(vx, vy);
+    if (speed < FLING_MIN_SPEED) return null;
+    if (speed > FLING_MAX_SPEED) {
+      const k = FLING_MAX_SPEED / speed;
+      vx *= k;
+      vy *= k;
+    }
+    return { vx, vy };
+  }
+
+  /**
+   * Continue the pan with the release velocity, decaying ~0.95 per 60Hz frame
+   * (frame-rate normalized) until it falls under a small epsilon. The next
+   * pointerdown / wheel / dblclick stops it immediately.
+   */
+  private startInertia(vx0: number, vy0: number): void {
+    this.stopInertia();
+    let vx = vx0;
+    let vy = vy0;
+    let lastT = performance.now();
+    const step = (now: number): void => {
+      this.inertiaRafId = 0;
+      // Clamp dt so a background-tab stall can't teleport the chart on resume.
+      const dt = Math.min(Math.max(now - lastT, 0), 50);
+      lastT = now;
+      this.timeScale.pan(vx * dt);
+      this.priceScale.pan(vy * dt);
+      const decay = Math.pow(INERTIA_DECAY_PER_FRAME, dt / (1000 / 60));
+      vx *= decay;
+      vy *= decay;
+      this.autoFollow = false;
+      this.scheduleRangeChange();
+      this.markDirty();
+      if (Math.hypot(vx, vy) > INERTIA_STOP_SPEED) {
+        this.inertiaRafId = requestAnimationFrame(step);
+      }
+    };
+    this.inertiaRafId = requestAnimationFrame(step);
+  }
+
+  private stopInertia(): void {
+    if (this.inertiaRafId) {
+      cancelAnimationFrame(this.inertiaRafId);
+      this.inertiaRafId = 0;
+    }
+  }
+
+  // ---- Eased wheel zoom ----
+
+  private wheelZoomStep = (now: number): void => {
+    this.wheelZoomRafId = 0;
+    const anim = this.wheelZoom;
+    if (!anim) return;
+    const t = Math.min(1, (now - anim.start) / WHEEL_ZOOM_MS);
+    const eased = 1 - Math.pow(1 - t, 3); // easeOutCubic
+    // Interpolate in log space so every frame is an equal zoom *ratio* — linear pxPerMs
+    // interpolation feels lopsided across a large retargeted step.
+    const lnFrom = Math.log(anim.fromPxPerMs);
+    const lnTo = Math.log(anim.toPxPerMs);
+    const desired = Math.exp(lnFrom + (lnTo - lnFrom) * eased);
+    const stepFactor = this.timeScale.state.pxPerMs / desired;
+    // zoomAroundX divides pxPerMs by the factor and re-anchors rightTime, so the time
+    // under the cursor stays pinned for the whole tween.
+    if (stepFactor !== 1) this.timeScale.zoomAroundX(anim.anchorX, stepFactor);
+    this.fitPriceScaleToVisible();
+    this.scheduleRangeChange();
+    this.markDirty();
+    if (t < 1) {
+      this.wheelZoomRafId = requestAnimationFrame(this.wheelZoomStep);
+    } else {
+      this.wheelZoom = null;
+    }
+  };
+
+  /** Snap an in-flight wheel zoom to its target (used when a pointer gesture interrupts it). */
+  private finishWheelZoom(): void {
+    if (this.wheelZoomRafId) {
+      cancelAnimationFrame(this.wheelZoomRafId);
+      this.wheelZoomRafId = 0;
+    }
+    const anim = this.wheelZoom;
+    if (!anim) return;
+    this.wheelZoom = null;
+    const stepFactor = this.timeScale.state.pxPerMs / anim.toPxPerMs;
+    if (stepFactor !== 1) {
+      this.timeScale.zoomAroundX(anim.anchorX, stepFactor);
+      this.fitPriceScaleToVisible();
+      this.scheduleRangeChange();
+      this.markDirty();
+    }
+  }
+
+  /** Drop an in-flight wheel zoom where it is (dblclick fit overrides it; destroy). */
+  private cancelWheelZoom(): void {
+    if (this.wheelZoomRafId) {
+      cancelAnimationFrame(this.wheelZoomRafId);
+      this.wheelZoomRafId = 0;
+    }
+    this.wheelZoom = null;
   }
 
   private toPointerEvent(
