@@ -15,10 +15,43 @@ import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart
  *   - PnL% per trade = (exit - entry) / entry × 100 for BUY, mirrored for SELL.
  *   - Equity is a multiplicative compound of (1 + pnl%/100) starting at 100.
  *
- * v1 NOT included (intentional): leverage, slippage, fees, SL/TP, fractional sizing,
- * cooldowns, multi-position, max-trades-per-day. Those land in Phase 1 #3+ once the
- * basic shape proves out.
+ * v1 NOT included (intentional): leverage, fractional sizing, cooldowns,
+ * multi-position, max-trades-per-day.
+ *
+ * REALISM options (opt-in, all OFF by default — see `BacktestRealismOptions`): when ANY
+ * of commission / slippage / SL / TP is set, the trade walk switches to an extended
+ * model. When none is set, the walk is the exact v1 path above, so results stay
+ * byte-identical to the legacy backtester (regression-tested).
  */
+
+export type BacktestExitReason = 'cross' | 'stop' | 'target' | 'end';
+
+/**
+ * Optional realism layer. Every field defaults to OFF (undefined); non-finite or <= 0
+ * values are treated as OFF too, so garbage input can never flip the model silently.
+ *
+ *   - commissionPct: charged PER SIDE as % of notional → per-trade cost in % of entry
+ *     equity is commissionPct × (1 + exit/entry).
+ *   - slippagePct:   both fills move AGAINST the trade (buy entry/short exit pay more,
+ *     buy exit/short entry receive less). Recorded entry/exit prices ARE the slipped
+ *     fills so the trade table stays consistent with the P&L.
+ *   - stopLossPct / takeProfitPct: % from the entry fill, checked INTRABAR against the
+ *     candle high/low from the bar AFTER entry (entries fill at the close, so the entry
+ *     bar itself can't stop out). Conservative assumptions: if one bar's range spans
+ *     both levels, the STOP is assumed to fill first; a stop that gaps past its level
+ *     fills at the bar's open (worse), while a target always fills at its level (never
+ *     better).
+ */
+export interface BacktestRealismOptions {
+  /** Commission per side, % of notional (e.g. 0.05 = 0.05% on entry AND on exit). */
+  commissionPct?: number;
+  /** Slippage %, applied against the trade on both the entry and exit fill. */
+  slippagePct?: number;
+  /** Stop loss, % below (buy) / above (sell) the entry fill. Intrabar exit. */
+  stopLossPct?: number;
+  /** Take profit, % above (buy) / below (sell) the entry fill. Intrabar exit. */
+  takeProfitPct?: number;
+}
 
 export interface BacktestTrade {
   side: 'buy' | 'sell';
@@ -31,6 +64,8 @@ export interface BacktestTrade {
   pnlPercent: number;
   /** RSI at entry — only set when rsiFilter is configured. */
   rsiAtEntry?: number;
+  /** Why the trade closed — present ONLY when realism options are active. */
+  exitReason?: BacktestExitReason;
 }
 
 export interface BacktestEquityPoint {
@@ -87,10 +122,39 @@ const BARS_PER_YEAR: Record<string, number> = {
   '1mo': 12,
 };
 
+/** Clamp a realism % to a usable range; undefined / non-finite / <= 0 ⇒ OFF. */
+function sanitizePct(v: number | undefined, max: number): number | undefined {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) return undefined;
+  return Math.min(v, max);
+}
+
+interface ActiveRealism {
+  commissionPct: number; // 0 = no commission
+  slippagePct: number; // 0 = no slippage
+  stopLossPct?: number;
+  takeProfitPct?: number;
+}
+
+/** Null unless at least one realism field is genuinely active — the legacy-path gate. */
+function normalizeRealism(opts?: BacktestRealismOptions): ActiveRealism | null {
+  if (!opts) return null;
+  // Commission/slippage above 50%/side and SL/TP at/above 100% are nonsense — clamp so
+  // extreme input can't produce negative fill prices or >100% single-trade losses.
+  const commissionPct = sanitizePct(opts.commissionPct, 50);
+  const slippagePct = sanitizePct(opts.slippagePct, 50);
+  const stopLossPct = sanitizePct(opts.stopLossPct, 99);
+  const takeProfitPct = sanitizePct(opts.takeProfitPct, 99);
+  if (commissionPct == null && slippagePct == null && stopLossPct == null && takeProfitPct == null) {
+    return null;
+  }
+  return { commissionPct: commissionPct ?? 0, slippagePct: slippagePct ?? 0, stopLossPct, takeProfitPct };
+}
+
 export function runMaCrossBacktest(
   candles: ReadonlyArray<Candle>,
   config: MaCrossAlertConfig,
   interval: string,
+  options?: BacktestRealismOptions,
 ): BacktestResult {
   if (candles.length < Math.max(config.ma.length, config.crossWith?.length ?? 0) + 5) {
     return emptyResult();
@@ -116,9 +180,82 @@ export function runMaCrossBacktest(
     return v! >= config.rsiFilter.sellAbove;
   });
 
-  // Walk gated crosses and pair entries with the next OPPOSITE-side cross as exit.
-  // A same-side cross while a position is open is ignored — the position is already
-  // capturing that direction.
+  // Trade walk. Realism OFF (the default) takes the UNTOUCHED v1 path so legacy
+  // results stay byte-identical; realism ON takes the extended walk.
+  const realism = normalizeRealism(options);
+  const trades: BacktestTrade[] = realism
+    ? buildRealismTrades(candles, config, gated, rsiVals, realism)
+    : buildLegacyTrades(candles, config, gated, rsiVals);
+
+  // Compound equity from a base of 100.
+  const equity: BacktestEquityPoint[] = [];
+  let cur = 100;
+  let peak = 100;
+  let maxDd = 0;
+  for (const t of trades) {
+    cur *= 1 + t.pnlPercent / 100;
+    if (cur > peak) peak = cur;
+    const dd = ((peak - cur) / peak) * 100;
+    if (dd > maxDd) maxDd = dd;
+    equity.push({ time: t.exitTime, equity: cur, drawdown: dd });
+  }
+
+  // Summary stats. Sharpe uses per-trade returns (not per-bar), so we scale by
+  // (BARS_PER_YEAR / avgBarsPerTrade) for an annual figure.
+  const wins = trades.filter((t) => t.pnlPercent > 0);
+  const losses = trades.filter((t) => t.pnlPercent < 0);
+  const grossWin = wins.reduce((acc, t) => acc + t.pnlPercent, 0);
+  const grossLoss = losses.reduce((acc, t) => acc + Math.abs(t.pnlPercent), 0);
+  const returns = trades.map((t) => t.pnlPercent);
+  const mean = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
+  const variance =
+    returns.length > 1
+      ? returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1)
+      : 0;
+  const stddev = Math.sqrt(variance);
+  const avgBars = trades.length > 0 ? trades.reduce((a, t) => a + t.bars, 0) / trades.length : 0;
+  const barsPerYear = BARS_PER_YEAR[interval] ?? 365;
+  const tradesPerYear = avgBars > 0 ? barsPerYear / avgBars : 0;
+  const sharpe = stddev > 0 ? (mean / stddev) * Math.sqrt(tradesPerYear) : 0;
+
+  return {
+    trades,
+    equity,
+    summary: {
+      trades: trades.length,
+      wins: wins.length,
+      losses: losses.length,
+      winRate: trades.length > 0 ? wins.length / trades.length : 0,
+      finalEquity: cur,
+      totalReturnPct: cur - 100,
+      maxDrawdownPct: maxDd,
+      sharpe,
+      profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0,
+      avgWinPct: wins.length > 0 ? grossWin / wins.length : 0,
+      avgLossPct: losses.length > 0 ? -grossLoss / losses.length : 0,
+      avgBars,
+    },
+  };
+}
+
+/** The slice of a `computeMaCross` cross point the trade walks need. */
+interface GatedCross {
+  index: number;
+  side: 'buy' | 'sell';
+}
+
+/**
+ * v1 trade walk — UNCHANGED legacy behavior (extracted verbatim from the original
+ * inline loop). Walk gated crosses and pair entries with the next OPPOSITE-side cross
+ * as exit. A same-side cross while a position is open is ignored — the position is
+ * already capturing that direction.
+ */
+function buildLegacyTrades(
+  candles: ReadonlyArray<Candle>,
+  config: MaCrossAlertConfig,
+  gated: ReadonlyArray<GatedCross>,
+  rsiVals: Float64Array | null,
+): BacktestTrade[] {
   const trades: BacktestTrade[] = [];
   let open: { side: 'buy' | 'sell'; entryIdx: number; entryPrice: number; rsi?: number } | null = null;
 
@@ -174,56 +311,123 @@ export function runMaCrossBacktest(
       rsiAtEntry: open.rsi,
     });
   }
+  return trades;
+}
 
-  // Compound equity from a base of 100.
-  const equity: BacktestEquityPoint[] = [];
-  let cur = 100;
-  let peak = 100;
-  let maxDd = 0;
-  for (const t of trades) {
-    cur *= 1 + t.pnlPercent / 100;
-    if (cur > peak) peak = cur;
-    const dd = ((peak - cur) / peak) * 100;
-    if (dd > maxDd) maxDd = dd;
-    equity.push({ time: t.exitTime, equity: cur, drawdown: dd });
+/**
+ * Realism trade walk. Same signal semantics as v1 (enter on a gated cross, exit on the
+ * next opposite cross, same-side re-entries ignored, end-of-data close) PLUS:
+ *
+ *   - Entry/exit fills move against the trade by `slippagePct` (recorded prices ARE
+ *     the fills, so the trade table reconciles with the P&L).
+ *   - `commissionPct` per side of notional is deducted from each trade's P&L%:
+ *     cost% = commissionPct × (1 + exitFill/entryFill).
+ *   - SL/TP levels are % from the entry FILL and are checked intrabar (high/low) on
+ *     every bar AFTER the entry bar — conservative ordering: the stop is checked
+ *     before the target, so a bar spanning both books a stop-out; a stop that gaps
+ *     past its level fills at the bar open (worse); a target fills exactly at level.
+ *   - After an SL/TP exit the book is flat, so the NEXT gated cross of either side
+ *     opens a fresh position (live alerts would still be firing on those crosses).
+ */
+function buildRealismTrades(
+  candles: ReadonlyArray<Candle>,
+  config: MaCrossAlertConfig,
+  gated: ReadonlyArray<GatedCross>,
+  rsiVals: Float64Array | null,
+  r: ActiveRealism,
+): BacktestTrade[] {
+  const trades: BacktestTrade[] = [];
+  const slip = r.slippagePct / 100;
+
+  type Open = { side: 'buy' | 'sell'; entryIdx: number; entryFill: number; sl?: number; tp?: number; rsi?: number };
+  let open: Open | null = null;
+
+  const close = (o: Open, exitIdx: number, rawExit: number, reason: BacktestExitReason): void => {
+    // Exit slippage works against the trade: a buy exits (sells) lower, a sell exits (buys back) higher.
+    const fill = o.side === 'buy' ? rawExit * (1 - slip) : rawExit * (1 + slip);
+    const gross =
+      o.side === 'buy'
+        ? ((fill - o.entryFill) / o.entryFill) * 100
+        : ((o.entryFill - fill) / o.entryFill) * 100;
+    const pnl = gross - r.commissionPct * (1 + fill / o.entryFill);
+    trades.push({
+      side: o.side,
+      entryTime: candles[o.entryIdx]!.openTime,
+      entryPrice: o.entryFill,
+      exitTime: candles[exitIdx]!.openTime,
+      exitPrice: fill,
+      bars: exitIdx - o.entryIdx,
+      pnlPercent: pnl,
+      rsiAtEntry: o.rsi,
+      exitReason: reason,
+    });
+  };
+
+  let gi = 0;
+  for (let i = 0; i < candles.length; i += 1) {
+    const bar = candles[i]!;
+
+    // 1) Intrabar SL/TP — only from the bar AFTER entry (entries fill at the close).
+    //    Conservative: stop checked before target, so a both-hit bar is a stop-out.
+    if (open && i > open.entryIdx) {
+      if (open.side === 'buy') {
+        if (open.sl != null && bar.low <= open.sl) {
+          close(open, i, Math.min(open.sl, bar.open), 'stop'); // gap-through fills at the open
+          open = null;
+        } else if (open.tp != null && bar.high >= open.tp) {
+          close(open, i, open.tp, 'target');
+          open = null;
+        }
+      } else {
+        if (open.sl != null && bar.high >= open.sl) {
+          close(open, i, Math.max(open.sl, bar.open), 'stop');
+          open = null;
+        } else if (open.tp != null && bar.low <= open.tp) {
+          close(open, i, open.tp, 'target');
+          open = null;
+        }
+      }
+    }
+
+    // 2) Cross signal(s) landing on this bar (fires at the close, after intrabar exits).
+    while (gi < gated.length && gated[gi]!.index === i) {
+      const c = gated[gi]!;
+      gi += 1;
+      if (open && open.side === c.side) continue; // ignore re-entries (matches v1)
+      const raw = pickSource(bar, config.ma.source);
+      if (open) {
+        close(open, i, raw, 'cross');
+        open = null;
+      }
+      // Entry slippage works against the trade: a buy fills higher, a sell fills lower.
+      const entryFill = c.side === 'buy' ? raw * (1 + slip) : raw * (1 - slip);
+      open = {
+        side: c.side,
+        entryIdx: i,
+        entryFill,
+        sl:
+          r.stopLossPct != null
+            ? c.side === 'buy'
+              ? entryFill * (1 - r.stopLossPct / 100)
+              : entryFill * (1 + r.stopLossPct / 100)
+            : undefined,
+        tp:
+          r.takeProfitPct != null
+            ? c.side === 'buy'
+              ? entryFill * (1 + r.takeProfitPct / 100)
+              : entryFill * (1 - r.takeProfitPct / 100)
+            : undefined,
+        rsi: config.rsiFilter && rsiVals ? rsiVals[i] : undefined,
+      };
+    }
   }
 
-  // Summary stats. Sharpe uses per-trade returns (not per-bar), so we scale by
-  // (BARS_PER_YEAR / avgBarsPerTrade) for an annual figure.
-  const wins = trades.filter((t) => t.pnlPercent > 0);
-  const losses = trades.filter((t) => t.pnlPercent < 0);
-  const grossWin = wins.reduce((acc, t) => acc + t.pnlPercent, 0);
-  const grossLoss = losses.reduce((acc, t) => acc + Math.abs(t.pnlPercent), 0);
-  const returns = trades.map((t) => t.pnlPercent);
-  const mean = returns.length > 0 ? returns.reduce((a, b) => a + b, 0) / returns.length : 0;
-  const variance =
-    returns.length > 1
-      ? returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (returns.length - 1)
-      : 0;
-  const stddev = Math.sqrt(variance);
-  const avgBars = trades.length > 0 ? trades.reduce((a, t) => a + t.bars, 0) / trades.length : 0;
-  const barsPerYear = BARS_PER_YEAR[interval] ?? 365;
-  const tradesPerYear = avgBars > 0 ? barsPerYear / avgBars : 0;
-  const sharpe = stddev > 0 ? (mean / stddev) * Math.sqrt(tradesPerYear) : 0;
-
-  return {
-    trades,
-    equity,
-    summary: {
-      trades: trades.length,
-      wins: wins.length,
-      losses: losses.length,
-      winRate: trades.length > 0 ? wins.length / trades.length : 0,
-      finalEquity: cur,
-      totalReturnPct: cur - 100,
-      maxDrawdownPct: maxDd,
-      sharpe,
-      profitFactor: grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0,
-      avgWinPct: wins.length > 0 ? grossWin / wins.length : 0,
-      avgLossPct: losses.length > 0 ? -grossLoss / losses.length : 0,
-      avgBars,
-    },
-  };
+  // Close any still-open position at the last candle to keep stats honest.
+  if (open) {
+    const lastIdx = candles.length - 1;
+    close(open, lastIdx, pickSource(candles[lastIdx]!, config.ma.source), 'end');
+  }
+  return trades;
 }
 
 function emptyResult(): BacktestResult {

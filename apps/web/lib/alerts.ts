@@ -192,6 +192,12 @@ export interface OptimizeBody {
   maxDdPct?: number;
   requirePositiveExpectancy?: boolean;
   requireLosingTrade?: boolean;
+  /* Realism pass-through — forwarded verbatim to every per-combo backtest (all OFF by
+     default). SL/TP exits assume worst-case intrabar ordering (stop fills before target). */
+  commissionPct?: number;
+  slippagePct?: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }
 
 export async function runOptimize(id: string, body: OptimizeBody = {}): Promise<OptimizeResponse> {

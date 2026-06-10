@@ -1,5 +1,5 @@
 import type { Candle, MaCrossAlertConfig } from '@supercharts/types';
-import { runMaCrossBacktest, type BacktestSummary } from './backtester';
+import { runMaCrossBacktest, type BacktestRealismOptions, type BacktestSummary } from './backtester';
 
 /**
  * Param optimizer.
@@ -56,6 +56,18 @@ export interface OptimizeRequest {
   requireLosingTrade?: boolean;
   /** Optional "balanced" weight overrides. */
   weights?: { sharpe?: number; expectancy?: number; profitFactor?: number; winRate?: number; ddPenalty?: number };
+
+  /* ── Realism pass-through (forwarded verbatim to every per-combo backtest) ──
+     All OFF by default. These ONLY change the per-combo backtest results the sweep
+     ranks over — ranking logic, filters and comparators are untouched. */
+  /** Commission per side, % of notional. */
+  commissionPct?: number;
+  /** Slippage %, applied against the trade on entry + exit fills. */
+  slippagePct?: number;
+  /** Stop loss % (intrabar exit). */
+  stopLossPct?: number;
+  /** Take profit % (intrabar exit; SL assumed first when both hit in one bar). */
+  takeProfitPct?: number;
 }
 
 export interface ComboMetrics {
@@ -335,6 +347,18 @@ export function runOptimizer(
   const rsiBuy = hasRsi ? (req.rsiBuyBelow ?? DEFAULT_RSI_BUY_BELOW) : [base.rsiFilter?.buyBelow ?? 0];
   const rsiSell = hasRsi ? (req.rsiSellAbove ?? DEFAULT_RSI_SELL_ABOVE) : [base.rsiFilter?.sellAbove ?? 0];
 
+  // Realism pass-through — forwarded to every per-combo backtest, never ranked on.
+  // `undefined` (the default) keeps each backtest on the byte-identical legacy path.
+  const realism: BacktestRealismOptions | undefined =
+    req.commissionPct != null || req.slippagePct != null || req.stopLossPct != null || req.takeProfitPct != null
+      ? {
+          commissionPct: req.commissionPct,
+          slippagePct: req.slippagePct,
+          stopLossPct: req.stopLossPct,
+          takeProfitPct: req.takeProfitPct,
+        }
+      : undefined;
+
   // Single grid sweep → every evaluated combo with its real backtest summary + legacy composite.
   const all: OptimizerCombo[] = [];
   let evaluated = 0;
@@ -352,7 +376,7 @@ export function runOptimizer(
               ? { length: base.rsiFilter!.length, buyBelow: buy, sellAbove: sell }
               : undefined,
           };
-          const result = runMaCrossBacktest(candles, cfg, interval);
+          const result = runMaCrossBacktest(candles, cfg, interval, realism);
           const score = result.summary.sharpe - ddPenalty * result.summary.maxDrawdownPct;
           all.push({ config: cfg, summary: result.summary, score });
         }

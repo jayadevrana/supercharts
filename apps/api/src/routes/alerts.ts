@@ -534,6 +534,11 @@ export function alertRoutes(
       ma?: { type?: 'sma' | 'ema'; length?: number; source?: 'open' | 'high' | 'low' | 'close' };
       crossWith?: { type?: 'sma' | 'ema'; length?: number };
       rsiFilter?: { length: number; buyBelow: number; sellAbove: number };
+      /* Optional realism layer — all OFF (undefined) by default. */
+      commissionPct?: number;
+      slippagePct?: number;
+      stopLossPct?: number;
+      takeProfitPct?: number;
     };
     const symbol = String(body.symbol ?? '').trim();
     const interval = String(body.interval ?? '').trim() as Interval;
@@ -551,6 +556,19 @@ export function alertRoutes(
       timezone: 'UTC',
       ...(body.rsiFilter ? { rsiFilter: body.rsiFilter } : {}),
     };
+
+    // Realism options: only finite positive numbers count; anything else stays OFF so
+    // the default run is byte-identical to the legacy v1 model.
+    const pct = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    const commissionPct = pct(body.commissionPct);
+    const slippagePct = pct(body.slippagePct);
+    const stopLossPct = pct(body.stopLossPct);
+    const takeProfitPct = pct(body.takeProfitPct);
+    const realism =
+      commissionPct != null || slippagePct != null || stopLossPct != null || takeProfitPct != null
+        ? { commissionPct, slippagePct, stopLossPct, takeProfitPct }
+        : undefined;
 
     const desired = 1000;
     let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
@@ -573,8 +591,16 @@ export function alertRoutes(
       reply.code(400);
       return { error: 'no_data' };
     }
-    const result = runMaCrossBacktest(candles, config, interval);
-    return { symbol, interval, config, barsTested: candles.length, ...result };
+    const result = runMaCrossBacktest(candles, config, interval, realism);
+    return {
+      symbol,
+      interval,
+      config,
+      barsTested: candles.length,
+      // Echo the applied realism layer so the client can label the run honestly.
+      ...(realism ? { realism } : {}),
+      ...result,
+    };
   });
 
   /* ─── Position sizer preview ─── */

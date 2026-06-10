@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { FlaskConical, Play, Loader2, LineChart, EyeOff, TrendingUp, TrendingDown } from 'lucide-react';
+import { FlaskConical, Play, Loader2, LineChart, EyeOff, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +26,14 @@ interface BacktestTrade {
   exitPrice: number;
   bars: number;
   pnlPercent: number;
+  /** Present only when realism options were applied. */
+  exitReason?: 'cross' | 'stop' | 'target' | 'end';
+}
+interface RealismOptions {
+  commissionPct?: number;
+  slippagePct?: number;
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }
 interface BacktestSummary {
   trades: number;
@@ -45,6 +53,8 @@ interface BacktestResponse {
   symbol: string;
   interval: string;
   barsTested: number;
+  /** Echoed by the API only when realism options were applied to the run. */
+  realism?: RealismOptions;
   trades: BacktestTrade[];
   equity: Array<{ time: number; equity: number; drawdown: number }>;
   summary: BacktestSummary;
@@ -57,6 +67,8 @@ const fmtMoney = (n: number): string => {
   const s = a >= 1000 ? `$${(a / 1000).toFixed(a >= 10000 ? 0 : 1)}K` : `$${a.toFixed(0)}`;
   return `${n < 0 ? '-' : ''}${s}`;
 };
+/** Trim float noise on modeled fills (slippage math) without touching clean candle prices. */
+const fmtPrice = (n: number): string => String(Number(n.toPrecision(10)));
 
 /**
  * Strategy Tester — backtest an MA-cross setup on the ACTIVE chart's symbol/interval on demand.
@@ -77,6 +89,25 @@ export function BacktestDialog() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BacktestResponse | null>(null);
 
+  // Realism layer — every field blank = OFF = the plain v1 model (byte-identical results).
+  const [showRealism, setShowRealism] = useState(false);
+  const [commission, setCommission] = useState('');
+  const [slippage, setSlippage] = useState('');
+  const [stopLoss, setStopLoss] = useState('');
+  const [takeProfit, setTakeProfit] = useState('');
+
+  const parsePct = (s: string): number | undefined => {
+    const v = parseFloat(s);
+    return Number.isFinite(v) && v > 0 ? v : undefined;
+  };
+  const realismBody: RealismOptions = {
+    ...(parsePct(commission) != null ? { commissionPct: parsePct(commission) } : {}),
+    ...(parsePct(slippage) != null ? { slippagePct: parsePct(slippage) } : {}),
+    ...(parsePct(stopLoss) != null ? { stopLossPct: parsePct(stopLoss) } : {}),
+    ...(parsePct(takeProfit) != null ? { takeProfitPct: parsePct(takeProfit) } : {}),
+  };
+  const realismActive = Object.keys(realismBody).length > 0;
+
   const plottedHere = backtestPreview?.paneId === pane.id;
 
   const run = async (): Promise<void> => {
@@ -93,6 +124,7 @@ export function BacktestDialog() {
           interval: pane.interval,
           ma: { type: maType, length: fast },
           crossWith: { type: maType, length: slow },
+          ...realismBody,
         }),
       });
       setResult(r);
@@ -156,6 +188,46 @@ export function BacktestDialog() {
           </Button>
         </div>
 
+        {/* Realism — optional fees / slippage / SL-TP. All blank = off = the plain v1 model. */}
+        <div className="border-b border-border px-4 py-2">
+          <button
+            type="button"
+            onClick={() => setShowRealism((v) => !v)}
+            aria-expanded={showRealism}
+            className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground hover:text-foreground"
+          >
+            <ChevronRight className={`h-3 w-3 transition-transform ${showRealism ? 'rotate-90' : ''}`} />
+            Realism · fees / slippage / SL-TP
+            {realismActive ? <Badge tone="accent" className="text-[9px]">on</Badge> : <span className="text-[9px] normal-case tracking-normal text-muted-foreground/60">off</span>}
+          </button>
+          {showRealism ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Commission %/side
+                  <Input type="number" min={0} step="0.01" placeholder="off" value={commission} onChange={(e) => setCommission(e.target.value)} className="h-8 w-28 text-xs" />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Slippage %
+                  <Input type="number" min={0} step="0.01" placeholder="off" value={slippage} onChange={(e) => setSlippage(e.target.value)} className="h-8 w-24 text-xs" />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Stop loss %
+                  <Input type="number" min={0} step="0.1" placeholder="off" value={stopLoss} onChange={(e) => setStopLoss(e.target.value)} className="h-8 w-24 text-xs" />
+                </label>
+                <label className="flex flex-col gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                  Take profit %
+                  <Input type="number" min={0} step="0.1" placeholder="off" value={takeProfit} onChange={(e) => setTakeProfit(e.target.value)} className="h-8 w-24 text-xs" />
+                </label>
+              </div>
+              <p className="leading-relaxed text-[10px] text-muted-foreground/70">
+                Commission is charged per side as % of notional; slippage moves both fills against the trade.
+                SL/TP exit intrabar off the candle high/low — when one bar&apos;s range spans both levels the <strong>stop is assumed to fill first</strong> (worst case), and a stop that gaps past its level fills at the bar open. Blank fields stay off.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
         {/* Results */}
         <div className="min-h-0 flex-1 overflow-auto scroll-thin p-4">
           {!s ? (
@@ -216,8 +288,12 @@ export function BacktestDialog() {
                             {t.side.toUpperCase()}
                           </span>
                         </td>
-                        <td className="px-2 py-1 tabular-nums text-muted-foreground">{new Date(t.entryTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} @ {t.entryPrice}</td>
-                        <td className="px-2 py-1 tabular-nums text-muted-foreground">{new Date(t.exitTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} @ {t.exitPrice}</td>
+                        <td className="px-2 py-1 tabular-nums text-muted-foreground">{new Date(t.entryTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} @ {fmtPrice(t.entryPrice)}</td>
+                        <td className="px-2 py-1 tabular-nums text-muted-foreground">
+                          {new Date(t.exitTime).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })} @ {fmtPrice(t.exitPrice)}
+                          {t.exitReason === 'stop' ? <span className="ml-1 text-bear">SL</span> : null}
+                          {t.exitReason === 'target' ? <span className="ml-1 text-bull">TP</span> : null}
+                        </td>
                         <td className="px-2 py-1 text-right tabular-nums text-muted-foreground">{t.bars}</td>
                         <td className={`px-2 py-1 text-right tabular-nums font-medium ${t.pnlPercent >= 0 ? 'text-bull' : 'text-bear'}`}>{fmtPct(t.pnlPercent, 2)}</td>
                       </tr>
@@ -226,9 +302,22 @@ export function BacktestDialog() {
                 </table>
               </div>
 
-              <p className="leading-relaxed text-[10px] text-muted-foreground/70">
-                Real backtest of the last {result.barsTested} closed candles of {formatSymbolLabel(pane.symbol)} {pane.interval}. v1 trade model — enter on each cross, exit on the next opposite cross; compounded from a base of 100; <strong>no fees / slippage / leverage / SL-TP / position sizing</strong>. The $ figure is the return % applied to your account size — illustrative only, not stored or ranked.
-              </p>
+              {result.realism ? (
+                <p className="leading-relaxed text-[10px] text-muted-foreground/70">
+                  Real backtest of the last {result.barsTested} closed candles of {formatSymbolLabel(pane.symbol)} {pane.interval}, with realism applied:{' '}
+                  {[
+                    result.realism.commissionPct != null ? `commission ${result.realism.commissionPct}%/side of notional` : null,
+                    result.realism.slippagePct != null ? `slippage ${result.realism.slippagePct}% against the trade on both fills` : null,
+                    result.realism.stopLossPct != null ? `stop loss ${result.realism.stopLossPct}%` : null,
+                    result.realism.takeProfitPct != null ? `take profit ${result.realism.takeProfitPct}%` : null,
+                  ].filter(Boolean).join(' · ')}
+                  . SL/TP exits use <strong>worst-case intrabar ordering</strong> — when one bar hits both levels the stop fills first, and a gapped stop fills at the bar open. Entry/exit prices shown are the modeled fills. Compounded from a base of 100; <strong>no leverage / position sizing</strong>. The $ figure is the return % applied to your account size — illustrative only, not stored or ranked.
+                </p>
+              ) : (
+                <p className="leading-relaxed text-[10px] text-muted-foreground/70">
+                  Real backtest of the last {result.barsTested} closed candles of {formatSymbolLabel(pane.symbol)} {pane.interval}. v1 trade model — enter on each cross, exit on the next opposite cross; compounded from a base of 100; <strong>no fees / slippage / leverage / SL-TP / position sizing</strong> (expand the Realism row above to add them). The $ figure is the return % applied to your account size — illustrative only, not stored or ranked.
+                </p>
+              )}
             </div>
           )}
         </div>
