@@ -6,7 +6,7 @@
 > Stripe-ready billing. Pricing: $400 / 6mo, $600 / 12mo.
 
 Repo: `/Volumes/PortableSSD/new start/supercharts` (pnpm monorepo).
-Codebase map: `docs/architecture.md` · Full build history: `docs/changelog.md`.
+Codebase map: `docs/architecture.md` · Full build history: `docs/changelog.md` · Per-task session prompts: `docs/sessions/`.
 
 ## Stack
 
@@ -130,7 +130,7 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 Long sessions hallucinate: when the context window fills and compacts, precise state is lost and
 output drifts toward plausible-looking fabrication (e.g. "best EMA results" with no command behind them).
 
-1. **One increment per session.** Read CLAUDE.md + `docs/architecture.md` (don't re-explore the repo) → do ONE task → verify → commit → update the log → STOP. Never start a second feature in a long/compacted session.
+1. **One increment per session.** Read CLAUDE.md + `docs/architecture.md` (don't re-explore the repo) → do ONE task → verify → commit → update the log → STOP. Never start a second feature in a long/compacted session. Every remaining work item has a prompt file in `docs/sessions/` (see `00-README.md` for order) — start each session from the next file's kickoff prompt.
 2. **End ritual:** Recent log updated → committed → session ends. The next session reboots at full fidelity from these files.
 3. **Fabrication tripwire:** if numbers appear that no command in this session produced, the context is poisoned — stop and restart the session instead of correcting in place.
 4. **Keep this file lean:** log ≤ 5 entries (older → `docs/changelog.md`); structure lives in `docs/architecture.md`.
