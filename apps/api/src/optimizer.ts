@@ -117,6 +117,10 @@ export interface OptimizeResult {
   /** When the win-rate floor shortens/empties the list, `bestWinRate` lets the UI suggest a value. */
   floor?: { minWinRate?: number; passed: number; bestWinRate: number };
   note?: string;
+  /** Present ONLY when `combos` is empty: the closest candidates ranked by the same
+   *  objective, every one flagged 'below quality bar' — so the pass table never
+   *  dead-ends, without pretending a failing setting is a winner. */
+  fallbackCombos?: OptimizerCombo[];
 }
 
 /* ─── Pure metric helpers (unit-tested directly) ─── */
@@ -251,8 +255,8 @@ export function rankPeak(pool: OptimizerCombo[], req: OptimizeRequest & { object
     survivors.push(c);
   }
 
-  // Enrich survivors with metrics.
-  const enriched = survivors.map((c) => {
+  // Enrich a combo with metrics; `belowBar` prepends the honest fallback flag.
+  const enrich = (c: OptimizerCombo, belowBar = false): OptimizerCombo => {
     const nb = neighbourStats(c);
     const passFrac = nb.checked > 0 ? nb.pass / nb.checked : 0;
     const rob = robustnessFlags(c.summary, nb.checked, passFrac);
@@ -261,10 +265,16 @@ export function rankPeak(pool: OptimizerCombo[], req: OptimizeRequest & { object
       profitFactorCapped: profitFactorCapped(c.summary),
       qualityScore: qualityScore(c.summary, minTrades, req.weights),
       rank: 0,
-      robustness: { neighboursChecked: nb.checked, neighbourPassFraction: passFrac, flags: rob.flags, tone: rob.tone },
+      robustness: {
+        neighboursChecked: nb.checked,
+        neighbourPassFraction: passFrac,
+        flags: belowBar ? ['below quality bar', ...rob.flags] : rob.flags,
+        tone: belowBar ? 'red' : rob.tone,
+      },
     };
     return { ...c, metrics };
-  });
+  };
+  const enriched = survivors.map((c) => enrich(c));
 
   // Objective comparator.
   const cmp = (a: OptimizerCombo, b: OptimizerCombo): number => {
@@ -311,12 +321,43 @@ export function rankPeak(pool: OptimizerCombo[], req: OptimizeRequest & { object
 
   const top = enriched.slice(0, topN);
   const passed = enriched.length;
+
+  // Honest empty-result note: name the filter(s) that ACTUALLY removed combos, largest
+  // first — never blame the win-rate floor when profitability guards did the killing
+  // (the old message could claim "no setting met win rate ≥ 10%" while reporting a best
+  // win rate of 40%, because it always attributed an empty result to the floor).
   let note: string | undefined;
+  let fallbackCombos: OptimizerCombo[] | undefined;
   if (passed === 0) {
+    const unprofitable = filtered.degeneratePf + filtered.nonPositiveExpectancy;
+    const reasons: Array<[number, string]> = [
+      [
+        filtered.belowWinRate,
+        minWinRate != null
+          ? `${filtered.belowWinRate} below your ${(minWinRate * 100).toFixed(0)}% win rate floor (best seen ${(bestWinRateSeen * 100).toFixed(0)}%)`
+          : '',
+      ],
+      [unprofitable, `${unprofitable} unprofitable (PF < ${minPF} or negative expectancy) — this setup may simply not work on this data/timeframe`],
+      [filtered.belowMinTrades, `${filtered.belowMinTrades} with fewer than ${minTrades} trades`],
+      [filtered.exceededMaxDd, `${filtered.exceededMaxDd} beyond ${maxDd}% drawdown`],
+      [filtered.zeroLoss, `${filtered.zeroLoss} with zero losing trades (suspicious)`],
+    ];
+    const named = reasons.filter(([n, t]) => n > 0 && t).sort((a, b) => b[0] - a[0]);
     note =
-      minWinRate != null
-        ? `No setting met win rate ≥ ${(minWinRate * 100).toFixed(0)}% (with trades ≥ ${minTrades}). Best win rate found was ${(bestWinRateSeen * 100).toFixed(0)}% — lower the floor.`
+      named.length > 0
+        ? `No setting met the quality bar: ${named.map(([, t]) => t).join('; ')}.`
         : `No setting passed the robustness guards (trades ≥ ${minTrades}, PF ≥ ${minPF}, DD ≤ ${maxDd}%).`;
+
+    // Never dead-end (the MetaTrader pass table always shows results): rank the closest
+    // candidates by the SAME objective and return them clearly flagged 'below quality
+    // bar' — shown as candidates, never celebrated as winners.
+    const candidates = pool.filter((c) => c.summary.trades >= minTrades);
+    const fb = (candidates.length > 0 ? candidates : pool.slice()).map((c) => enrich(c, true));
+    fb.sort(cmp);
+    fb.forEach((c, i) => {
+      c.metrics!.rank = i + 1;
+    });
+    fallbackCombos = fb.slice(0, topN);
   } else if (passed < topN) {
     note = `Only ${passed} setting${passed === 1 ? '' : 's'} met your filters.`;
   }
@@ -330,6 +371,7 @@ export function rankPeak(pool: OptimizerCombo[], req: OptimizeRequest & { object
     filtered,
     floor: { minWinRate, passed, bestWinRate: bestWinRateSeen },
     note,
+    ...(fallbackCombos ? { fallbackCombos } : {}),
   };
 }
 

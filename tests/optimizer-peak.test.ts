@@ -181,3 +181,49 @@ describe('runOptimizer wiring + back-compat', () => {
     r.combos.forEach((c, i) => expect(c.metrics!.rank).toBe(i + 1));
   });
 });
+
+describe('honest empty-result note + fallback candidates (never dead-end)', () => {
+  // Every combo is UNPROFITABLE (PF < 1) but ABOVE the win-rate floor — the old note
+  // wrongly blamed the floor ("no setting met win rate ≥ 10%… best seen 40%").
+  const losers = [
+    mkCombo(5, 20, { totalReturnPct: -8, winRate: 0.40, wins: 12, losses: 18, profitFactor: 0.7, avgWinPct: 1, avgLossPct: -1.2 }),
+    mkCombo(7, 30, { totalReturnPct: -4, winRate: 0.38, wins: 11, losses: 19, profitFactor: 0.8, avgWinPct: 1, avgLossPct: -1.1 }),
+    mkCombo(9, 40, { totalReturnPct: -12, winRate: 0.33, wins: 10, losses: 20, profitFactor: 0.6, avgWinPct: 1, avgLossPct: -1.4 }),
+  ];
+
+  it('attributes the empty result to unprofitability, NOT the win-rate floor', () => {
+    const r = rankPeak(losers, { objective: 'profit', minWinRate: 0.1 });
+    expect(r.combos).toHaveLength(0);
+    expect(r.filtered!.belowWinRate).toBe(0);
+    expect(r.note).toMatch(/unprofitable/i);
+    expect(r.note).not.toMatch(/win rate floor/i);
+  });
+
+  it('still blames the floor when the floor IS the binding filter', () => {
+    const r = rankPeak(
+      [mkCombo(5, 20, { winRate: 0.5 }), mkCombo(7, 30, { winRate: 0.55 })],
+      { objective: 'profit', minWinRate: 0.6 },
+    );
+    expect(r.note).toMatch(/win rate/i);
+    expect(r.note).toMatch(/55%/);
+  });
+
+  it('returns fallback candidates ranked by the objective, flagged below-quality-bar', () => {
+    const r = rankPeak(losers, { objective: 'profit', minWinRate: 0.1 });
+    expect(r.fallbackCombos).toBeDefined();
+    expect(r.fallbackCombos!.length).toBe(3);
+    // profit objective → least-bad return first
+    expect(r.fallbackCombos!.map((c) => c.summary.totalReturnPct)).toEqual([-4, -8, -12]);
+    for (const c of r.fallbackCombos!) {
+      expect(c.metrics!.robustness.flags[0]).toBe('below quality bar');
+      expect(c.metrics!.robustness.tone).toBe('red');
+    }
+    expect(r.fallbackCombos!.map((c) => c.metrics!.rank)).toEqual([1, 2, 3]);
+  });
+
+  it('omits fallbackCombos entirely when real winners exist', () => {
+    const r = rankPeak([mkCombo(10, 39)], { objective: 'profit', minWinRate: 0 });
+    expect(r.combos).toHaveLength(1);
+    expect(r.fallbackCombos).toBeUndefined();
+  });
+});

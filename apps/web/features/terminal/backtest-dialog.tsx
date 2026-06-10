@@ -81,6 +81,8 @@ interface OptimizeResponse {
   evaluated: number;
   qualifying: number;
   combos: OptimizeCombo[];
+  /** Present only when combos is empty: closest candidates, flagged 'below quality bar'. */
+  fallbackCombos?: OptimizeCombo[];
   note?: string;
   floor?: { minWinRate: number; passed: number; bestWinRate: number };
 }
@@ -546,6 +548,8 @@ function OptimizerResults({
       </div>
     );
   }
+  const isFallback = result.combos.length === 0 && (result.fallbackCombos?.length ?? 0) > 0;
+  const rows = isFallback ? result.fallbackCombos! : result.combos;
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
@@ -555,7 +559,14 @@ function OptimizerResults({
         <span>· {result.sweepMs} ms</span>
       </div>
       {result.note ? <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-200">{result.note}</div> : null}
-      {result.combos.length > 0 ? (
+      {isFallback ? (
+        <div className="rounded-md border border-border bg-surface-raised/60 p-2 text-[11px] text-muted-foreground">
+          Showing the <span className="font-medium text-foreground">closest candidates</span> ranked by your objective — none meets the
+          quality bar, so treat these as a map of the landscape, <span className="font-medium text-foreground">not</span> tradeable
+          settings. A higher timeframe usually helps.
+        </div>
+      ) : null}
+      {rows.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full text-left text-[11px]">
             <thead className="bg-surface-raised/60 text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
@@ -572,7 +583,7 @@ function OptimizerResults({
               </tr>
             </thead>
             <tbody>
-              {result.combos.map((c) => {
+              {rows.map((c) => {
                 const cs = c.summary;
                 const m = c.metrics;
                 const tone = m?.robustness.tone ?? 'amber';
