@@ -17,6 +17,24 @@ export interface MT5AccountView {
   lastSeenAt: number;
 }
 
+/** Account that paired at some point (persisted server-side), may be offline now. */
+export interface MT5KnownAccount {
+  accountId: string;
+  broker: string;
+  server: string;
+  currency: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  connected: boolean;
+}
+
+export interface MT5BridgeStatus {
+  bridgePort: number;
+  bridgeHost: string;
+  connectedAccounts: number;
+  knownAccounts: MT5KnownAccount[];
+}
+
 interface MT5StoreState {
   accounts: MT5AccountView[];
   positions: MT5Position[];
@@ -25,8 +43,15 @@ interface MT5StoreState {
   activeAccountId: string | null;
   pairingToken: string | null;
   pairingExpiresAt: number | null;
+  /** Honest failure message when token generation hit the API and failed. */
+  pairingError: string | null;
+  /** Live bridge status (null until first successful fetch). */
+  bridgeStatus: MT5BridgeStatus | null;
+  /** Honest failure message when the status fetch failed (API down). */
+  statusError: string | null;
   refreshAccounts: () => Promise<void>;
   refreshPositions: () => Promise<void>;
+  refreshStatus: () => Promise<void>;
   setActiveAccount: (id: string | null) => void;
   generatePairingToken: () => Promise<void>;
   /** WebSocket dispatcher — call from the main ws client. */
@@ -40,6 +65,9 @@ export const useMT5Store = create<MT5StoreState>((set, get) => ({
   activeAccountId: null,
   pairingToken: null,
   pairingExpiresAt: null,
+  pairingError: null,
+  bridgeStatus: null,
+  statusError: null,
 
   async refreshAccounts() {
     try {
@@ -67,6 +95,15 @@ export const useMT5Store = create<MT5StoreState>((set, get) => ({
     }
   },
 
+  async refreshStatus() {
+    try {
+      const r = await api<MT5BridgeStatus>('/mt5/status');
+      set({ bridgeStatus: r, statusError: null });
+    } catch (err) {
+      set({ statusError: (err as Error).message || 'API unreachable' });
+    }
+  },
+
   setActiveAccount(id) {
     set({ activeAccountId: id });
   },
@@ -76,9 +113,14 @@ export const useMT5Store = create<MT5StoreState>((set, get) => ({
       const r = await api<{ token: string; expiresInMs: number }>('/mt5/pair-tokens', {
         method: 'POST',
       });
-      set({ pairingToken: r.token, pairingExpiresAt: Date.now() + r.expiresInMs });
-    } catch {
-      /* ignore */
+      set({
+        pairingToken: r.token,
+        pairingExpiresAt: Date.now() + r.expiresInMs,
+        pairingError: null,
+      });
+    } catch (err) {
+      // Surface the failure instead of showing "Generating…" forever.
+      set({ pairingError: (err as Error).message || 'Token request failed' });
     }
   },
 
@@ -89,6 +131,7 @@ export const useMT5Store = create<MT5StoreState>((set, get) => ({
       case 'account_added':
       case 'account_removed':
         void get().refreshAccounts();
+        void get().refreshStatus();
         return;
       case 'account_snapshot': {
         const snap = e.snapshot as MT5AccountSnapshot;

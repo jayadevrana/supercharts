@@ -97,7 +97,7 @@ export function startMT5Bridge(opts: {
     const accountId = msg.account.id;
     conn.accountId = accountId;
     byAccount.set(accountId, conn);
-    store.ensureAccount(accountId, userId, tokenMaybe, msg.eaVersion);
+    store.ensureAccount(accountId, userId, tokenMaybe, msg.eaVersion, msg.account);
     store.applyHelloSymbols(accountId, msg.symbols);
     log(`[mt5] EA paired account=${accountId} user=${userId} version=${msg.eaVersion}`);
   }

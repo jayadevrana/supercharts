@@ -7,6 +7,7 @@
 import { EventEmitter } from 'node:events';
 import type {
   MT5AccountSnapshot,
+  MT5AccountSummary,
   MT5PendingOrder,
   MT5Position,
   MT5SymbolInfo,
@@ -23,6 +24,8 @@ export interface MT5AccountState {
   token: string;
   /** Last hello from EA. */
   eaVersion: string;
+  /** Account summary from the last hello (broker/server/currency/login). */
+  summary: MT5AccountSummary | null;
   symbols: Map<string, MT5SymbolInfo>;
   snapshot: MT5AccountSnapshot | null;
   positions: Map<string, MT5Position>;
@@ -51,14 +54,30 @@ export class MT5Store extends EventEmitter {
   /** In-flight intents keyed by clientId → intent + state. */
   private intents = new Map<string, OrderIntentResult & { intent: OrderIntent }>();
 
-  issuePairingToken(userId: string, token: string): void {
-    this.pairingTokens.set(token, { userId, createdAt: Date.now() });
+  /**
+   * Register a pairing token. `createdAt` defaults to now; pass the original
+   * issue time when re-hydrating persisted tokens after a server restart so
+   * expiry stays anchored to the real issue/last-attach time.
+   */
+  issuePairingToken(userId: string, token: string, createdAt: number = Date.now()): void {
+    this.pairingTokens.set(token, { userId, createdAt });
+  }
+
+  /**
+   * Refresh a token's validity window (called when an EA attaches or detaches,
+   * so an actively-used token never expires out from under a live pairing).
+   */
+  touchPairingToken(token: string): void {
+    const row = this.pairingTokens.get(token);
+    if (row) row.createdAt = Date.now();
   }
 
   redeemPairingToken(token: string): string | null {
     const row = this.pairingTokens.get(token);
     if (!row) return null;
-    // Tokens are single-use but stay valid for 24h until first attach.
+    // A token is valid for 24h after issue. Each successful attach/detach
+    // refreshes the window (see touchPairingToken), so a configured EA keeps
+    // reconnecting indefinitely; an unused token dies after 24h.
     if (Date.now() - row.createdAt > 24 * 60 * 60_000) {
       this.pairingTokens.delete(token);
       return null;
@@ -66,12 +85,19 @@ export class MT5Store extends EventEmitter {
     return row.userId;
   }
 
-  ensureAccount(accountId: string, userId: string, token: string, eaVersion: string): MT5AccountState {
+  ensureAccount(
+    accountId: string,
+    userId: string,
+    token: string,
+    eaVersion: string,
+    summary: MT5AccountSummary | null = null,
+  ): MT5AccountState {
     const existing = this.accounts.get(accountId);
     if (existing) {
       existing.userId = userId;
       existing.token = token;
       existing.eaVersion = eaVersion;
+      if (summary) existing.summary = summary;
       existing.connected = true;
       existing.lastSeenAt = Date.now();
       this.emit('event', { kind: 'account_added', accountId } satisfies MT5Event);
@@ -82,6 +108,7 @@ export class MT5Store extends EventEmitter {
       userId,
       token,
       eaVersion,
+      summary,
       symbols: new Map(),
       snapshot: null,
       positions: new Map(),

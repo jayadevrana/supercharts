@@ -7,24 +7,44 @@ import { useMT5Store } from './mt5-store';
 import { MT5ConnectDialog } from './mt5-connect-dialog';
 
 export function MT5Chip() {
-  const { accounts, activeAccountId, setActiveAccount, refreshAccounts } = useMT5Store();
+  const { accounts, activeAccountId, setActiveAccount, refreshAccounts, bridgeStatus, refreshStatus } =
+    useMT5Store();
   const [open, setOpen] = useState(false);
   const active = accounts.find((a) => a.accountId === activeAccountId) ?? accounts[0];
 
   useEffect(() => {
     void refreshAccounts();
-    const id = setInterval(() => void refreshAccounts(), 8_000);
+    void refreshStatus();
+    const id = setInterval(() => {
+      void refreshAccounts();
+      void refreshStatus();
+    }, 8_000);
     return () => clearInterval(id);
-  }, [refreshAccounts]);
+  }, [refreshAccounts, refreshStatus]);
 
   if (!active) {
+    // An account paired before but its EA is offline right now (e.g. MT5 closed
+    // or the server restarted) — show that honestly instead of "Connect MT5".
+    const known = bridgeStatus?.knownAccounts?.[0];
     return (
       <>
         <button
           onClick={() => setOpen(true)}
-          className="flex items-center gap-1.5 rounded-md border border-dashed border-border bg-surface-sunken px-2.5 py-1.5 text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:border-accent/60 hover:text-foreground"
+          className={
+            known
+              ? 'flex items-center gap-1.5 rounded-md border border-warn/40 bg-surface-sunken px-2.5 py-1.5 text-[11px] text-warn hover:border-accent/60'
+              : 'flex items-center gap-1.5 rounded-md border border-dashed border-border bg-surface-sunken px-2.5 py-1.5 text-[11px] uppercase tracking-[0.14em] text-muted-foreground hover:border-accent/60 hover:text-foreground'
+          }
         >
-          <Plug className="h-3 w-3" /> Connect MT5
+          {known ? (
+            <>
+              <WifiOff className="h-3 w-3" /> MT5 · awaiting EA
+            </>
+          ) : (
+            <>
+              <Plug className="h-3 w-3" /> Connect MT5
+            </>
+          )}
         </button>
         <MT5ConnectDialog open={open} onOpenChange={setOpen} />
       </>

@@ -300,17 +300,30 @@ function PositionsList({
   accountId: string;
 }) {
   const refreshPositions = useMT5Store((s) => s.refreshPositions);
+  const [actionError, setActionError] = useState<string | null>(null);
   const own = positions.filter((p) => p.accountId === accountId);
   const ownOrders = pending.filter((p) => p.accountId === accountId);
+  // Close/cancel previously let api() rejections escape as unhandled promise
+  // rejections — clicking Close with the bridge offline silently did nothing.
   const close = async (id: string, fraction = 1): Promise<void> => {
-    await api(`/mt5/positions/${id}`, {
-      method: 'DELETE',
-      searchParams: { fraction: String(fraction) },
-    });
+    setActionError(null);
+    try {
+      await api(`/mt5/positions/${id}`, {
+        method: 'DELETE',
+        searchParams: { fraction: String(fraction) },
+      });
+    } catch (err) {
+      setActionError(`Close failed · ${(err as Error).message}`);
+    }
     await refreshPositions();
   };
   const cancel = async (id: string): Promise<void> => {
-    await api(`/mt5/orders/${id}`, { method: 'DELETE' });
+    setActionError(null);
+    try {
+      await api(`/mt5/orders/${id}`, { method: 'DELETE' });
+    } catch (err) {
+      setActionError(`Cancel failed · ${(err as Error).message}`);
+    }
     await refreshPositions();
   };
   return (
@@ -318,6 +331,11 @@ function PositionsList({
       <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
         <Briefcase className="h-3 w-3" /> Open positions ({own.length})
       </div>
+      {actionError ? (
+        <div className="mb-1 rounded-md border border-bear/40 bg-bear/5 px-2 py-1 text-[10px] text-bear">
+          {actionError}
+        </div>
+      ) : null}
       <div className="space-y-1">
         {own.length === 0 ? (
           <div className="rounded-md border border-dashed border-border px-2 py-2 text-[11px] text-muted-foreground">No open positions.</div>

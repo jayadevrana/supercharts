@@ -52,12 +52,112 @@ const intentSchema = z.object({
   recipeId: z.string().optional(),
 }) satisfies z.ZodType<OrderIntent>;
 
+const PAIRING_TOKEN_TTL_MS = 24 * 60 * 60_000;
+
+/**
+ * Re-load persisted pairing tokens into the in-memory store. Without this,
+ * every API restart (tsx watch restarts on each edit) silently stranded all
+ * configured EAs: the EA reconnects with its saved token, the store has never
+ * heard of it, and the bridge refuses the hello until the user generates a
+ * fresh token and re-edits the EA inputs. Expired rows are pruned here too.
+ */
+function hydratePairingTokens(db: AppDB, store: MT5Store): void {
+  const cutoff = Date.now() - PAIRING_TOKEN_TTL_MS;
+  db.raw.prepare('DELETE FROM mt5_pairing_tokens WHERE created_at < ?').run(cutoff);
+  const rows = db.raw
+    .prepare('SELECT token, user_id, created_at FROM mt5_pairing_tokens WHERE created_at >= ?')
+    .all(cutoff) as Array<{ token: string; user_id: string; created_at: number }>;
+  for (const row of rows) {
+    store.issuePairingToken(row.user_id, row.token, row.created_at);
+  }
+}
+
+/**
+ * Mirror live pairing events into SQLite so pairings survive restarts:
+ *  - refresh the pairing token's validity window on attach/detach (an
+ *    actively-reconnecting EA never expires; an unused token dies in 24h),
+ *  - upsert the `mt5_accounts` audit row (broker/server/currency/last-seen)
+ *    so the UI can show "previously paired, awaiting reconnect" honestly.
+ */
+function persistPairingEvents(db: AppDB, store: MT5Store): void {
+  store.on('event', (e: { kind: string; accountId?: string }) => {
+    if (e.kind !== 'account_added' && e.kind !== 'account_removed') return;
+    const account = e.accountId ? store.account(e.accountId) : undefined;
+    if (!account) return;
+    try {
+      const now = Date.now();
+      store.touchPairingToken(account.token);
+      db.raw
+        .prepare('UPDATE mt5_pairing_tokens SET created_at = ? WHERE token = ?')
+        .run(now, account.token);
+      const s = account.summary;
+      db.raw
+        .prepare(
+          `INSERT INTO mt5_accounts (account_id, user_id, broker, server, currency, first_seen_at, last_seen_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(account_id) DO UPDATE SET
+             user_id = excluded.user_id,
+             broker = excluded.broker,
+             server = excluded.server,
+             currency = excluded.currency,
+             last_seen_at = excluded.last_seen_at`,
+        )
+        .run(
+          account.accountId,
+          account.userId,
+          s?.broker ?? '',
+          s?.server ?? '',
+          s?.currency ?? '',
+          now,
+          now,
+        );
+    } catch {
+      // Persistence is best-effort; the live in-memory pairing must never
+      // break because an audit write failed.
+    }
+  });
+}
+
 export function mt5Routes(
   fastify: FastifyInstance,
   db: AppDB,
   store: MT5Store,
   router: IntentRouter,
 ): void {
+  hydratePairingTokens(db, store);
+  persistPairingEvents(db, store);
+
+  /**
+   * Honest connection status for the connect dialog: where the TCP bridge
+   * actually listens (mirrors the env defaults in main.ts), how many EAs are
+   * live right now, and which accounts have ever paired.
+   */
+  fastify.get('/api/mt5/status', async (req) => {
+    const user = getUser(req, db);
+    const live = store.listAccountsForUser(user.id);
+    const known = db.raw
+      .prepare(
+        `SELECT account_id as accountId, broker, server, currency,
+                first_seen_at as firstSeenAt, last_seen_at as lastSeenAt
+         FROM mt5_accounts WHERE user_id = ? ORDER BY last_seen_at DESC`,
+      )
+      .all(user.id) as Array<{
+      accountId: string;
+      broker: string;
+      server: string;
+      currency: string;
+      firstSeenAt: number;
+      lastSeenAt: number;
+    }>;
+    const liveIds = new Set(live.filter((a) => a.connected).map((a) => a.accountId));
+    return {
+      bridgePort: Number(process.env.MT5_BRIDGE_PORT ?? 7878),
+      bridgeHost: process.env.MT5_BRIDGE_HOST ?? '127.0.0.1',
+      connectedAccounts: liveIds.size,
+      knownAccounts: known.map((k) => ({ ...k, connected: liveIds.has(k.accountId) })),
+    };
+  });
+
   fastify.post('/api/mt5/pair-tokens', async (req) => {
     const user = getUser(req, db);
     const token = nanoid(24);
@@ -124,6 +224,12 @@ export function mt5Routes(
       const user = getUser(req, db);
       const { positionId } = req.params;
       const fraction = Number((req.query as { fraction?: string }).fraction ?? 1);
+      // A malformed fraction must never reach the EA: Number('abc') is NaN,
+      // which would serialize as null inside the close command.
+      if (!Number.isFinite(fraction) || fraction <= 0 || fraction > 1) {
+        reply.code(400);
+        return { error: 'invalid_fraction' };
+      }
       const all = store.listAccountsForUser(user.id);
       const owning = all.find((a) => a.positions.has(positionId));
       if (!owning) {
