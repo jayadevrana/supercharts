@@ -9,6 +9,7 @@ import type { IngestionContext } from '@supercharts/ingestion';
 import type { AlertEngine } from '../alert-engine';
 import { discoverTelegramChats, getTelegramBotInfo, sendTelegramMessage } from '../telegram';
 import { runMaCrossBacktest, runSignalBacktest } from '../backtester';
+import { optimizeScript } from '../script-optimizer';
 import { runScript } from '@supercharts/script-lang';
 import { runOptimizer, type OptimizeRequest } from '../optimizer';
 import { runWalkForward, type WalkForwardRequest } from '../walk-forward';
@@ -711,6 +712,109 @@ export function alertRoutes(
       sweepMs: Date.now() - started,
       ...result,
     };
+  });
+
+  /* ─── Script input optimizer: sweep a CODED strategy's input.num parameters ─── */
+  // The MetaTrader "optimize my EA's inputs" feature for PulseScript strategies. Every
+  // combination re-runs the user's script over the same real candles and backtests its
+  // marks; ranking/filters/objectives are identical to the MA-cross optimizer. Sweeps
+  // are time-budgeted (deterministic sampling order) and honestly report truncation.
+  fastify.post('/api/optimize/script', async (req, reply) => {
+    getUser(req, db); // pure compute
+    const body = (req.body ?? {}) as {
+      symbol?: string;
+      interval?: string;
+      source?: string;
+      inputs?: Record<string, number | boolean | string>;
+      ranges?: Record<string, { from?: number; step?: number; to?: number }>;
+      objective?: 'profit' | 'accuracy' | 'balanced';
+      minWinRate?: number;
+      topN?: number;
+      commissionPct?: number;
+      slippagePct?: number;
+      stopLossPct?: number;
+      takeProfitPct?: number;
+    };
+    const symbol = String(body.symbol ?? '').trim();
+    const interval = String(body.interval ?? '').trim() as Interval;
+    const source = typeof body.source === 'string' ? body.source : '';
+    if (!symbol || !interval) {
+      reply.code(400);
+      return { error: 'symbol_and_interval_required' };
+    }
+    if (!source.trim()) {
+      reply.code(400);
+      return { error: 'empty_script' };
+    }
+    const rangeEntries = Object.entries(body.ranges ?? {}).filter(
+      ([, r]) => r && Number.isFinite(Number(r.from)) && Number.isFinite(Number(r.to)) && Number(r.step ?? 0) > 0,
+    );
+    if (rangeEntries.length === 0) {
+      reply.code(400);
+      return { error: 'no_ranges', message: 'Pick at least one numeric input to optimize (from/step/to).' };
+    }
+    const ranges = Object.fromEntries(
+      rangeEntries.map(([id, r]) => [id, { from: Number(r!.from), step: Number(r!.step), to: Number(r!.to) }]),
+    );
+
+    const desired = 1000;
+    let candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+    if (candles.length < desired) {
+      const provider = resolveProvider(symbol, ctx);
+      if (provider) {
+        try {
+          const now = Date.now();
+          const intervalMs = INTERVAL_TO_MS[interval] ?? 60_000;
+          const from = now - desired * intervalMs;
+          const fetched = await provider.fetchHistoricalCandles(symbol, interval, from, now, desired);
+          for (const c of fetched) ctx.candleStore.upsert(symbol, interval, c);
+          candles = ctx.candleStore.query(symbol, interval, undefined, undefined, desired);
+        } catch (err) {
+          console.warn('[optimize/script] candle fetch failed, running on cache:', err);
+        }
+      }
+    }
+    if (candles.length === 0) {
+      reply.code(400);
+      return { error: 'no_data' };
+    }
+
+    // Validate the script ONCE before sweeping so a syntax error is a clear 400 with a
+    // line number, not 1000 swallowed per-combo failures.
+    try {
+      runScript(source, candles.slice(0, Math.min(candles.length, 50)), { inputs: body.inputs, timeoutMs: 1000 });
+    } catch (err) {
+      reply.code(400);
+      return { error: 'script_error', message: err instanceof Error ? err.message : String(err) };
+    }
+
+    const pct = (v: unknown): number | undefined =>
+      typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+    const commissionPct = pct(body.commissionPct);
+    const slippagePct = pct(body.slippagePct);
+    const stopLossPct = pct(body.stopLossPct);
+    const takeProfitPct = pct(body.takeProfitPct);
+    const realism =
+      commissionPct != null || slippagePct != null || stopLossPct != null || takeProfitPct != null
+        ? { commissionPct, slippagePct, stopLossPct, takeProfitPct }
+        : undefined;
+
+    const started = Date.now();
+    try {
+      const result = optimizeScript(candles, source, body.inputs ?? {}, ranges, interval, {
+        objective: body.objective ?? 'balanced',
+        minWinRate: typeof body.minWinRate === 'number' && body.minWinRate > 0 ? body.minWinRate : undefined,
+        topN: Math.min(50, Math.max(1, Math.round(body.topN ?? 20))),
+        realism,
+      });
+      return { symbol, interval, barsTested: candles.length, sweepMs: Date.now() - started, ...result };
+    } catch (err) {
+      if (err instanceof RangeError) {
+        reply.code(400);
+        return { error: 'invalid_ranges', message: err.message };
+      }
+      throw err;
+    }
   });
 
   /* ─── Strategy backtest: PulseScript → Strategy Tester (TradingView model) ─── */

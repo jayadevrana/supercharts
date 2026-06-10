@@ -176,7 +176,7 @@ function cfgCompare(a: OptimizerCombo, b: OptimizerCombo): number {
   return ka.fast - kb.fast || ka.slow - kb.slow || ka.buy - kb.buy || ka.sell - kb.sell;
 }
 
-function robustnessFlags(s: BacktestSummary, neighboursChecked: number, neighbourPassFraction: number): { flags: string[]; tone: 'green' | 'amber' | 'red' } {
+export function robustnessFlags(s: BacktestSummary, neighboursChecked: number, neighbourPassFraction: number): { flags: string[]; tone: 'green' | 'amber' | 'red' } {
   const red: string[] = [];
   const amber: string[] = [];
   if (s.losses === 0) red.push('no losing trades');

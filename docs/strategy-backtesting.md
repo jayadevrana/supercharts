@@ -62,6 +62,27 @@ Press **Backtest**. That's it.
 - **Data**: the last 1000 closed candles of the chart's symbol/interval — real market
   data, never synthetic. Run the same backtest twice and you get byte-identical results.
 
+## Optimizing your strategy's inputs (the MetaTrader way)
+
+The editor's **Optimizer** tab sweeps your script's own `input.num` parameters:
+
+1. **Run** the script once — the optimizer discovers its numeric inputs.
+2. Toggle the inputs to sweep and set **from / step / to** for each (up to 4 inputs,
+   1000 combinations max — the button shows the live count).
+3. Pick the objective (💰 Profit / 🎯 Accuracy / ⚖️ Balanced), optionally set a win-rate
+   floor, and press **Find best settings**.
+
+Every combination **re-runs your actual script** on the same real candles and backtests
+its marks — nothing is approximated. Results are ranked with hard anti-overfit guards
+(min trades, must have a losing trade, PF ≥ 1 and positive expectancy for profit/balanced,
+drawdown cap) plus neighbour-robustness flags, so a lone lucky spike can't win. When
+nothing passes, you get the closest candidates clearly flagged "below quality bar" and an
+honest reason (usually: nothing is profitable on this timeframe). **Apply** writes a row's
+values into the script's inputs and re-runs it on the chart.
+
+Sweeps are time-budgeted (~10s): if the grid is too big to finish, it samples evenly,
+tells you how many of the planned combinations ran, and suggests raising the steps.
+
 ## Verifying a backtest (do this — it's the point)
 
 After **Backtest**, the same script is pushed to the chart, so with "On chart" enabled

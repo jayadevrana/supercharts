@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, ChevronDown, FlaskConical, Loader2, TrendingUp, TrendingDown } from 'lucide-react';
+import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, ChevronDown, FlaskConical, Loader2, TrendingUp, TrendingDown, Trophy } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -20,6 +20,32 @@ interface SavedScript {
   name: string;
   source: string;
   updatedAt: number;
+}
+
+/** One pass of POST /api/optimize/script — a swept setting of the script's own inputs. */
+interface ScriptOptCombo {
+  inputs: Record<string, number>;
+  summary: { totalReturnPct: number; winRate: number; trades: number; maxDrawdownPct: number; profitFactor: number };
+  metrics?: { profitFactorCapped: number; rank: number; robustness: { flags: string[]; tone: 'green' | 'amber' | 'red' } };
+}
+interface ScriptOptResponse {
+  barsTested: number;
+  sweepMs: number;
+  planned: number;
+  evaluated: number;
+  qualifying: number;
+  truncated: boolean;
+  scriptErrors: number;
+  combos: ScriptOptCombo[];
+  fallbackCombos?: ScriptOptCombo[];
+  note?: string;
+}
+/** Per-input sweep config in the Optimizer tab. */
+interface SweepCfg {
+  on: boolean;
+  from: string;
+  step: string;
+  to: string;
 }
 
 /** Result of POST /api/backtest/script — the script's marks backtested on real candles. */
@@ -82,8 +108,8 @@ export function PulseEditorPanel() {
 
   const [draft, setDraft] = useState(pane.pulse.source);
   const [height, setHeight] = useState(DEFAULT_H);
-  // Right column: Console (run output + inputs) | Strategy Tester (backtest of the marks).
-  const [rightTab, setRightTab] = useState<'console' | 'tester'>('console');
+  // Right column: Console (run output + inputs) | Strategy Tester | input Optimizer.
+  const [rightTab, setRightTab] = useState<'console' | 'tester' | 'optimizer'>('console');
   const [btRunning, setBtRunning] = useState(false);
   const [btResult, setBtResult] = useState<ScriptBacktest | null>(null);
   const [btError, setBtError] = useState<string | null>(null);
@@ -91,6 +117,13 @@ export function PulseEditorPanel() {
   const [slippage, setSlippage] = useState('');
   const [stopLoss, setStopLoss] = useState('');
   const [takeProfit, setTakeProfit] = useState('');
+  // Input optimizer (MetaTrader-style sweep of the script's own input.num parameters).
+  const [sweepCfg, setSweepCfg] = useState<Record<string, SweepCfg>>({});
+  const [optObjective, setOptObjective] = useState<'profit' | 'accuracy' | 'balanced'>('balanced');
+  const [optMinWin, setOptMinWin] = useState(0);
+  const [optRunning, setOptRunning] = useState(false);
+  const [optResult, setOptResult] = useState<ScriptOptResponse | null>(null);
+  const [optError, setOptError] = useState<string | null>(null);
   const [saved, setSaved] = useState<SavedScript[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [currentName, setCurrentName] = useState('');
@@ -137,6 +170,82 @@ export function PulseEditorPanel() {
   const run = (): void => {
     setPulseSource(pane.id, draft);
     if (!pane.pulse.enabled) setPulseEnabled(pane.id, true);
+  };
+
+  // Seed sweep ranges from the script's discovered numeric inputs (after a Run). The
+  // default range brackets each input's declared default (½×..2×, clamped to min/max)
+  // so the out-of-the-box grid stays under the server's 1000-combo cap.
+  const numInputs = (result?.inputs ?? []).filter((d) => d.kind === 'num');
+  useEffect(() => {
+    if (numInputs.length === 0) return;
+    setSweepCfg((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const d of numInputs) {
+        if (next[d.id]) continue;
+        const dflt = Number(d.default) || 1;
+        const lo = Math.max(d.min ?? 1, Math.ceil(dflt / 2));
+        const hi = Math.min(d.max ?? dflt * 2, Math.max(lo + 1, Math.round(dflt * 2)));
+        next[d.id] = { on: false, from: String(lo), step: String(d.step ?? 1), to: String(hi) };
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numInputs.map((d) => d.id).join('|')]);
+
+  const sweptEntries = Object.entries(sweepCfg).filter(
+    ([id, c]) => c.on && numInputs.some((d) => d.id === id),
+  );
+  const optComboCount = sweptEntries.reduce((acc, [, c]) => {
+    const from = parseFloat(c.from);
+    const to = parseFloat(c.to);
+    const step = parseFloat(c.step);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(step) || step <= 0 || to < from) return 0;
+    return acc * (Math.floor((to - from) / step) + 1);
+  }, sweptEntries.length > 0 ? 1 : 0);
+
+  const runOptimize = async (obj = optObjective, minWin = optMinWin): Promise<void> => {
+    setOptRunning(true);
+    setOptError(null);
+    const pct = (s: string): number | undefined => {
+      const v = parseFloat(s);
+      return Number.isFinite(v) && v > 0 ? v : undefined;
+    };
+    try {
+      const r = await api<ScriptOptResponse>('/optimize/script', {
+        method: 'POST',
+        body: JSON.stringify({
+          symbol: pane.symbol,
+          interval: pane.interval,
+          source: draft,
+          inputs: pane.pulse.inputValues,
+          ranges: Object.fromEntries(
+            sweptEntries.map(([id, c]) => [id, { from: parseFloat(c.from), step: parseFloat(c.step), to: parseFloat(c.to) }]),
+          ),
+          objective: obj,
+          minWinRate: minWin > 0 ? minWin / 100 : undefined,
+          topN: 20,
+          ...(pct(commission) != null ? { commissionPct: pct(commission) } : {}),
+          ...(pct(slippage) != null ? { slippagePct: pct(slippage) } : {}),
+          ...(pct(stopLoss) != null ? { stopLossPct: pct(stopLoss) } : {}),
+          ...(pct(takeProfit) != null ? { takeProfitPct: pct(takeProfit) } : {}),
+        }),
+      });
+      setOptResult(r);
+    } catch (err) {
+      setOptResult(null);
+      setOptError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOptRunning(false);
+    }
+  };
+
+  /** Apply a swept setting: write each value into the script's inputs and re-run on chart. */
+  const applyCombo = (c: ScriptOptCombo): void => {
+    for (const [id, v] of Object.entries(c.inputs)) setPulseInput(pane.id, id, v);
+    run();
+    toast({ title: 'Setting applied', description: Object.entries(c.inputs).map(([k, v]) => `${k}=${v}`).join(' · '), tone: 'success' });
   };
 
   // Strategy Tester: run THIS script server-side over real candles and backtest its
@@ -318,7 +427,7 @@ export function PulseEditorPanel() {
       </div>
 
       {/* Body: editor + console/inputs */}
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_300px]" style={{ height: bodyH }}>
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_340px]" style={{ height: bodyH }}>
         <div className="min-h-0 min-w-0 overflow-hidden border-r border-border">
           <CodeMirror
             value={draft}
@@ -332,7 +441,13 @@ export function PulseEditorPanel() {
         <div className="flex min-h-0 flex-col text-xs">
           {/* Right-column tabs — TradingView's Pine Editor / Strategy Tester split. */}
           <div className="flex shrink-0 border-b border-border">
-            {(['console', 'tester'] as const).map((t) => (
+            {(
+              [
+                ['console', 'Console'],
+                ['tester', 'Tester'],
+                ['optimizer', 'Optimizer'],
+              ] as const
+            ).map(([t, label]) => (
               <button
                 key={t}
                 onClick={() => setRightTab(t)}
@@ -340,11 +455,169 @@ export function PulseEditorPanel() {
                   rightTab === t ? 'border-b-2 border-accent text-accent' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
-                {t === 'console' ? 'Console' : 'Strategy Tester'}
+                {label}
               </button>
             ))}
           </div>
-          {rightTab === 'console' ? (
+          {rightTab === 'optimizer' ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3 scroll-thin">
+              {numInputs.length === 0 ? (
+                <div className="rounded-md border border-border bg-surface-raised/60 p-2.5 text-muted-foreground">
+                  Press <span className="font-medium text-foreground">Run</span> first — the optimizer sweeps your script&apos;s{' '}
+                  <code>input.num</code> parameters, so it needs a run to discover them.
+                </div>
+              ) : (
+                <>
+                  <div className="text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    Sweep these inputs · from / step / to
+                  </div>
+                  {numInputs.map((d) => {
+                    const c = sweepCfg[d.id];
+                    if (!c) return null;
+                    return (
+                      <div key={d.id} className="flex items-center gap-1.5">
+                        <Switch checked={c.on} onCheckedChange={(v) => setSweepCfg((p) => ({ ...p, [d.id]: { ...c, on: v } }))} />
+                        <span className="w-20 truncate text-[11px] text-foreground" title={d.title}>{d.title}</span>
+                        {(['from', 'step', 'to'] as const).map((k) => (
+                          <Input
+                            key={k}
+                            type="number"
+                            value={c[k]}
+                            disabled={!c.on}
+                            onChange={(e) => setSweepCfg((p) => ({ ...p, [d.id]: { ...c, [k]: e.target.value } }))}
+                            className="h-7 w-14 text-xs"
+                          />
+                        ))}
+                      </div>
+                    );
+                  })}
+                  <div className="flex overflow-hidden rounded-md border border-border">
+                    {(
+                      [
+                        ['profit', '💰 Profit'],
+                        ['accuracy', '🎯 Accuracy'],
+                        ['balanced', '⚖️ Balanced'],
+                      ] as const
+                    ).map(([o, label]) => (
+                      <button
+                        key={o}
+                        onClick={() => { setOptObjective(o); if (optResult) void runOptimize(o); }}
+                        className={`flex-1 px-1 py-1.5 text-[11px] transition-colors ${optObjective === o ? 'bg-accent/20 font-medium text-accent' : 'text-muted-foreground hover:text-foreground'}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                    Min win ≥ {optMinWin}%
+                    <input
+                      type="range" min={0} max={90} step={5} value={optMinWin}
+                      onChange={(e) => setOptMinWin(+e.target.value)}
+                      onPointerUp={() => { if (optResult) void runOptimize(); }}
+                      className="flex-1 accent-[hsl(var(--accent))]"
+                    />
+                  </label>
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5"
+                    onClick={() => void runOptimize()}
+                    disabled={optRunning || optComboCount === 0 || optComboCount > 1000}
+                  >
+                    {optRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trophy className="h-3.5 w-3.5" />}
+                    Find best settings · {optComboCount.toLocaleString()} combos
+                  </Button>
+                  {optComboCount > 1000 ? <div className="text-[10px] text-bear">Over the 1000-combination cap — raise the steps.</div> : null}
+                  {optComboCount === 0 && sweptEntries.length === 0 ? (
+                    <div className="text-[10px] text-muted-foreground">Toggle at least one input to sweep.</div>
+                  ) : null}
+
+                  {optError ? (
+                    <div className="rounded-md border border-bear/40 bg-bear/10 p-2.5">
+                      <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-bear">{optError}</pre>
+                    </div>
+                  ) : null}
+                  {optResult ? (
+                    <>
+                      <div className="text-[10px] text-muted-foreground">
+                        <span className="font-semibold text-foreground">{optResult.evaluated.toLocaleString()} of {optResult.planned.toLocaleString()} combos</span>
+                        {' '}· {optResult.qualifying} qualified · {optResult.barsTested} candles · {(optResult.sweepMs / 1000).toFixed(1)}s
+                        {optResult.scriptErrors > 0 ? ` · ${optResult.scriptErrors} run errors` : ''}
+                      </div>
+                      {optResult.note ? <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[10px] text-amber-200">{optResult.note}</div> : null}
+                      {(() => {
+                        const isFallback = optResult.combos.length === 0 && (optResult.fallbackCombos?.length ?? 0) > 0;
+                        const rows = isFallback ? optResult.fallbackCombos! : optResult.combos;
+                        if (rows.length === 0) return null;
+                        return (
+                          <>
+                            {isFallback ? (
+                              <div className="rounded-md border border-border bg-surface-raised/60 p-2 text-[10px] text-muted-foreground">
+                                Closest candidates — <span className="font-medium text-foreground">none meets the quality bar</span>; not tradeable settings.
+                              </div>
+                            ) : null}
+                            <div className="overflow-hidden rounded-md border border-border">
+                              <table className="w-full text-left text-[10px]">
+                                <thead className="bg-surface-raised/60 text-[8px] uppercase tracking-[0.1em] text-muted-foreground">
+                                  <tr>
+                                    <th className="px-1.5 py-1">#</th>
+                                    <th className="px-1.5 py-1">Setting</th>
+                                    <th className="px-1.5 py-1 text-right">Ret</th>
+                                    <th className="px-1.5 py-1 text-right">Win</th>
+                                    <th className="px-1.5 py-1 text-right">Tr</th>
+                                    <th className="px-1.5 py-1" />
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {rows.map((c) => {
+                                    const tone = c.metrics?.robustness.tone ?? 'amber';
+                                    return (
+                                      <tr key={Object.values(c.inputs).join('|')} className="border-t border-border/60">
+                                        <td className="px-1.5 py-0.5 text-muted-foreground">{c.metrics?.rank}</td>
+                                        <td className="px-1.5 py-0.5">
+                                          <span
+                                            className={`font-medium ${tone === 'green' ? 'text-bull' : tone === 'red' ? 'text-bear' : 'text-amber-300'}`}
+                                            title={c.metrics?.robustness.flags.join(' · ')}
+                                          >
+                                            {Object.entries(c.inputs).map(([k, v]) => `${k}=${v}`).join(' ')}
+                                          </span>
+                                        </td>
+                                        <td className={`px-1.5 py-0.5 text-right tabular-nums ${c.summary.totalReturnPct >= 0 ? 'text-bull' : 'text-bear'}`}>
+                                          {c.summary.totalReturnPct >= 0 ? '+' : ''}{c.summary.totalReturnPct.toFixed(1)}%
+                                        </td>
+                                        <td className="px-1.5 py-0.5 text-right tabular-nums">{(c.summary.winRate * 100).toFixed(0)}%</td>
+                                        <td className="px-1.5 py-0.5 text-right tabular-nums text-muted-foreground">{c.summary.trades}</td>
+                                        <td className="px-1.5 py-0.5 text-right">
+                                          <button
+                                            className="rounded border border-border px-1.5 py-0.5 text-[9px] text-muted-foreground transition-colors hover:border-accent hover:text-accent"
+                                            onClick={() => applyCombo(c)}
+                                          >
+                                            Apply
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                            <p className="leading-relaxed text-[9px] text-muted-foreground/70">
+                              Every row re-ran YOUR script on the same {optResult.barsTested} real candles and backtested its marks. Hover a setting
+                              for robustness flags. <strong>Apply</strong> writes the values into the script&apos;s inputs and re-runs it on the chart.
+                            </p>
+                          </>
+                        );
+                      })()}
+                    </>
+                  ) : !optError ? (
+                    <div className="rounded-md border border-border bg-surface-raised/60 p-2.5 text-muted-foreground">
+                      Toggle the inputs to sweep, set from/step/to, and press{' '}
+                      <span className="font-medium text-foreground">Find best settings</span> — like MetaTrader&apos;s optimizer, but for your PulseScript.
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </div>
+          ) : rightTab === 'console' ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scroll-thin">
               <ConsolePanel result={result} enabled={pane.pulse.enabled} />
               <InputsPanel
