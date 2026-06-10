@@ -43,3 +43,4 @@ apps/tv-recorder/output/screens/
 # macOS metadata files
 ._*
 .DS_Store
+reserch/
