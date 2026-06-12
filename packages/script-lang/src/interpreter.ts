@@ -2,7 +2,7 @@ import type { Candle } from '@supercharts/types';
 import { priceFromCandle, type PriceSource } from '@supercharts/indicators';
 import type { Arg, Expr, MarkKind, Program, Stmt } from './ast';
 import { parse } from './parser';
-import { MATH, TA, type TaFn, type TaOut } from './stdlib';
+import { MATH, MATH_CONSTS, TA, type TaFn, type TaResult } from './stdlib';
 
 /**
  * PulseScript bar-by-bar interpreter (Phase 6 task 3 — core).
@@ -232,12 +232,12 @@ class Interpreter {
   private lastPos: { line: number; col: number } = { line: 1, col: 1 };
   /** Per-call-site cache of a series argument's values, grown bar-by-bar (locals-free calls only). */
   private seriesCache = new Map<Expr, { arr: number[]; upTo: number }>();
-  /** Per-call-site cache of a stdlib call's output array, valid for the current top bar (per-bar fallback). */
-  private callCache = new Map<Expr, { at: number; out: TaOut }>();
+  /** Per-call-site cache of a stdlib call's output, valid for the current top bar (per-bar fallback). */
+  private callCache = new Map<Expr, { at: number; out: TaResult }>();
   /** series:0 studies (atr/vwap/macd/stoch) depend only on candles + params → one result per (fn, params) for the whole run. */
-  private taParamCache = new Map<string, TaOut>();
+  private taParamCache = new Map<string, TaResult>();
   /** Per-call-site cache for a bar-invariant series-based call → computed once over the full range, then just indexed. */
-  private taRunCache = new Map<Expr, TaOut>();
+  private taRunCache = new Map<Expr, TaResult>();
   /** Memoised "is this ta call bar-invariant (cache-safe)?" decision, per call site. */
   private taStable = new Map<Expr, boolean>();
   /** Every name the script binds (decls / fn names+params / loop vars) — a reference to one of these is not a pure candle read. */
@@ -499,8 +499,9 @@ class Interpreter {
       case 'call':
         return this.evalCall(e, bar, locals);
       case 'member': {
-        // Namespaces are call-only; a record value (multi-output study) exposes its fields.
+        // Namespaces are call-only (except `math.pi`-style constants); records expose fields.
         if (e.object.type === 'ident' && NAMESPACE_NAMES.has(e.object.name)) {
+          if (e.object.name === 'math' && e.property in MATH_CONSTS) return MATH_CONSTS[e.property]!;
           throw new RuntimeError(
             `namespace member '.${e.property}' must be called, e.g. ta.sma(close, 20)`,
             e.pos.line,
@@ -803,9 +804,22 @@ class Interpreter {
   private callTa(fn: string, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     const spec = TA[fn];
     if (!spec) throw new RuntimeError(`unknown indicator '${fn}'`, e.pos.line, e.pos.col);
-    const r = this.taOutput(fn, spec, e, locals)[bar];
-    if (r == null) return null;
-    return typeof r === 'boolean' ? r : this.finiteOrNull(r);
+    return this.pickTa(this.taOutput(fn, spec, e, locals), bar);
+  }
+
+  /** Index a study's full output at one bar — a record value for multi-output studies. */
+  private pickTa(out: TaResult, bar: number): Value {
+    if (Array.isArray(out)) {
+      const r = out[bar];
+      if (r == null) return null;
+      return typeof r === 'boolean' ? r : this.finiteOrNull(r);
+    }
+    const rec: RecordValue = {};
+    for (const key of Object.keys(out)) {
+      const r = out[key]![bar];
+      rec[key] = r == null ? null : typeof r === 'boolean' ? r : this.finiteOrNull(r);
+    }
+    return rec;
   }
 
   /**
@@ -819,7 +833,7 @@ class Interpreter {
    *    the per-top-bar recompute, reused within the bar.
    * The indicators are causal, so indexing `out[bar]` never reads a future bar in any path.
    */
-  private taOutput(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): TaOut {
+  private taOutput(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): TaResult {
     if (locals !== null) return this.computeTa(fn, spec, e, locals, this.i); // inside a fn — no cross-call memo
 
     if (spec.series === 0) {
@@ -863,7 +877,7 @@ class Interpreter {
   }
 
   /** Build a ta call's series args (over bars 0..upTo) and params, then run the indicator. */
-  private computeTa(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null, upTo: number): TaOut {
+  private computeTa(fn: string, spec: TaFn, e: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null, upTo: number): TaResult {
     const sArgs: number[][] = [];
     for (let k = 0; k < spec.series; k++) {
       const arg = e.args[k];
@@ -903,10 +917,16 @@ class Interpreter {
         return this.isStableSeries(e.object) && this.isConst(e.index);
       case 'call':
         return this.isStableCall(e, false);
-      case 'list':
       case 'member':
+        return this.isMathConst(e);
+      case 'list':
         return false;
     }
+  }
+
+  /** `math.pi` / `math.e` / `math.phi` — constant member reads. */
+  private isMathConst(e: Extract<Expr, { type: 'member' }>): boolean {
+    return e.object.type === 'ident' && e.object.name === 'math' && e.property in MATH_CONSTS;
   }
 
   /** An expr that evaluates to the same scalar on every bar — required of a param before it can seed a run-wide cache. */
@@ -926,9 +946,10 @@ class Interpreter {
         return this.isConst(e.cond) && this.isConst(e.then) && this.isConst(e.else);
       case 'call':
         return this.isStableCall(e, true);
+      case 'member':
+        return this.isMathConst(e);
       case 'ident': // price sources / barIndex / globals all vary per bar
       case 'index':
-      case 'member':
       case 'list':
         return false;
     }
