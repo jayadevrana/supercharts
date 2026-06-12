@@ -85,6 +85,12 @@ export interface PaneState {
     economicEvents: boolean;
     /** MA-cross BUY/SELL labels from a matching alert (or a backtest preview). Default on. */
     maSignals: boolean;
+    /**
+     * On-chart [bid SELL][spread][ask BUY] buttons (TV-style). Default on; they render
+     * only while a REAL order-book feed flows (Binance) — venues without depth show
+     * nothing. Persisted panes from before this flag read undefined = shown.
+     */
+    tradeButtons: boolean;
   };
   /** SMC / order-flow indicator toggles. Each maps 1:1 to a SmcLayer flag. */
   smc: {
@@ -171,6 +177,8 @@ interface TerminalStore {
   setPaneChartType: (id: string, t: ChartType) => void;
   setPaneScaleMode: (id: string, mode: NonNullable<PaneState['scaleMode']>) => void;
   togglePaneOverlay: (id: string, overlay: keyof PaneState['overlays']) => void;
+  /** Explicit overlay set — for flags whose "unset" means shown (legacy panes), where a blind toggle would mis-flip. */
+  setPaneOverlay: (id: string, overlay: keyof PaneState['overlays'], value: boolean) => void;
   toggleSmcOverlay: (id: string, overlay: keyof PaneState['smc']) => void;
   setHeatmapSetting: (id: string, key: keyof PaneState['heatmapSettings'], value: number) => void;
   setStsSetting: <K extends keyof PaneState['stsSettings']>(
@@ -202,6 +210,12 @@ interface TerminalStore {
    */
   dialogRequest: { kind: 'indicators' | 'alerts'; token: number } | null;
   requestDialog: (kind: 'indicators' | 'alerts') => void;
+  /**
+   * One-shot order-ticket routing from the on-chart buy/sell buttons: opens the Trade
+   * tab and preselects the side in the order panel. Never places an order.
+   */
+  orderSideRequest: { side: 'buy' | 'sell'; token: number } | null;
+  requestOrderSide: (side: 'buy' | 'sell') => void;
   /** When set, the Ind panel auto-opens that instance's settings editor, then clears this. */
   indicatorSettingsTarget: string | null;
   requestIndicatorSettings: (id: string) => void;
@@ -258,6 +272,7 @@ function defaultPane(id: string, symbol: string): PaneState {
       signalsTrendScore: false,
       economicEvents: false,
       maSignals: true,
+      tradeButtons: true,
     },
     smc: {
       fvg: false,
@@ -376,6 +391,13 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
       ),
     })),
 
+  setPaneOverlay: (id, overlay, value) =>
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === id ? { ...p, overlays: { ...p.overlays, [overlay]: value } } : p,
+      ),
+    })),
+
   toggleSmcOverlay: (id, overlay) =>
     set((state) => ({
       panes: state.panes.map((p) =>
@@ -445,6 +467,13 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   dialogRequest: null,
   requestDialog: (kind) =>
     set((s) => ({ dialogRequest: { kind, token: (s.dialogRequest?.token ?? 0) + 1 } })),
+  orderSideRequest: null,
+  requestOrderSide: (side) =>
+    set((s) => ({
+      orderSideRequest: { side, token: (s.orderSideRequest?.token ?? 0) + 1 },
+      rightRailTab: 'trade',
+      showRightRail: true,
+    })),
   indicatorSettingsTarget: null,
   requestIndicatorSettings: (id) => set({ rightRailTab: 'ind', indicatorSettingsTarget: id }),
   clearIndicatorSettingsTarget: () => set({ indicatorSettingsTarget: null }),

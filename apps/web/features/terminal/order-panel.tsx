@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownToLine, ArrowUpToLine, Briefcase, Crosshair, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,6 +32,13 @@ export function OrderPanel({ pane }: OrderPanelProps) {
 
   const [tab, setTab] = useState<Tab>('market');
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
+  // On-chart buy/sell buttons route here with a preselected side (ticket prep only —
+  // the user still reviews and submits the order themselves).
+  const orderSideRequest = useTerminalStore((s) => s.orderSideRequest);
+  useEffect(() => {
+    if (orderSideRequest) setSide(orderSideRequest.side);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderSideRequest?.token]);
   const [sizingMode, setSizingMode] = useState<SizingMode>('fixed_lots');
   const [lots, setLots] = useState(0.01);
   const [riskPercent, setRiskPercent] = useState(0.5);

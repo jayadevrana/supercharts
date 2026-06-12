@@ -58,6 +58,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IndicatorLegend } from './indicator-legend';
 import { SymbolStatusLine } from './symbol-status-line';
 import { ChartFooter, resolvePresetSpan, type RangePreset } from './chart-footer';
+import { TradeButtons } from './trade-buttons';
+import { isStaleBook, topOfBook, type TopOfBook } from './trade-buttons-util';
 import { buildLegendRows } from './indicator-legend-util';
 import { buildDataWindow } from './data-window-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
@@ -114,6 +116,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const bookRef = useRef<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
   const [domBook, setDomBook] = useState<{ bids: Level[]; asks: Level[] }>({ bids: [], asks: [] });
   const domOnRef = useRef(false);
+  /** Live best bid/ask for the on-chart buy/sell buttons (null = no real book → hidden). */
+  const bookTopRef = useRef<TopOfBook | null>(null);
+  const [bookTop, setBookTop] = useState<TopOfBook | null>(null);
   /** Open Interest (REST-polled from /api/futures/oi while the panel is on). */
   const [oiData, setOiData] = useState<OIData | null>(null);
   const [oiLoading, setOiLoading] = useState(false);
@@ -160,6 +165,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const rightRailTab = useTerminalStore((s) => s.rightRailTab);
   const setPaneInterval = useTerminalStore((s) => s.setPaneInterval);
   const setPaneScaleMode = useTerminalStore((s) => s.setPaneScaleMode);
+  const requestOrderSide = useTerminalStore((s) => s.requestOrderSide);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
@@ -546,7 +552,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         }
 
         case 'orderbook_delta': {
-          if (msg.symbol !== pane.symbol || !domOnRef.current) return;
+          if (msg.symbol !== pane.symbol) return;
+          // Best bid/ask for the on-chart buy/sell buttons — kept regardless of the DOM
+          // ladder toggle (the gateway streams the book for every subscribed symbol).
+          const top = topOfBook(msg.delta);
+          if (top) bookTopRef.current = top;
+          if (!domOnRef.current) return;
           // depth20 snapshots — just keep the latest top-of-book for the ladder.
           bookRef.current = { bids: msg.delta.bids, asks: msg.delta.asks };
           return;
@@ -1137,6 +1148,22 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     return () => clearInterval(timer);
   }, [pane.overlays.timeAndSales, pane.symbol, pane.interval]);
 
+  // Buy/sell buttons: flush the top-of-book ref to render state ~2×/s while shown.
+  // A stale book (feed gone >10s) or a venue with no depth clears the buttons entirely —
+  // they only ever show a live, real market.
+  useEffect(() => {
+    bookTopRef.current = null;
+    setBookTop(null);
+    if (pane.overlays.tradeButtons === false) return;
+    const flush = (): void => {
+      const top = bookTopRef.current;
+      setBookTop(top && !isStaleBook(top, Date.now()) ? top : null);
+    };
+    flush();
+    const timer = setInterval(flush, 500);
+    return () => clearInterval(timer);
+  }, [pane.overlays.tradeButtons, pane.symbol, pane.interval]);
+
   // DOM ladder: same pattern — orderbook_delta fills bookRef, flushed to state ~4×/s.
   useEffect(() => {
     domOnRef.current = pane.overlays.domLadder;
@@ -1677,6 +1704,14 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
               </button>
             ) : null}
           </div>
+          {pane.overlays.tradeButtons !== false && bookTop ? (
+            <TradeButtons
+              bid={bookTop.bid}
+              ask={bookTop.ask}
+              onSell={() => requestOrderSide('sell')}
+              onBuy={() => requestOrderSide('buy')}
+            />
+          ) : null}
           {!legendCollapsed ? (
             <IndicatorLegend
               rows={legendRows}
@@ -1864,6 +1899,7 @@ function ChartContextMenu({
   onToggleHoverPanel: () => void;
 }) {
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
+  const setPaneOverlay = useTerminalStore((s) => s.setPaneOverlay);
   const requestDialog = useTerminalStore((s) => s.requestDialog);
   const priceLabel = corePriceFormat(menu.price);
   const [copied, setCopied] = useState(false);
@@ -1943,6 +1979,13 @@ function ChartContextMenu({
         <MenuItem
           label={hoverPanelOn ? 'Hide hover OHLC panel' : 'Show hover OHLC panel'}
           onClick={onToggleHoverPanel}
+        />
+        <MenuItem
+          label={pane.overlays.tradeButtons !== false ? 'Hide buy/sell buttons' : 'Show buy/sell buttons'}
+          onClick={() => {
+            setPaneOverlay(pane.id, 'tradeButtons', pane.overlays.tradeButtons === false);
+            onClose();
+          }}
         />
         <MenuSeparator />
         <MenuItem
