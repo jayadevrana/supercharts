@@ -85,6 +85,11 @@ export interface PriceScaleState {
   priceMin: number;
   mode: PriceScaleMode;
   inverted: boolean;
+  /**
+   * Percent-mode baseline (the first visible bar's close, TV semantics). Percent mode keeps
+   * the linear price↔y transform — only labels are expressed as % change vs this baseline.
+   */
+  baseline?: number;
 }
 
 export class PriceScale {
@@ -129,18 +134,43 @@ export class PriceScale {
     this.state.priceMax = highestPrice + pad;
   }
 
-  /** Shift price range by dy pixels (positive dy pans down → reveals lower prices). */
+  /**
+   * Shift price range by dy pixels. Positive dy (cursor dragged down) moves the window to
+   * higher prices — the content follows the cursor, grab-style.
+   * In log mode the shift happens in log space (a pixel pans a constant *ratio*, not a
+   * constant price delta) so panning feels uniform across the whole axis.
+   */
   pan(dyPixels: number): void {
-    const { priceMin, priceMax, height } = this.state;
+    const { priceMin, priceMax, height, mode } = this.state;
+    if (mode === 'log') {
+      const lo = Math.log(Math.max(priceMin, 1e-12));
+      const hi = Math.log(Math.max(priceMax, 1e-12));
+      const dLog = (hi - lo) * (dyPixels / Math.max(height, 1));
+      this.state.priceMin = Math.exp(lo + dLog);
+      this.state.priceMax = Math.exp(hi + dLog);
+      return;
+    }
     const dPrice = (priceMax - priceMin) * (dyPixels / Math.max(height, 1));
     this.state.priceMin += dPrice;
     this.state.priceMax += dPrice;
   }
 
-  /** Zoom around a focal y. factor < 1 stretches range smaller (more detail). */
+  /**
+   * Zoom around a focal y. factor < 1 stretches range smaller (more detail).
+   * Log mode scales the log-span around the focal price so the price under the cursor
+   * stays pinned and both halves zoom by equal ratios.
+   */
   zoomAroundY(focalY: number, factor: number): void {
     const pFocal = this.yToPrice(focalY);
-    const { priceMin, priceMax } = this.state;
+    const { priceMin, priceMax, mode } = this.state;
+    if (mode === 'log') {
+      const lf = Math.log(Math.max(pFocal, 1e-12));
+      const lo = Math.log(Math.max(priceMin, 1e-12));
+      const hi = Math.log(Math.max(priceMax, 1e-12));
+      this.state.priceMin = Math.exp(lf + (lo - lf) * factor);
+      this.state.priceMax = Math.exp(lf + (hi - lf) * factor);
+      return;
+    }
     this.state.priceMin = pFocal + (priceMin - pFocal) * factor;
     this.state.priceMax = pFocal + (priceMax - pFocal) * factor;
   }

@@ -552,6 +552,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     chartRef.current?.setTheme(resolvedTheme);
   }, [resolvedTheme]);
 
+  // Price-scale mode (linear / log / percent). Re-applies after the ChartCore is rebuilt
+  // on a symbol/interval switch, so a log chart stays log across timeframe changes.
+  useEffect(() => {
+    chartRef.current?.setPriceScaleMode(pane.scaleMode ?? 'linear');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.scaleMode, pane.symbol, pane.interval]);
+
   // Cross-pane crosshair sync: publish the active pane's hover time + mirror others.
   useEffect(() => {
     const core = chartRef.current;

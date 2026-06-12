@@ -1,10 +1,10 @@
 import type { Candle, DrawingObject, DeepTradeBubble, FootprintBar, LiquidityHeatmapCell, VolumeProfile } from '@supercharts/types';
-import { PriceScale, TimeScale } from './scale';
+import { PriceScale, TimeScale, type PriceScaleMode } from './scale';
 import { computeGeometry, type ChartGeometry } from './viewport';
 import { DARK_THEME, type ChartTheme } from './theme';
 import type { Layer, RenderContext, ChartFrame } from './layers/types';
-import { GridLayer, niceTicks, priceTickTarget } from './layers/grid';
-import { AxisLayer, formatPrice } from './layers/axis';
+import { GridLayer, priceTickTarget, priceTickValues } from './layers/grid';
+import { AxisLayer, priceAxisLabel } from './layers/axis';
 import { PriceSeriesLayer } from './layers/price-series';
 import { VolumeLayer } from './layers/volume';
 import { CrosshairLayer } from './layers/crosshair';
@@ -210,6 +210,97 @@ export class ChartCore {
     if (this.showVolumePane === visible) return;
     this.showVolumePane = visible;
     this.resize();
+  }
+
+  // ---- Price-scale modes (linear / log / percent), invert, auto-fit ----
+
+  /**
+   * Switch the vertical scale mode. Log re-lays ticks per decade and pans/zooms in ratio
+   * space; percent keeps the linear transform but relabels the axis as % change vs the
+   * first visible bar's close (re-baselined live as the user pans). Auto-fit re-fits so
+   * the data fills the pane under the new mode.
+   */
+  setPriceScaleMode(mode: PriceScaleMode): void {
+    if (this.priceScale.state.mode === mode) return;
+    this.priceScale.state.mode = mode;
+    if (mode === 'percent') this.refreshPercentBaseline();
+    if (mode === 'log' && this.priceScale.state.priceMin <= 0) {
+      // A pinned range that dips ≤ 0 has no log image — re-arm auto and snap to the data.
+      this.setPriceAutoFit(true);
+    }
+    if (this.priceAutoFit) this.fitPriceScaleToVisible(false);
+    this.markDirty();
+    this.emitScaleState();
+  }
+
+  /** Flip the vertical axis (TV "Invert scale"). */
+  setInverted(inverted: boolean): void {
+    if (this.priceScale.state.inverted === inverted) return;
+    this.priceScale.state.inverted = inverted;
+    this.markDirty();
+    this.emitScaleState();
+  }
+
+  /** Re-arm price auto-fit (the explicit "Auto" control — same effect as double-click). */
+  setAutoFit(): void {
+    this.setPriceAutoFit(true);
+    this.fitPriceScaleToVisible(true);
+    this.markDirty();
+  }
+
+  getScaleState(): { mode: PriceScaleMode; inverted: boolean; auto: boolean } {
+    return {
+      mode: this.priceScale.state.mode,
+      inverted: this.priceScale.state.inverted,
+      auto: this.priceAutoFit,
+    };
+  }
+
+  /** Subscribe to scale-state changes (mode / invert / auto-fit) — UI toggles stay live. */
+  onScaleState(cb: (s: { mode: PriceScaleMode; inverted: boolean; auto: boolean }) => void): () => void {
+    this.scaleStateListeners.add(cb);
+    return () => this.scaleStateListeners.delete(cb);
+  }
+
+  private scaleStateListeners = new Set<
+    (s: { mode: PriceScaleMode; inverted: boolean; auto: boolean }) => void
+  >();
+
+  private emitScaleState(): void {
+    const s = this.getScaleState();
+    for (const cb of this.scaleStateListeners) cb(s);
+  }
+
+  /** Single write-path for the auto-fit flag so every flip reaches the listeners. */
+  private setPriceAutoFit(v: boolean): void {
+    if (this.priceAutoFit === v) return;
+    this.priceAutoFit = v;
+    if (!v) this.priceFitTarget = null;
+    this.emitScaleState();
+  }
+
+  /** Percent labels are relative to the first VISIBLE bar's close (TV semantics). */
+  private refreshPercentBaseline(): void {
+    if (this.priceScale.state.mode !== 'percent') return;
+    const { fromTime } = this.timeScale.visibleRange();
+    const candles = this.frame.candles;
+    if (candles.length === 0) return;
+    // First candle at/after the left edge (sorted by openTime).
+    let lo = 0;
+    let hi = candles.length - 1;
+    let idx = candles.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (candles[mid]!.openTime >= fromTime) {
+        idx = mid;
+        hi = mid - 1;
+      } else lo = mid + 1;
+    }
+    const base = candles[idx]!.close;
+    if (base > 0 && base !== this.priceScale.state.baseline) {
+      this.priceScale.state.baseline = base;
+      this.markDirty();
+    }
   }
 
   /**
@@ -524,8 +615,7 @@ export class ChartCore {
       if (x >= this.geometry.axisPane.x) {
         priceAxisDrag = true;
         // Grabbing the price axis is an explicit "I'll scale this myself" (TV semantics).
-        this.priceAutoFit = false;
-        this.priceFitTarget = null;
+        this.setPriceAutoFit(false);
       } else if (y >= this.geometry.timeAxisPane.y) timeAxisDrag = true;
       else if (!suppressed) {
         dragging = true;
@@ -548,8 +638,7 @@ export class ChartCore {
           // jitter cancels out) hands the user manual control mid-gesture, TV-style.
           this.gestureDy += y - lastY;
           if (Math.abs(this.gestureDy) > MANUAL_PRICE_DRAG_PX) {
-            this.priceAutoFit = false;
-            this.priceFitTarget = null;
+            this.setPriceAutoFit(false);
           } else {
             this.fitPriceScaleToVisible(true);
           }
@@ -625,7 +714,7 @@ export class ChartCore {
       this.stopInertia();
       this.cancelWheelZoom();
       this.autoFollow = true;
-      this.priceAutoFit = true; // dblclick re-arms auto-scale (TV semantics)
+      this.setPriceAutoFit(true); // dblclick re-arms auto-scale (TV semantics)
       const candles = this.frame.candles;
       if (candles.length > 0) {
         const last = candles[candles.length - 1]!;
@@ -880,7 +969,7 @@ export class ChartCore {
     if (!ext) return;
     const current: PriceRange = { min: this.priceScale.state.priceMin, max: this.priceScale.state.priceMax };
     if (rangesOverlap(current, { min: ext.lo, max: ext.hi })) return;
-    this.priceAutoFit = true;
+    this.setPriceAutoFit(true);
     this.fitPriceScaleToVisible(false);
   }
 
@@ -924,18 +1013,17 @@ export class ChartCore {
     ctx.save();
     ctx.font = `${this.theme.font.sizeAxis}px ${this.theme.font.family}`;
     let widest = 0;
-    const ticks = niceTicks(
-      this.priceScale.state.priceMin,
-      this.priceScale.state.priceMax,
+    const ticks = priceTickValues(
+      this.priceScale.state,
       priceTickTarget(this.geometry.pricePane.height),
     );
     for (const p of ticks) {
-      const w = ctx.measureText(formatPrice(p)).width;
+      const w = ctx.measureText(priceAxisLabel(p, this.priceScale.state)).width;
       if (w > widest) widest = w;
     }
     const last = this.frame.candles[this.frame.candles.length - 1];
     if (last) {
-      const w = ctx.measureText(formatPrice(last.close)).width;
+      const w = ctx.measureText(priceAxisLabel(last.close, this.priceScale.state)).width;
       if (w > widest) widest = w;
     }
     ctx.restore();
@@ -974,6 +1062,8 @@ export class ChartCore {
   };
 
   private render(): void {
+    // Percent labels track the first visible bar as the user pans (TV re-baselines live).
+    this.refreshPercentBaseline();
     this.updateAxisWidth();
     const { ctx, canvas } = this;
     ctx.save();

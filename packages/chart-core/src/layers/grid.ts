@@ -1,4 +1,5 @@
 import type { Layer, RenderContext } from './types';
+import type { PriceScaleState } from '../scale';
 
 export class GridLayer implements Layer {
   readonly id = 'grid';
@@ -12,9 +13,10 @@ export class GridLayer implements Layer {
     ctx.lineWidth = 1;
 
     // Horizontal price grid lines — density tracks the pane height (~1 tick / 55px).
-    const priceLines = niceTicks(
-      priceScale.state.priceMin,
-      priceScale.state.priceMax,
+    // Mode-aware: log space gets decade/mantissa ticks, percent gets round-% steps —
+    // the SAME positions the axis labels use, so lines and labels always align.
+    const priceLines = priceTickValues(
+      priceScale.state,
       priceTickTarget(pricePane.height),
     );
     ctx.beginPath();
@@ -59,6 +61,63 @@ export class GridLayer implements Layer {
  */
 export function priceTickTarget(paneHeightPx: number): number {
   return Math.max(6, Math.min(16, Math.round(paneHeightPx / 55)));
+}
+
+/**
+ * Mode-aware tick POSITIONS (prices) for the vertical scale. Label formatting stays with
+ * the axis layer; the grid only needs positions, and sharing this function guarantees
+ * gridlines and axis labels never drift apart.
+ *
+ * - linear  → the classic 1-2-5 nice ticks.
+ * - log     → round prices laid out per decade (1-2-5 mantissas, density-scaled); narrow
+ *             ranges (< one octave) fall back to linear ticks, which read fine in log space.
+ * - percent → round percent steps relative to `baseline`, mapped back to prices.
+ */
+export function priceTickValues(
+  state: Pick<PriceScaleState, 'priceMin' | 'priceMax' | 'mode' | 'baseline'>,
+  target: number,
+): number[] {
+  const { priceMin: min, priceMax: max, mode } = state;
+  if (!(max > min)) return [];
+  if (mode === 'log') return logTicks(min, max, target);
+  if (mode === 'percent' && state.baseline !== undefined && state.baseline > 0) {
+    const b = state.baseline;
+    const pMin = (min / b - 1) * 100;
+    const pMax = (max / b - 1) * 100;
+    return niceTicks(pMin, pMax, target).map((p) => b * (1 + p / 100));
+  }
+  return niceTicks(min, max, target);
+}
+
+/** Log-spaced round-price ticks: every decade crossed gets the same mantissa pattern. */
+export function logTicks(min: number, max: number, target: number): number[] {
+  const lo = Math.max(min, 1e-12);
+  const hi = Math.max(max, lo * 1.0001);
+  const decades = Math.log10(hi / lo);
+  // Less than ~2× of range: linear nice ticks are indistinguishable from log ticks
+  // and avoid awkward 1-2-5-only jumps on intraday charts.
+  if (decades < 0.30103) return niceTicks(lo, hi, target);
+  const MANTISSA_SETS: ReadonlyArray<ReadonlyArray<number>> = [
+    [1],
+    [1, 3],
+    [1, 2, 5],
+    [1, 1.5, 2, 3, 4, 5, 7],
+  ];
+  let chosen: ReadonlyArray<number> = MANTISSA_SETS[0]!;
+  for (const set of MANTISSA_SETS) {
+    if (set.length * decades <= target) chosen = set;
+  }
+  const out: number[] = [];
+  const kLo = Math.floor(Math.log10(lo)) - 1;
+  const kHi = Math.ceil(Math.log10(hi)) + 1;
+  for (let k = kLo; k <= kHi; k += 1) {
+    const mag = Math.pow(10, k);
+    for (const m of chosen) {
+      const v = m * mag;
+      if (v >= lo && v <= hi) out.push(v);
+    }
+  }
+  return out.sort((a, b) => a - b);
 }
 
 export function niceTicks(min: number, max: number, target: number): number[] {

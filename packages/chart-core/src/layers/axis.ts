@@ -1,5 +1,6 @@
 import type { Layer, RenderContext } from './types';
-import { chooseTimeStep, niceTicks, priceTickTarget } from './grid';
+import type { PriceScaleState } from '../scale';
+import { chooseTimeStep, priceTickTarget, priceTickValues } from './grid';
 
 export class AxisLayer implements Layer {
   readonly id = 'axis';
@@ -18,15 +19,14 @@ export class AxisLayer implements Layer {
     c.textBaseline = 'middle';
     c.textAlign = 'left';
 
-    const priceTicks = niceTicks(
-      priceScale.state.priceMin,
-      priceScale.state.priceMax,
+    const priceTicks = priceTickValues(
+      priceScale.state,
       priceTickTarget(geometry.pricePane.height),
     );
     for (const p of priceTicks) {
       const y = priceScale.priceToY(p);
       if (y < 0 || y > geometry.pricePane.y + geometry.pricePane.height) continue;
-      c.fillText(formatPrice(p), geometry.axisPane.x + 6, y);
+      c.fillText(priceAxisLabel(p, priceScale.state), geometry.axisPane.x + 6, y);
     }
 
     // Time axis ticks
@@ -57,7 +57,7 @@ export class AxisLayer implements Layer {
       c.setLineDash([]);
 
       // Price label tag on axis — with an optional bar-close countdown row (live bars only).
-      const label = formatPrice(last.close);
+      const label = priceAxisLabel(last.close, priceScale.state);
       const countdown = barCloseCountdown(last.closeTime, Date.now());
       const padding = 4;
       const rowH = theme.font.sizeAxis + 6;
@@ -83,7 +83,7 @@ export class AxisLayer implements Layer {
 
     // Crosshair labels
     if (crosshair) {
-      const label = formatPrice(crosshair.price);
+      const label = priceAxisLabel(crosshair.price, priceScale.state);
       const padding = 4;
       const tw = c.measureText(label).width + padding * 2;
       const th = theme.font.sizeAxis + 6;
@@ -135,6 +135,22 @@ export function barCloseCountdown(closeTime: number, nowMs: number): string {
   const s = totalSec % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/**
+ * The label the vertical axis shows for a price under the current scale mode:
+ * percent mode renders "+2.50%" relative to the baseline, everything else a price.
+ */
+export function priceAxisLabel(
+  price: number,
+  state: Pick<PriceScaleState, 'mode' | 'baseline'>,
+): string {
+  if (state.mode === 'percent' && state.baseline !== undefined && state.baseline > 0) {
+    const pct = (price / state.baseline - 1) * 100;
+    const fixed = Math.abs(pct) < 1e-9 ? '0.00' : pct.toFixed(2);
+    return `${pct > 0 && fixed !== '0.00' ? '+' : ''}${fixed}%`;
+  }
+  return formatPrice(price);
 }
 
 export function formatPrice(p: number): string {
