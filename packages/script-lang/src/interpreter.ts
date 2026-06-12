@@ -192,6 +192,65 @@ export interface RunOptions {
   interval?: string;
 }
 
+/** "15m" / "4h" / "1d" → milliseconds; null when the unit is unsupported (weeks/months need real calendars). */
+export function intervalToMs(s: string): number | null {
+  const m = /^(\d+)(m|h|d)$/.exec(s.trim());
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2] === 'm' ? 60_000 : m[2] === 'h' ? 3_600_000 : 86_400_000;
+  return n * unit;
+}
+
+/**
+ * Aggregate chart candles into `tfMs` buckets (UTC-aligned: bucket = floor(openTime / tfMs)).
+ * A partial LEADING bucket (buffer starts mid-bucket) is dropped — its OHLC would be a lie.
+ * The trailing (forming) bucket is kept; the onTf bar-mapping only references completed buckets.
+ */
+export function aggregateCandles(candles: readonly Candle[], tfMs: number, tfLabel: string): Candle[] {
+  const out: Candle[] = [];
+  let cur: Candle | null = null;
+  let curStart = -1;
+  for (const c of candles) {
+    const start = Math.floor(c.openTime / tfMs) * tfMs;
+    if (cur === null || start !== curStart) {
+      if (cur) out.push(cur);
+      curStart = start;
+      cur = {
+        ...c,
+        interval: tfLabel as Candle['interval'],
+        openTime: start,
+        closeTime: start + tfMs,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+        volume: c.volume,
+        quoteVolume: c.quoteVolume ?? 0,
+        buyVolume: c.buyVolume ?? 0,
+        sellVolume: c.sellVolume ?? 0,
+        delta: c.delta ?? 0,
+        trades: c.trades ?? 0,
+        isClosed: false,
+      };
+    } else {
+      cur.high = Math.max(cur.high, c.high);
+      cur.low = Math.min(cur.low, c.low);
+      cur.close = c.close;
+      cur.volume += c.volume;
+      cur.quoteVolume = (cur.quoteVolume ?? 0) + (c.quoteVolume ?? 0);
+      cur.buyVolume = (cur.buyVolume ?? 0) + (c.buyVolume ?? 0);
+      cur.sellVolume = (cur.sellVolume ?? 0) + (c.sellVolume ?? 0);
+      cur.delta = (cur.delta ?? 0) + (c.delta ?? 0);
+      cur.trades = (cur.trades ?? 0) + (c.trades ?? 0);
+    }
+  }
+  if (cur) out.push(cur);
+  // Drop the leading bucket when the buffer starts mid-bucket (its open/high/low are incomplete).
+  if (out.length > 0 && candles.length > 0 && candles[0]!.openTime % tfMs !== 0) out.shift();
+  return out;
+}
+
 /** Direct sub-expressions of an expression (for AST walks). */
 function exprChildren(e: Expr): Expr[] {
   switch (e.type) {
@@ -302,6 +361,12 @@ class Interpreter {
   private declaredNames = new Set<string>();
   /** Per-openTime Date memo for the date-time built-ins (year/month/…): avoids a Date per lookup. */
   private dtMemo: { at: number; d: Date } = { at: NaN, d: new Date(0) };
+  /** Chart timeframe of the candles (RunOptions.interval) — required by onTf. */
+  private readonly interval: string | null;
+  /** onTf(...) per-call-site cache: child values per aggregated bar + chart-bar → child-bar map. */
+  private onTfCache = new Map<Expr, { values: Value[]; map: Int32Array }>();
+  /** On an onTf child: the parent's declared names, so reads of chart-context vars error clearly. */
+  private outerNames: Set<string> | null = null;
   /** Declared inputs (the editor's form schema), discovered in a pre-pass. */
   private inputDefs: InputDef[] = [];
   private inputByExpr = new Map<Expr, InputDef>();
@@ -316,6 +381,7 @@ class Interpreter {
     this.timeoutMs = opts.timeoutMs ?? 2_000;
     this.maxBars = opts.maxBars ?? 50_000;
     this.inputOverrides = opts.inputs ?? {};
+    this.interval = opts.interval ?? null;
   }
 
   run(): RunResult {
@@ -810,8 +876,98 @@ class Interpreter {
       if (count > 100_000) throw new RuntimeError('repeat() count exceeds the 100k safety cap', e.pos.line, e.pos.col);
       return new Array<Value>(count).fill(v);
     }
+    if (name === 'onTf') return this.callOnTf(e, bar, locals);
     if (TA[name]) return this.callTa(name, e, bar, locals);
     throw new RuntimeError(`unknown function '${name}'`, e.pos.line, e.pos.col);
+  }
+
+  /**
+   * `onTf("4h", expr)` — evaluate `expr` on the chart candles aggregated to a higher timeframe,
+   * then read it back per chart bar from the last COMPLETED higher-TF bar. Strictly causal: the
+   * forming higher-TF bar is never referenced, so values never repaint (unlike lookahead-style
+   * security calls elsewhere). The expression runs in its own context: price series, ta.*,
+   * math.*, inputs and fn definitions work; chart-timeframe variables are out of reach.
+   */
+  private callOnTf(e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
+    if (locals !== null) {
+      throw new RuntimeError(
+        'onTf(...) must be used at the top level of the script (not inside fn bodies or for/while loops)',
+        e.pos.line,
+        e.pos.col,
+      );
+    }
+    let cached = this.onTfCache.get(e);
+    if (!cached) {
+      cached = this.buildOnTf(e);
+      this.onTfCache.set(e, cached);
+    }
+    const j = cached.map[bar] ?? -1;
+    return j >= 0 ? (cached.values[j] ?? null) : null;
+  }
+
+  private buildOnTf(e: Extract<Expr, { type: 'call' }>): { values: Value[]; map: Int32Array } {
+    const positional = e.args.filter((a) => a.name === null);
+    if (positional.length < 2) {
+      throw new RuntimeError(`onTf needs a timeframe and an expression — onTf("4h", ema(close, 20))`, e.pos.line, e.pos.col);
+    }
+    const tfV = this.evalExpr(positional[0]!.value, 0, null);
+    if (typeof tfV !== 'string') {
+      throw new RuntimeError('onTf timeframe must be text like "15m", "4h" or "1d"', e.pos.line, e.pos.col);
+    }
+    if (this.outerNames !== null) {
+      throw new RuntimeError('onTf cannot be nested inside another onTf', e.pos.line, e.pos.col);
+    }
+    if (!this.interval) {
+      throw new RuntimeError(
+        'this run has no chart interval — onTf needs RunOptions.interval (the chart and API pass it automatically)',
+        e.pos.line,
+        e.pos.col,
+      );
+    }
+    const chartMs = intervalToMs(this.interval);
+    if (chartMs == null) {
+      throw new RuntimeError(`onTf does not support the chart interval "${this.interval}" (use minute/hour/day charts)`, e.pos.line, e.pos.col);
+    }
+    const tfMs = intervalToMs(tfV);
+    if (tfMs == null) {
+      throw new RuntimeError(`unsupported onTf timeframe "${tfV}" — use minutes/hours/days, e.g. "15m", "4h", "1d"`, e.pos.line, e.pos.col);
+    }
+    if (tfMs < chartMs || tfMs % chartMs !== 0) {
+      throw new RuntimeError(
+        `onTf("${tfV}") must be a whole multiple of the chart interval (${this.interval}) at or above it`,
+        e.pos.line,
+        e.pos.col,
+      );
+    }
+    const agg = aggregateCandles(this.candles, tfMs, tfV);
+    const map = new Int32Array(this.candles.length).fill(-1);
+    const values: Value[] = [];
+    if (agg.length > 0) {
+      // Child interpreter over the aggregated candles — shares fns + input defs/overrides,
+      // its own globals/caches. No interval → nested onTf inside it fails loud.
+      const child = new Interpreter({ meta: null, body: [] }, agg, {
+        inputs: this.inputOverrides,
+        maxLoopSteps: this.maxLoopSteps,
+        timeoutMs: this.timeoutMs,
+        maxBars: this.maxBars,
+      });
+      child.funcs = this.funcs;
+      child.inputByExpr = this.inputByExpr;
+      child.deadline = this.deadline;
+      child.outerNames = this.declaredNames;
+      for (let b = 0; b < agg.length; b++) {
+        this.checkDeadline(e.pos);
+        values.push(child.evalExpr(positional[1]!.value, b, null));
+      }
+      // Chart bar i reads the last aggregated bar that COMPLETED at or before bar i's close.
+      let j = -1;
+      for (let i = 0; i < this.candles.length; i++) {
+        const chartEnd = this.candles[i]!.openTime + chartMs;
+        while (j + 1 < agg.length && agg[j + 1]!.openTime + tfMs <= chartEnd) j += 1;
+        map[i] = j;
+      }
+    }
+    return { values, map };
   }
 
   /** Methods on list / text values — `xs.size()`, `s.upper()`, … Mutators return the list for chaining. */
@@ -1165,6 +1321,9 @@ class Interpreter {
       const name = e.callee.name;
       if (TA[name]) return !constOnly && this.taArgsStable(TA[name]!, e);
       if (name === 'nz' || name === 'na') return stableArgs();
+      // onTf output is fixed by the candles alone (chart-context reads are forbidden inside it),
+      // so chained studies like ema(onTf("4h", close), 9) can run-cache instead of going O(n²).
+      if (name === 'onTf') return !constOnly && e.args.length > 0 && this.isConst(e.args[0]!.value);
     }
     return false; // user fns aren't analysed → treated as per-bar
   }
@@ -1272,6 +1431,13 @@ class Interpreter {
     }
     const p = priceOf(name, c);
     if (p !== null) return p;
+    if (this.outerNames?.has(name)) {
+      throw new RuntimeError(
+        `'${name}' is a chart-timeframe variable — an onTf(...) expression runs on its own timeframe and can only use price series, ta.*, math.*, inputs and fn calls`,
+        e.pos.line,
+        e.pos.col,
+      );
+    }
     throw new RuntimeError(`undefined name '${name}'`, e.pos.line, e.pos.col);
   }
 

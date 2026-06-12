@@ -782,7 +782,7 @@ export function alertRoutes(
     // Validate the script ONCE before sweeping so a syntax error is a clear 400 with a
     // line number, not 1000 swallowed per-combo failures.
     try {
-      runScript(source, candles.slice(0, Math.min(candles.length, 50)), { inputs: body.inputs, timeoutMs: 1000 });
+      runScript(source, candles.slice(0, Math.min(candles.length, 50)), { inputs: body.inputs, timeoutMs: 1000, interval });
     } catch (err) {
       reply.code(400);
       return { error: 'script_error', message: err instanceof Error ? err.message : String(err) };
@@ -882,7 +882,7 @@ export function alertRoutes(
 
     let run;
     try {
-      run = runScript(source, candles, { inputs: body.inputs, timeoutMs: 2000 });
+      run = runScript(source, candles, { inputs: body.inputs, timeoutMs: 2000, interval });
     } catch (err) {
       reply.code(400);
       return { error: 'script_error', message: err instanceof Error ? err.message : String(err) };

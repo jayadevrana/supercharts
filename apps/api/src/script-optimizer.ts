@@ -166,6 +166,7 @@ export function optimizeScript(
       const run = runScript(source, candles, {
         inputs: { ...baseInputs, ...combo },
         timeoutMs: PER_RUN_TIMEOUT_MS,
+        interval,
       });
       const signals = run.marks
         .filter((m): m is typeof m & { kind: 'buy' | 'sell' } => m.kind === 'buy' || m.kind === 'sell')
