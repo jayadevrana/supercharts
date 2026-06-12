@@ -80,6 +80,7 @@ describe('PulseScript inputs (task 5)', () => {
   });
 
   it('rejects an unknown input kind', () => {
-    expect(() => runScript('let x = input.color("red")\ndraw line(close, title: "p")', series([1, 2]))).toThrow(/unknown input kind/);
+    // input.color became a real kind — `fancy` stays imaginary.
+    expect(() => runScript('let x = input.fancy("red")\ndraw line(close, title: "p")', series([1, 2]))).toThrow(/unknown input kind/);
   });
 });

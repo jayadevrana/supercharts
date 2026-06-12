@@ -77,7 +77,7 @@ export interface AlertEvent {
   bar: number;
   text: string;
 }
-export type InputKind = 'num' | 'bool' | 'text' | 'source';
+export type InputKind = 'num' | 'bool' | 'text' | 'source' | 'select' | 'color';
 /** A declared `input.*(...)` — the editor renders these as form controls and feeds overrides back. */
 export interface InputDef {
   id: string;
@@ -1309,7 +1309,7 @@ class Interpreter {
 
   private buildInputDef(call: Extract<Expr, { type: 'call' }>, declName: string | undefined, autoId: () => string, used: Set<string>): InputDef {
     const kind = (call.callee as Extract<Expr, { type: 'member' }>).property as InputKind;
-    if (kind !== 'num' && kind !== 'bool' && kind !== 'text' && kind !== 'source') {
+    if (kind !== 'num' && kind !== 'bool' && kind !== 'text' && kind !== 'source' && kind !== 'select' && kind !== 'color') {
       throw new RuntimeError(`unknown input kind 'input.${kind}'`, call.pos.line, call.pos.col);
     }
     const positional: Expr[] = [];
@@ -1336,6 +1336,22 @@ class Interpreter {
       def = { id: '', kind, title, default: positional[0] ? toBoolInput(this.evalExpr(positional[0], 0, null)) : false };
     } else if (kind === 'text') {
       def = { id: '', kind, title, default: positional[0] ? String(this.evalExpr(positional[0], 0, null) ?? '') : '' };
+    } else if (kind === 'select') {
+      // input.select(default, title?, options: ["a", "b", …]) — a dropdown of fixed choices.
+      const optExpr = named.get('options');
+      const optVal = optExpr ? this.evalExpr(optExpr, 0, null) : null;
+      const options = isList(optVal) ? optVal.map((o) => String(o ?? '')).filter((o) => o.length > 0) : [];
+      if (options.length === 0) {
+        throw new RuntimeError(
+          `input.select needs an options list — e.g. input.select("fast", "Mode", options: ["fast", "slow"])`,
+          call.pos.line,
+          call.pos.col,
+        );
+      }
+      const rawDefault = positional[0] ? String(this.evalExpr(positional[0], 0, null) ?? '') : options[0]!;
+      def = { id: '', kind, title, default: options.includes(rawDefault) ? rawDefault : options[0]!, options };
+    } else if (kind === 'color') {
+      def = { id: '', kind, title, default: positional[0] ? String(this.evalExpr(positional[0], 0, null) ?? '#38bdf8') : '#38bdf8' };
     } else {
       const min = named.has('min') ? constNum(named.get('min'), -Infinity) : positional[2] ? constNum(positional[2], -Infinity) : undefined;
       const max = named.has('max') ? constNum(named.get('max'), Infinity) : positional[3] ? constNum(positional[3], Infinity) : undefined;
@@ -1394,6 +1410,11 @@ class Interpreter {
       return n;
     }
     if (def.kind === 'bool') return toBoolInput(v);
+    if (def.kind === 'select') {
+      // An override outside the declared options falls back to the default (defensive).
+      const s = String(v);
+      return def.options?.includes(s) ? s : def.default;
+    }
     return String(v);
   }
 

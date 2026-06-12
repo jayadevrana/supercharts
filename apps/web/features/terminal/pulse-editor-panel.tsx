@@ -797,8 +797,21 @@ function ConsolePanel({ result, enabled }: { result: PulseResult | undefined; en
       <div className="text-[11px] text-muted-foreground">
         {result.plotCount} plot{result.plotCount === 1 ? '' : 's'} · {result.markCount} mark
         {result.markCount === 1 ? '' : 's'} · {result.inputs.length} input{result.inputs.length === 1 ? '' : 's'}
+        {(result.levelCount ?? 0) > 0 ? ` · ${result.levelCount} level${result.levelCount === 1 ? '' : 's'}` : ''}
+        {(result.shapeCount ?? 0) > 0 ? ` · ${result.shapeCount} marker${result.shapeCount === 1 ? '' : 's'}` : ''}
+        {(result.paintCount ?? 0) > 0 ? ` · ${result.paintCount} painted` : ''}
+        {(result.alertCount ?? 0) > 0 ? ` · ${result.alertCount} alert${result.alertCount === 1 ? '' : 's'}` : ''}
         {enabled ? '' : ' · toggle "On chart" to draw'}
       </div>
+      {(result.alerts ?? []).length > 0 && (
+        <div className="mt-1.5 flex flex-col gap-0.5 border-t border-bull/20 pt-1.5">
+          {(result.alerts ?? []).slice(-5).map((a, i) => (
+            <div key={i} className="truncate font-mono text-[10px] text-muted-foreground">
+              ⚡ bar {a.bar}: {a.text}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -824,7 +837,7 @@ function InputsPanel({
               <span className="truncate text-foreground" title={def.title}>{def.title}</span>
               {def.kind === 'bool' ? (
                 <Switch checked={Boolean(cur)} onCheckedChange={(v) => onChange(def.id, v)} />
-              ) : def.kind === 'source' ? (
+              ) : def.kind === 'source' || def.kind === 'select' ? (
                 <Select value={String(cur)} onValueChange={(v) => onChange(def.id, v)}>
                   <SelectTrigger className="h-7 w-32 text-xs">
                     <SelectValue />
@@ -835,6 +848,14 @@ function InputsPanel({
                     ))}
                   </SelectContent>
                 </Select>
+              ) : def.kind === 'color' ? (
+                <input
+                  type="color"
+                  aria-label={def.title}
+                  className="h-7 w-12 cursor-pointer rounded border border-border bg-transparent"
+                  value={/^#[0-9a-fA-F]{6}$/.test(String(cur)) ? String(cur) : '#38bdf8'}
+                  onChange={(e) => onChange(def.id, e.target.value)}
+                />
               ) : def.kind === 'num' ? (
                 <Input
                   type="number"
