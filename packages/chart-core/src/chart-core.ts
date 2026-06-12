@@ -3,8 +3,8 @@ import { PriceScale, TimeScale } from './scale';
 import { computeGeometry, type ChartGeometry } from './viewport';
 import { DARK_THEME, type ChartTheme } from './theme';
 import type { Layer, RenderContext, ChartFrame } from './layers/types';
-import { GridLayer } from './layers/grid';
-import { AxisLayer } from './layers/axis';
+import { GridLayer, niceTicks, priceTickTarget } from './layers/grid';
+import { AxisLayer, formatPrice } from './layers/axis';
 import { PriceSeriesLayer } from './layers/price-series';
 import { VolumeLayer } from './layers/volume';
 import { CrosshairLayer } from './layers/crosshair';
@@ -128,6 +128,10 @@ export class ChartCore {
    * the full height — the band must never sit reserved-but-empty under a volume-less chart.
    */
   private showVolumePane: boolean;
+  /** Right axis gutter width — adapts to the widest price label (BTC needs more than EURUSD). */
+  private axisWidthPx = 64;
+  /** Seconds-to-bar-close drawn last frame; a change marks the canvas dirty (countdown tick). */
+  private lastCountdownSec = -1;
 
   constructor(opts: ChartCoreOptions) {
     this.opts = opts;
@@ -148,7 +152,10 @@ export class ChartCore {
     const h = Math.max(100, rect.height);
     this.dpr = window.devicePixelRatio || 1;
     this.showVolumePane = opts.showVolumePane ?? true;
-    this.geometry = computeGeometry(w, h, { showVolumePane: this.showVolumePane });
+    this.geometry = computeGeometry(w, h, {
+      showVolumePane: this.showVolumePane,
+      axisWidth: this.axisWidthPx,
+    });
     const barDur = opts.initialBarDurationMs ?? 60_000;
     const barW = opts.initialBarWidth ?? 8;
     this.timeScale = new TimeScale({
@@ -458,7 +465,10 @@ export class ChartCore {
     // observer-driven resize loop on subsequent layout changes.
     if (this.canvas.width !== bitmapW) this.canvas.width = bitmapW;
     if (this.canvas.height !== bitmapH) this.canvas.height = bitmapH;
-    this.geometry = computeGeometry(w, h, { showVolumePane: this.showVolumePane });
+    this.geometry = computeGeometry(w, h, {
+      showVolumePane: this.showVolumePane,
+      axisWidth: this.axisWidthPx,
+    });
     this.timeScale.state.width = this.geometry.pricePane.width;
     this.priceScale.state.height = this.geometry.pricePane.height;
     this.volumeScale.state.height = this.geometry.volumePane.height;
@@ -901,9 +911,59 @@ export class ChartCore {
     this.dirty = true;
   }
 
+  /**
+   * Grow/shrink the right axis gutter to the widest visible price label (ticks and the
+   * last-price tag). Fixed 64px clips "63,796.48" on BTC while wasting space on FX pairs.
+   * Runs at the top of render(); converges in one pass because price ticks don't depend
+   * on the gutter width.
+   */
+  private updateAxisWidth(): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.font = `${this.theme.font.sizeAxis}px ${this.theme.font.family}`;
+    let widest = 0;
+    const ticks = niceTicks(
+      this.priceScale.state.priceMin,
+      this.priceScale.state.priceMax,
+      priceTickTarget(this.geometry.pricePane.height),
+    );
+    for (const p of ticks) {
+      const w = ctx.measureText(formatPrice(p)).width;
+      if (w > widest) widest = w;
+    }
+    const last = this.frame.candles[this.frame.candles.length - 1];
+    if (last) {
+      const w = ctx.measureText(formatPrice(last.close)).width;
+      if (w > widest) widest = w;
+    }
+    ctx.restore();
+    const desired = Math.max(56, Math.ceil(widest) + 14); // 6px left pad + breathing room
+    if (Math.abs(desired - this.axisWidthPx) > 2) {
+      this.axisWidthPx = desired;
+      this.geometry = computeGeometry(this.geometry.width, this.geometry.height, {
+        showVolumePane: this.showVolumePane,
+        axisWidth: this.axisWidthPx,
+      });
+      this.timeScale.state.width = this.geometry.pricePane.width;
+    }
+  }
+
+  /** Mark dirty once per second while the last bar is still forming (countdown repaint). */
+  private tickCountdown(): void {
+    const last = this.frame.candles[this.frame.candles.length - 1];
+    if (!last) return;
+    const left = last.closeTime - Date.now();
+    const sec = left > 0 ? Math.floor(left / 1000) : -1;
+    if (sec !== this.lastCountdownSec) {
+      this.lastCountdownSec = sec;
+      this.markDirty();
+    }
+  }
+
   private loop = (now?: number): void => {
     // Smoothed price fit runs inside the existing render loop — no extra rAF chain.
     if (this.priceFitTarget) this.advancePriceFit(now ?? performance.now());
+    this.tickCountdown();
     if (this.dirty) {
       this.dirty = false;
       this.render();
@@ -912,6 +972,7 @@ export class ChartCore {
   };
 
   private render(): void {
+    this.updateAxisWidth();
     const { ctx, canvas } = this;
     ctx.save();
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);

@@ -11,8 +11,12 @@ export class GridLayer implements Layer {
     ctx.strokeStyle = theme.gridLine;
     ctx.lineWidth = 1;
 
-    // Horizontal price grid lines — ~6-8 evenly spaced ticks.
-    const priceLines = niceTicks(priceScale.state.priceMin, priceScale.state.priceMax, 8);
+    // Horizontal price grid lines — density tracks the pane height (~1 tick / 55px).
+    const priceLines = niceTicks(
+      priceScale.state.priceMin,
+      priceScale.state.priceMax,
+      priceTickTarget(pricePane.height),
+    );
     ctx.beginPath();
     for (const p of priceLines) {
       const y = Math.round(priceScale.priceToY(p)) + 0.5;
@@ -47,6 +51,14 @@ export class GridLayer implements Layer {
     ctx.stroke();
     ctx.restore();
   }
+}
+
+/**
+ * How many price ticks a pane of this height should target — TV sits around one
+ * gridline per ~50-60px, which keeps levels readable without turning into graph paper.
+ */
+export function priceTickTarget(paneHeightPx: number): number {
+  return Math.max(6, Math.min(16, Math.round(paneHeightPx / 55)));
 }
 
 export function niceTicks(min: number, max: number, target: number): number[] {
@@ -86,7 +98,7 @@ const TIME_STEPS = [
 ];
 
 export function chooseTimeStep(spanMs: number, widthPx: number): number {
-  const targetLines = Math.max(4, Math.min(12, widthPx / 110));
+  const targetLines = Math.max(4, Math.min(14, widthPx / 90));
   const ideal = spanMs / targetLines;
   for (const step of TIME_STEPS) {
     if (step >= ideal) return step;
