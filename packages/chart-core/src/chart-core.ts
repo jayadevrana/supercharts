@@ -50,6 +50,8 @@ export interface ChartPointerEvent {
   shiftKey: boolean;
   ctrlKey: boolean;
   metaKey: boolean;
+  /** Which surface the pointer sat on — the price axis and time axis get their own context menus. */
+  region?: 'chart' | 'price-axis' | 'time-axis';
 }
 
 // ---- Interaction feel tuning (momentum pan + eased wheel zoom) ----
@@ -760,6 +762,13 @@ export class ChartCore {
       const rect = cvs.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      // Same boundary tests as onPointerDown — the price/time axes get dedicated menus.
+      const region: ChartPointerEvent['region'] =
+        x >= this.geometry.axisPane.x
+          ? 'price-axis'
+          : y >= this.geometry.timeAxisPane.y
+            ? 'time-axis'
+            : 'chart';
       this.opts.onPointerEvent?.({
         type: 'contextmenu',
         x,
@@ -771,6 +780,7 @@ export class ChartCore {
         shiftKey: e.shiftKey,
         ctrlKey: e.ctrlKey,
         metaKey: e.metaKey,
+        region,
       });
     };
 

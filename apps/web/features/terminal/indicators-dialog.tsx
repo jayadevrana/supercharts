@@ -199,6 +199,12 @@ export function IndicatorsDialog() {
     setOpen(v);
     if (!v) setQ('');
   };
+  // Open on request from other surfaces (chart context menu "Add indicator…").
+  const dialogRequest = useTerminalStore((s) => s.dialogRequest);
+  useEffect(() => {
+    if (dialogRequest?.kind === 'indicators') setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogRequest?.token]);
   useEffect(() => {
     if (!open) {
       setSearchReady(false);

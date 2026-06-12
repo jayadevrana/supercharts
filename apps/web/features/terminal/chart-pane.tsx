@@ -15,6 +15,8 @@ import {
   IndicatorsLayer,
   MaCrossLayer,
   EconomicEventsLayer,
+  TooltipLayer,
+  formatPrice as corePriceFormat,
   computeMaCross,
   buildVisibleRangeProfile,
   computeSignalsTrendScore,
@@ -122,7 +124,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const [last, setLast] = useState<{ price: number; change: number } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    price: number;
+    time: number;
+    region: 'chart' | 'price-axis' | 'time-axis';
+  } | null>(null);
   const [stsFrame, setStsFrame] = useState<SignalsTrendScoreFrame | null>(null);
   const [mtfRows, setMtfRows] = useState<MtfRow[]>([]);
   // Alerts targeting this pane's (symbol, interval). The MA cross layer renders
@@ -189,7 +197,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       showVolumePane: pane.overlays.volume,
       onPointerEvent: (e) => {
         if (e.type === 'contextmenu') {
-          setMenu({ x: e.x, y: e.y });
+          setMenu({ x: e.x, y: e.y, price: e.price, time: e.time, region: e.region ?? 'chart' });
         } else if (e.type === 'pointerdown') {
           setMenu(null);
         }
@@ -1723,9 +1731,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         ) : null}
         {menu ? (
           <ChartContextMenu
-            x={menu.x}
-            y={menu.y}
+            menu={menu}
             pane={pane}
+            scale={{ ...scaleState, inverted: chartRef.current?.getScaleState().inverted ?? false }}
+            hoverPanelOn={
+              chartRef.current?.getLayer<TooltipLayer>('tooltip')?.options.showPanel ?? false
+            }
             onClose={() => setMenu(null)}
             onResetZoom={() => {
               const ev = new MouseEvent('dblclick');
@@ -1734,6 +1745,28 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             }}
             onDeleteDrawing={() => {
               drawingControllerRef.current?.deleteSelected();
+              setMenu(null);
+            }}
+            onScaleMode={(m) => {
+              setPaneScaleMode(pane.id, m);
+              setMenu(null);
+            }}
+            onAutoFit={() => {
+              chartRef.current?.setAutoFit();
+              setMenu(null);
+            }}
+            onInvert={() => {
+              const core = chartRef.current;
+              if (core) core.setInverted(!core.getScaleState().inverted);
+              setMenu(null);
+            }}
+            onToggleHoverPanel={() => {
+              const core = chartRef.current;
+              const layer = core?.getLayer<TooltipLayer>('tooltip');
+              if (layer) {
+                layer.options.showPanel = !layer.options.showPanel;
+                core?.invalidate();
+              }
               setMenu(null);
             }}
           />
@@ -1795,31 +1828,111 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
 }
 
 function ChartContextMenu({
-  x,
-  y,
+  menu,
   pane,
+  scale,
+  hoverPanelOn,
   onClose,
   onResetZoom,
   onDeleteDrawing,
+  onScaleMode,
+  onAutoFit,
+  onInvert,
+  onToggleHoverPanel,
 }: {
-  x: number;
-  y: number;
+  menu: { x: number; y: number; price: number; time: number; region: 'chart' | 'price-axis' | 'time-axis' };
   pane: PaneState;
+  scale: { mode: 'linear' | 'log' | 'percent'; inverted: boolean; auto: boolean };
+  hoverPanelOn: boolean;
   onClose: () => void;
   onResetZoom: () => void;
   onDeleteDrawing: () => void;
+  onScaleMode: (m: 'linear' | 'log' | 'percent') => void;
+  onAutoFit: () => void;
+  onInvert: () => void;
+  onToggleHoverPanel: () => void;
 }) {
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
+  const requestDialog = useTerminalStore((s) => s.requestDialog);
+  const priceLabel = corePriceFormat(menu.price);
+  const [copied, setCopied] = useState(false);
+  const { x, y, region } = menu;
+
+  // The price-axis menu is the TV scale menu; the time axis gets a slim reset menu.
+  if (region === 'price-axis') {
+    return (
+      <div className="absolute inset-0 z-30" onClick={onClose} onContextMenu={(e) => e.preventDefault()}>
+        <div
+          role="menu"
+          className="absolute z-30 w-52 rounded-lg border border-border bg-surface-raised/95 p-1 text-xs shadow-floating backdrop-blur"
+          style={{ right: 8, top: Math.max(8, y - 8) }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MenuItem label="Auto (fit data to screen)" checked={scale.auto} onClick={onAutoFit} />
+          <MenuSeparator />
+          <MenuItem label="Regular" checked={scale.mode === 'linear'} onClick={() => onScaleMode('linear')} />
+          <MenuItem label="Logarithmic" checked={scale.mode === 'log'} onClick={() => onScaleMode('log')} />
+          <MenuItem label="Percent" checked={scale.mode === 'percent'} onClick={() => onScaleMode('percent')} />
+          <MenuSeparator />
+          <MenuItem label="Invert scale" checked={scale.inverted} onClick={onInvert} />
+        </div>
+      </div>
+    );
+  }
+
+  if (region === 'time-axis') {
+    return (
+      <div className="absolute inset-0 z-30" onClick={onClose} onContextMenu={(e) => e.preventDefault()}>
+        <div
+          role="menu"
+          className="absolute z-30 w-48 rounded-lg border border-border bg-surface-raised/95 p-1 text-xs shadow-floating backdrop-blur"
+          style={{ left: Math.min(x, window.innerWidth - 200), bottom: 8 }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <MenuItem label="Reset chart view" hint="dbl-click" onClick={onResetZoom} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="absolute inset-0" onClick={onClose}>
+    <div className="absolute inset-0 z-30" onClick={onClose} onContextMenu={(e) => e.preventDefault()}>
       <div
         role="menu"
-        className="absolute z-30 w-56 rounded-lg border border-border bg-surface-raised/95 p-1 text-xs shadow-floating backdrop-blur"
+        className="absolute z-30 w-60 rounded-lg border border-border bg-surface-raised/95 p-1 text-xs shadow-floating backdrop-blur"
         style={{ left: x, top: y }}
         onClick={(e) => e.stopPropagation()}
       >
-        <MenuItem label="Reset zoom" hint="dbl-click" onClick={onResetZoom} />
+        <MenuItem
+          label={copied ? 'Copied' : `Copy price ${priceLabel}`}
+          onClick={() => {
+            void navigator.clipboard?.writeText(priceLabel).catch(() => {});
+            setCopied(true);
+            setTimeout(onClose, 350);
+          }}
+        />
+        <MenuSeparator />
+        <MenuItem
+          label="Add indicator…"
+          onClick={() => {
+            requestDialog('indicators');
+            onClose();
+          }}
+        />
+        <MenuItem
+          label={`Create alert on ${formatSymbolLabel(pane.symbol)}…`}
+          onClick={() => {
+            requestDialog('alerts');
+            onClose();
+          }}
+        />
+        <MenuSeparator />
+        <MenuItem label="Reset chart view" hint="dbl-click" onClick={onResetZoom} />
         <MenuItem label="Delete selected drawing" hint="Del" onClick={onDeleteDrawing} />
+        <MenuItem
+          label={hoverPanelOn ? 'Hide hover OHLC panel' : 'Show hover OHLC panel'}
+          onClick={onToggleHoverPanel}
+        />
         <MenuSeparator />
         <MenuItem
           label={pane.overlays.heatmap ? 'Hide heatmap' : 'Show heatmap'}
@@ -1864,18 +1977,28 @@ function ChartContextMenu({
 function MenuItem({
   label,
   hint,
+  checked,
   onClick,
 }: {
   label: string;
   hint?: string;
+  /** Renders a leading check slot (TV-style mode menus). Undefined = plain action row. */
+  checked?: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
+      role={checked === undefined ? 'menuitem' : 'menuitemradio'}
+      aria-checked={checked}
       className="flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-muted"
     >
-      <span>{label}</span>
+      <span className="flex items-center gap-1.5">
+        {checked !== undefined ? (
+          <span className={`w-3 text-accent ${checked ? '' : 'invisible'}`}>✓</span>
+        ) : null}
+        {label}
+      </span>
       {hint ? <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{hint}</span> : null}
     </button>
   );

@@ -32,6 +32,7 @@ import {
 import type { PaperPortfolio, PaperTrade } from '@supercharts/types';
 import { bulkSubscribeSignals } from '@/lib/signals';
 import { useMT5Store } from './mt5-store';
+import { useTerminalStore } from './terminal-store';
 import {
   Dialog,
   DialogContent,
@@ -131,6 +132,12 @@ type DraftAlert = {
 
 export function AlertsDialog({ activeSymbol }: { activeSymbol?: string }) {
   const [open, setOpen] = useState(false);
+  // Open on request from other surfaces (chart context menu "Create alert…").
+  const dialogRequest = useTerminalStore((s) => s.dialogRequest);
+  useEffect(() => {
+    if (dialogRequest?.kind === 'alerts') setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dialogRequest?.token]);
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>

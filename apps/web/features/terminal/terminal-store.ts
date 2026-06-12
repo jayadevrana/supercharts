@@ -195,6 +195,13 @@ interface TerminalStore {
   /** Controlled right-rail tab so other UI can switch to it (e.g. the on-chart legend gear → Ind). */
   rightRailTab: string;
   setRightRailTab: (tab: string) => void;
+  /**
+   * One-shot dialog opener so non-topbar surfaces (e.g. the chart context menu) can open
+   * the Indicators / Alerts dialogs, which own their `open` state locally. Each request
+   * bumps `token`; the dialog opens when it sees a new token for its kind.
+   */
+  dialogRequest: { kind: 'indicators' | 'alerts'; token: number } | null;
+  requestDialog: (kind: 'indicators' | 'alerts') => void;
   /** When set, the Ind panel auto-opens that instance's settings editor, then clears this. */
   indicatorSettingsTarget: string | null;
   requestIndicatorSettings: (id: string) => void;
@@ -435,6 +442,9 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   setSyncCrosshair: (v) => set({ syncCrosshair: v }),
   rightRailTab: 'trade',
   setRightRailTab: (tab) => set({ rightRailTab: tab }),
+  dialogRequest: null,
+  requestDialog: (kind) =>
+    set((s) => ({ dialogRequest: { kind, token: (s.dialogRequest?.token ?? 0) + 1 } })),
   indicatorSettingsTarget: null,
   requestIndicatorSettings: (id) => set({ rightRailTab: 'ind', indicatorSettingsTarget: id }),
   clearIndicatorSettingsTarget: () => set({ indicatorSettingsTarget: null }),
