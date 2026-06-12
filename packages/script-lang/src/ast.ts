@@ -27,7 +27,9 @@ export type Expr =
   | { type: 'call'; callee: Expr; args: Arg[]; pos: Pos }
   | { type: 'unary'; op: '-' | 'not'; operand: Expr; pos: Pos }
   | { type: 'binary'; op: BinaryOp; left: Expr; right: Expr; pos: Pos }
-  | { type: 'logical'; op: 'and' | 'or'; left: Expr; right: Expr; pos: Pos };
+  | { type: 'logical'; op: 'and' | 'or'; left: Expr; right: Expr; pos: Pos }
+  | { type: 'ternary'; cond: Expr; then: Expr; else: Expr; pos: Pos }
+  | { type: 'list'; items: Expr[]; pos: Pos };
 
 export type BinaryOp = '+' | '-' | '*' | '/' | '%' | '==' | '!=' | '<' | '>' | '<=' | '>=';
 
@@ -46,6 +48,9 @@ export type Stmt =
   | { type: 'when'; cond: Expr; body: Stmt[]; pos: Pos }
   | { type: 'forIn'; varName: string; iter: Expr; body: Stmt[]; pos: Pos }
   | { type: 'forRange'; varName: string; from: Expr; to: Expr; body: Stmt[]; pos: Pos }
+  | { type: 'while'; cond: Expr; body: Stmt[]; pos: Pos }
+  | { type: 'break'; pos: Pos }
+  | { type: 'continue'; pos: Pos }
   | { type: 'fn'; name: string; params: Param[]; body: Stmt[]; ret: Expr | null; pos: Pos }
   | { type: 'draw'; call: Expr; pos: Pos }
   | { type: 'mark'; kind: MarkKind; at: Expr | null; text: Expr | null; pos: Pos }

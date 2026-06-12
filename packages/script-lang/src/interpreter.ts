@@ -18,7 +18,11 @@ import { MATH, TA, type TaFn, type TaOut } from './stdlib';
  * provides the price series, arithmetic/logic/control-flow, user `fn`s, and history.
  */
 
-export type Value = number | boolean | string | null;
+export type Value = number | boolean | string | null | Value[] | RecordValue;
+/** A record value — the result of a multi-output study (e.g. `.upper` / `.lower` fields). */
+export interface RecordValue {
+  [key: string]: Value;
+}
 
 export interface Plot {
   title: string;
@@ -82,17 +86,46 @@ interface FnDef {
 }
 
 const isNone = (v: Value): v is null => v === null;
+const isList = (v: Value): v is Value[] => Array.isArray(v);
+const isRecord = (v: Value): v is RecordValue => typeof v === 'object' && v !== null && !Array.isArray(v);
 const num = (v: Value): number => (typeof v === 'number' ? v : typeof v === 'boolean' ? (v ? 1 : 0) : NaN);
 
+/** Control-flow signal for `break` / `continue` — caught by the enclosing loop, never escapes a run. */
+class LoopSignal {
+  constructor(
+    public kind: 'break' | 'continue',
+    public pos: { line: number; col: number },
+  ) {}
+}
+
 /** The price-series names a script (and `input.source`) can read off each candle. */
-export const PRICE_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'volume'] as const;
-/** Read a named price series off a candle: the indicators package's price math, plus `volume`. */
+export const PRICE_SOURCES = ['close', 'open', 'high', 'low', 'hl2', 'hlc3', 'ohlc4', 'hlcc4', 'volume'] as const;
+/** Read a named price series off a candle: the indicators package's price math, plus `volume`/`hlcc4`. */
 function priceOf(name: string, c: Candle): number | null {
   if (name === 'volume') return c.volume;
+  if (name === 'hlcc4') return (c.high + c.low + c.close + c.close) / 4;
   return (PRICE_SOURCES as readonly string[]).includes(name) ? priceFromCandle(c, name as PriceSource) : null;
 }
+/** Bar clock/context names readable on any bar (UTC fields of the bar's open time + run shape). */
+const CONTEXT_NAMES = [
+  'year',
+  'month',
+  'day',
+  'weekday',
+  'hour',
+  'minute',
+  'second',
+  'barCount',
+  'lastBarIndex',
+  'isFirstBar',
+  'isLastBar',
+] as const;
 /** Identifiers whose value at a given bar is fixed by the candle alone (no execution-built state). */
-const STABLE_PRICE_NAMES = new Set<string>([...PRICE_SOURCES, 'barIndex', 'time', 'none']);
+const STABLE_PRICE_NAMES = new Set<string>([...PRICE_SOURCES, ...CONTEXT_NAMES, 'barIndex', 'time', 'none']);
+/** Built-in namespaces — these idents never resolve as values, only as `ns.fn(...)` calls. */
+const NAMESPACE_NAMES = new Set(['math', 'ta', 'input']);
+/** The date-time field names (subset of CONTEXT_NAMES that need a Date). */
+const DT_NAMES = new Set(['year', 'month', 'day', 'weekday', 'hour', 'minute', 'second']);
 const slug = (s: string): string => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 /** Coerce an input default/override to a bool consistently (true / 1 / "true" / "1"). */
 const toBoolInput = (v: Value): boolean => v === true || v === 1 || v === 'true' || v === '1';
@@ -122,6 +155,10 @@ function exprChildren(e: Expr): Expr[] {
     case 'binary':
     case 'logical':
       return [e.left, e.right];
+    case 'ternary':
+      return [e.cond, e.then, e.else];
+    case 'list':
+      return e.items;
     default:
       return [];
   }
@@ -146,6 +183,13 @@ function* stmtExprs(s: Stmt): Generator<Expr> {
     case 'forIn':
       yield s.iter;
       for (const t of s.body) yield* stmtExprs(t);
+      return;
+    case 'while':
+      yield s.cond;
+      for (const t of s.body) yield* stmtExprs(t);
+      return;
+    case 'break':
+    case 'continue':
       return;
     case 'forRange':
       yield s.from;
@@ -198,6 +242,8 @@ class Interpreter {
   private taStable = new Map<Expr, boolean>();
   /** Every name the script binds (decls / fn names+params / loop vars) — a reference to one of these is not a pure candle read. */
   private declaredNames = new Set<string>();
+  /** Per-openTime Date memo for the date-time built-ins (year/month/…): avoids a Date per lookup. */
+  private dtMemo: { at: number; d: Date } = { at: NaN, d: new Date(0) };
   /** Declared inputs (the editor's form schema), discovered in a pre-pass. */
   private inputDefs: InputDef[] = [];
   private inputByExpr = new Map<Expr, InputDef>();
@@ -232,7 +278,12 @@ class Interpreter {
     }
     for (this.i = 0; this.i < this.candles.length; this.i++) {
       this.checkDeadline();
-      for (const s of this.program.body) this.execStmt(s, null);
+      try {
+        for (const s of this.program.body) this.execStmt(s, null);
+      } catch (e) {
+        if (e instanceof LoopSignal) throw new RuntimeError(`'${e.kind}' outside a loop`, e.pos.line, e.pos.col);
+        throw e;
+      }
     }
     return {
       meta: this.meta,
@@ -303,7 +354,7 @@ class Interpreter {
         for (let v = from; step > 0 ? v <= to : v >= to; v += step) {
           this.tick(s.pos);
           inner.set(s.varName, v);
-          for (const st of s.body) this.execStmt(st, inner);
+          if (this.runLoopBody(s.body, inner)) break;
         }
         return;
       }
@@ -314,16 +365,29 @@ class Interpreter {
         for (const v of iter as Value[]) {
           this.tick(s.pos);
           inner.set(s.varName, v);
-          for (const st of s.body) this.execStmt(st, inner);
+          if (this.runLoopBody(s.body, inner)) break;
         }
         return;
       }
+      case 'while': {
+        const inner = locals ?? new Map<string, Value>();
+        while (this.truthy(this.evalExpr(s.cond, this.i, inner))) {
+          this.tick(s.pos);
+          if (this.runLoopBody(s.body, inner)) break;
+        }
+        return;
+      }
+      case 'break':
+        throw new LoopSignal('break', s.pos);
+      case 'continue':
+        throw new LoopSignal('continue', s.pos);
       case 'draw':
         this.evalDraw(s.call, locals);
         return;
       case 'mark': {
         const price = s.at ? this.toNumOrNull(this.evalExpr(s.at, this.i, locals)) : this.candles[this.i]!.close;
-        const text = s.text ? String(this.evalExpr(s.text, this.i, locals) ?? '') : null;
+        const tv = s.text ? this.evalExpr(s.text, this.i, locals) : null;
+        const text = s.text ? (isNone(tv) ? '' : this.display(tv)) : null;
         this.marks.push({ bar: this.i, kind: s.kind, price, text });
         return;
       }
@@ -331,6 +395,17 @@ class Interpreter {
         this.evalExpr(s.expr, this.i, locals);
         return;
     }
+  }
+
+  /** Run one loop iteration's statements; returns true when a `break` unwound to this loop. */
+  private runLoopBody(body: Stmt[], locals: Map<string, Value>): boolean {
+    try {
+      for (const st of body) this.execStmt(st, locals);
+    } catch (e) {
+      if (e instanceof LoopSignal) return e.kind === 'break';
+      throw e;
+    }
+    return false;
   }
 
   private tick(pos: { line: number; col: number }): void {
@@ -415,14 +490,41 @@ class Interpreter {
         if (back < 0 || back >= this.candles.length) return null;
         return this.evalExpr(e.object, back, locals);
       }
+      case 'ternary':
+        return this.truthy(this.evalExpr(e.cond, bar, locals))
+          ? this.evalExpr(e.then, bar, locals)
+          : this.evalExpr(e.else, bar, locals);
+      case 'list':
+        return e.items.map((it) => this.evalExpr(it, bar, locals));
       case 'call':
         return this.evalCall(e, bar, locals);
-      case 'member':
+      case 'member': {
+        // Namespaces are call-only; a record value (multi-output study) exposes its fields.
+        if (e.object.type === 'ident' && NAMESPACE_NAMES.has(e.object.name)) {
+          throw new RuntimeError(
+            `namespace member '.${e.property}' must be called, e.g. ta.sma(close, 20)`,
+            e.pos.line,
+            e.pos.col,
+          );
+        }
+        const obj = this.evalExpr(e.object, bar, locals);
+        if (isNone(obj)) return null; // none propagates through field reads
+        if (isRecord(obj)) {
+          if (!(e.property in obj)) {
+            throw new RuntimeError(
+              `no field '.${e.property}' on this value (fields: ${Object.keys(obj).join(', ')})`,
+              e.pos.line,
+              e.pos.col,
+            );
+          }
+          return obj[e.property]!;
+        }
         throw new RuntimeError(
-          `namespace member '.${e.property}' must be called, e.g. ta.sma(close, 20)`,
+          `'.${e.property}' is not a field — methods need (), e.g. .${e.property}()`,
           e.pos.line,
           e.pos.col,
         );
+      }
     }
   }
 
@@ -468,12 +570,17 @@ class Interpreter {
 
   private evalCall(e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
     if (e.callee.type === 'member') {
-      const ns = e.callee.object.type === 'ident' ? e.callee.object.name : '?';
       const fn = e.callee.property;
-      if (ns === 'math') return this.callMath(fn, e, bar, locals);
-      if (ns === 'ta') return this.callTa(fn, e, bar, locals);
-      if (ns === 'input') return this.resolveInput(e, bar);
-      throw new RuntimeError(`unknown namespace '${ns}.${fn}'`, e.pos.line, e.pos.col);
+      if (e.callee.object.type === 'ident' && NAMESPACE_NAMES.has(e.callee.object.name)) {
+        const ns = e.callee.object.name;
+        if (ns === 'math') return this.callMath(fn, e, bar, locals);
+        if (ns === 'ta') return this.callTa(fn, e, bar, locals);
+        return this.resolveInput(e, bar);
+      }
+      // Value method — evaluate the receiver and dispatch on its runtime type.
+      const recv = this.evalExpr(e.callee.object, bar, locals);
+      const args = e.args.map((a) => this.evalExpr(a.value, bar, locals));
+      return this.callMethod(recv, fn, args, e);
     }
     if (e.callee.type !== 'ident') {
       throw new RuntimeError('only named function calls are supported', e.pos.line, e.pos.col);
@@ -487,8 +594,169 @@ class Interpreter {
       return this.isNa(x) ? d : x;
     }
     if (name === 'na') return this.isNa(e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null);
+    if (name === 'text') {
+      // text(v, decimals?) — render any value as text; decimals fixes a number's precision.
+      const v = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
+      const dec = e.args[1] ? num(this.evalExpr(e.args[1].value, bar, locals)) : NaN;
+      if (typeof v === 'number' && Number.isFinite(dec)) return v.toFixed(Math.max(0, Math.min(12, Math.trunc(dec))));
+      return this.display(v);
+    }
+    if (name === 'parseNum') {
+      const v = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
+      const n = typeof v === 'string' ? Number(v.trim()) : num(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (name === 'repeat') {
+      // repeat(value, count) — build a list of `count` copies (each bar gets a fresh list).
+      const v = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
+      const count = Math.max(0, Math.trunc(num(e.args[1] ? this.evalExpr(e.args[1].value, bar, locals) : 0)));
+      if (count > 100_000) throw new RuntimeError('repeat() count exceeds the 100k safety cap', e.pos.line, e.pos.col);
+      return new Array<Value>(count).fill(v);
+    }
     if (TA[name]) return this.callTa(name, e, bar, locals);
     throw new RuntimeError(`unknown function '${name}'`, e.pos.line, e.pos.col);
+  }
+
+  /** Methods on list / text values — `xs.size()`, `s.upper()`, … Mutators return the list for chaining. */
+  private callMethod(recv: Value, name: string, args: Value[], e: Extract<Expr, { type: 'call' }>): Value {
+    const err = (msg: string): never => {
+      throw new RuntimeError(msg, e.pos.line, e.pos.col);
+    };
+    if (isList(recv)) {
+      const idx = (v: Value): number => Math.trunc(num(v));
+      const numericItems = (): number[] => recv.map((x) => num(x)).filter((n) => Number.isFinite(n));
+      switch (name) {
+        case 'size':
+          return recv.length;
+        case 'at': {
+          const i = idx(args[0] ?? null);
+          return i >= 0 && i < recv.length ? recv[i]! : null;
+        }
+        case 'first':
+          return recv.length ? recv[0]! : null;
+        case 'last':
+          return recv.length ? recv[recv.length - 1]! : null;
+        case 'push':
+          recv.push(args[0] ?? null);
+          return recv;
+        case 'pop':
+          return recv.length ? recv.pop()! : null;
+        case 'shift':
+          return recv.length ? recv.shift()! : null;
+        case 'unshift':
+          recv.unshift(args[0] ?? null);
+          return recv;
+        case 'set': {
+          const i = idx(args[0] ?? null);
+          if (i < 0 || i >= recv.length) err(`.set(${i}, …) is out of range (size ${recv.length})`);
+          recv[i] = args[1] ?? null;
+          return recv;
+        }
+        case 'insert': {
+          const i = Math.max(0, Math.min(recv.length, idx(args[0] ?? null)));
+          recv.splice(i, 0, args[1] ?? null);
+          return recv;
+        }
+        case 'removeAt': {
+          const i = idx(args[0] ?? null);
+          if (i < 0 || i >= recv.length) return null;
+          return recv.splice(i, 1)[0]!;
+        }
+        case 'clear':
+          recv.length = 0;
+          return recv;
+        case 'copy':
+          return [...recv];
+        case 'contains':
+          return recv.some((x) => this.equals(x, args[0] ?? null));
+        case 'indexOf': {
+          const i = recv.findIndex((x) => this.equals(x, args[0] ?? null));
+          return i >= 0 ? i : null;
+        }
+        case 'slice': {
+          const from = idx(args[0] ?? 0);
+          const to = args.length > 1 ? idx(args[1]!) : recv.length;
+          return recv.slice(Math.max(0, from), Math.max(0, to));
+        }
+        case 'join':
+          return recv.map((x) => this.display(x)).join(typeof args[0] === 'string' ? args[0] : ', ');
+        case 'sum': {
+          const xs = numericItems();
+          return xs.length ? xs.reduce((s, x) => s + x, 0) : null;
+        }
+        case 'avg': {
+          const xs = numericItems();
+          return xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null;
+        }
+        case 'min': {
+          const xs = numericItems();
+          return xs.length ? Math.min(...xs) : null;
+        }
+        case 'max': {
+          const xs = numericItems();
+          return xs.length ? Math.max(...xs) : null;
+        }
+        case 'sort': {
+          const desc = args[0] === true;
+          recv.sort((a, b) => {
+            const an = num(a);
+            const bn = num(b);
+            const cmp =
+              Number.isFinite(an) && Number.isFinite(bn)
+                ? an - bn
+                : String(this.display(a)).localeCompare(String(this.display(b)));
+            return desc ? -cmp : cmp;
+          });
+          return recv;
+        }
+        case 'reverse':
+          recv.reverse();
+          return recv;
+        default:
+          err(`lists have no method '.${name}()'`);
+      }
+    }
+    if (typeof recv === 'string') {
+      const s = recv;
+      const str = (v: Value): string => (typeof v === 'string' ? v : this.display(v));
+      switch (name) {
+        case 'len':
+          return s.length;
+        case 'upper':
+          return s.toUpperCase();
+        case 'lower':
+          return s.toLowerCase();
+        case 'trim':
+          return s.trim();
+        case 'contains':
+          return s.includes(str(args[0] ?? ''));
+        case 'startsWith':
+          return s.startsWith(str(args[0] ?? ''));
+        case 'endsWith':
+          return s.endsWith(str(args[0] ?? ''));
+        case 'indexOf': {
+          const i = s.indexOf(str(args[0] ?? ''));
+          return i >= 0 ? i : null;
+        }
+        case 'replace':
+          return s.split(str(args[0] ?? '')).join(str(args[1] ?? ''));
+        case 'split':
+          return s.split(str(args[0] ?? ',')) as Value[];
+        case 'slice': {
+          const from = Math.trunc(num(args[0] ?? 0));
+          const to = args.length > 1 ? Math.trunc(num(args[1]!)) : s.length;
+          return s.slice(from, to);
+        }
+        case 'repeat': {
+          const n = Math.max(0, Math.min(10_000, Math.trunc(num(args[0] ?? 0))));
+          return s.repeat(n);
+        }
+        default:
+          err(`text has no method '.${name}()'`);
+      }
+    }
+    if (isNone(recv)) return null; // none propagates through method calls
+    return err(`'.${name}()' — this value has no methods (only lists and text do)`);
   }
 
   private callUserFn(name: string, fn: FnDef, e: Extract<Expr, { type: 'call' }>, bar: number, locals: Map<string, Value> | null): Value {
@@ -502,9 +770,14 @@ class Interpreter {
     }
     if (fn.ret) return this.evalExpr(fn.ret, bar, scope);
     let result: Value = null;
-    for (const st of fn.body) {
-      if (st.type === 'expr') result = this.evalExpr(st.expr, bar, scope);
-      else this.execStmt(st, scope);
+    try {
+      for (const st of fn.body) {
+        if (st.type === 'expr') result = this.evalExpr(st.expr, bar, scope);
+        else this.execStmt(st, scope);
+      }
+    } catch (err) {
+      if (err instanceof LoopSignal) throw new RuntimeError(`'${err.kind}' outside a loop`, err.pos.line, err.pos.col);
+      throw err;
     }
     return result;
   }
@@ -624,10 +897,13 @@ class Interpreter {
       case 'binary':
       case 'logical':
         return this.isStableSeries(e.left) && this.isStableSeries(e.right);
+      case 'ternary':
+        return this.isStableSeries(e.cond) && this.isStableSeries(e.then) && this.isStableSeries(e.else);
       case 'index':
         return this.isStableSeries(e.object) && this.isConst(e.index);
       case 'call':
         return this.isStableCall(e, false);
+      case 'list':
       case 'member':
         return false;
     }
@@ -646,11 +922,14 @@ class Interpreter {
       case 'binary':
       case 'logical':
         return this.isConst(e.left) && this.isConst(e.right);
+      case 'ternary':
+        return this.isConst(e.cond) && this.isConst(e.then) && this.isConst(e.else);
       case 'call':
         return this.isStableCall(e, true);
       case 'ident': // price sources / barIndex / globals all vary per bar
       case 'index':
       case 'member':
+      case 'list':
         return false;
     }
   }
@@ -724,6 +1003,9 @@ class Interpreter {
             this.declaredNames.add(s.varName);
             walk(s.body);
             break;
+          case 'while':
+            walk(s.body);
+            break;
         }
       }
     };
@@ -739,6 +1021,38 @@ class Interpreter {
     if (name === 'time') return c.openTime;
     if (name === 'barIndex') return bar;
     if (name === 'none') return null;
+    // Run-shape context (bar clock):
+    switch (name) {
+      case 'barCount':
+        return this.candles.length;
+      case 'lastBarIndex':
+        return this.candles.length - 1;
+      case 'isFirstBar':
+        return bar === 0;
+      case 'isLastBar':
+        return bar === this.candles.length - 1;
+    }
+    // Date-time fields of the bar's open time, in UTC (documented — not exchange-local).
+    if (DT_NAMES.has(name)) {
+      if (this.dtMemo.at !== c.openTime) this.dtMemo = { at: c.openTime, d: new Date(c.openTime) };
+      const d = this.dtMemo.d;
+      switch (name) {
+        case 'year':
+          return d.getUTCFullYear();
+        case 'month':
+          return d.getUTCMonth() + 1;
+        case 'day':
+          return d.getUTCDate();
+        case 'weekday':
+          return ((d.getUTCDay() + 6) % 7) + 1; // ISO: Mon=1 … Sun=7
+        case 'hour':
+          return d.getUTCHours();
+        case 'minute':
+          return d.getUTCMinutes();
+        case 'second':
+          return d.getUTCSeconds();
+      }
+    }
     const p = priceOf(name, c);
     if (p !== null) return p;
     throw new RuntimeError(`undefined name '${name}'`, e.pos.line, e.pos.col);
@@ -871,10 +1185,25 @@ class Interpreter {
   }
   private equals(a: Value, b: Value): boolean {
     if (isNone(a) || isNone(b)) return isNone(a) && isNone(b);
+    if (isList(a) && isList(b)) return a.length === b.length && a.every((v, i) => this.equals(v, b[i]!));
+    if (isList(a) || isList(b)) return false;
+    if (isRecord(a) && isRecord(b)) {
+      const ka = Object.keys(a);
+      const kb = Object.keys(b);
+      return ka.length === kb.length && ka.every((k) => k in b && this.equals(a[k]!, b[k]!));
+    }
+    if (isRecord(a) || isRecord(b)) return false;
     return a === b;
   }
   private display(v: Value): string {
-    return isNone(v) ? 'none' : String(v);
+    if (isNone(v)) return 'none';
+    if (isList(v)) return `[${v.map((x) => this.display(x)).join(', ')}]`;
+    if (isRecord(v)) {
+      return `{${Object.entries(v)
+        .map(([k, x]) => `${k}: ${this.display(x)}`)
+        .join(', ')}}`;
+    }
+    return String(v);
   }
   private toNumOrNull(v: Value): number | null {
     if (isNone(v)) return null;

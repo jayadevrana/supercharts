@@ -13,7 +13,7 @@ export class LexError extends Error {
 }
 
 const TWO_CHAR_OPS = new Set(['==', '!=', '<=', '>=']);
-const SINGLE_OPS = new Set(['+', '-', '*', '/', '%', '=', '<', '>']);
+const SINGLE_OPS = new Set(['+', '-', '*', '/', '%', '=', '<', '>', '?']);
 
 const isDigit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
 const isIdentStart = (c: string | undefined): boolean =>

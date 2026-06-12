@@ -100,6 +100,16 @@ class Parser {
           return this.parseWhen();
         case 'for':
           return this.parseFor();
+        case 'while':
+          return this.parseWhile();
+        case 'break': {
+          const kw = this.advance();
+          return { type: 'break', pos: this.posOf(kw) };
+        }
+        case 'continue': {
+          const kw = this.advance();
+          return { type: 'continue', pos: this.posOf(kw) };
+        }
         case 'fn':
           return this.parseFn();
         case 'draw':
@@ -174,6 +184,13 @@ class Parser {
     return { type: 'forRange', varName, from, to, body, pos: this.posOf(kw) };
   }
 
+  private parseWhile(): Stmt {
+    const kw = this.advance();
+    const cond = this.parseExpr();
+    const body = this.parseBlock();
+    return { type: 'while', cond, body, pos: this.posOf(kw) };
+  }
+
   private parseFn(): Stmt {
     const kw = this.advance();
     const name = this.expect('ident').value;
@@ -231,7 +248,17 @@ class Parser {
   // ---- expressions (precedence climbing) ----
 
   private parseExpr(): Expr {
-    return this.parseOr();
+    return this.parseTernary();
+  }
+  /** `cond ? a : b` — lowest precedence, right-associative (`a ? b : c ? d : e` nests right). */
+  private parseTernary(): Expr {
+    const cond = this.parseOr();
+    if (!this.at('op', '?')) return cond;
+    const q = this.advance();
+    const then = this.parseTernary();
+    this.expect('colon');
+    const elseE = this.parseTernary();
+    return { type: 'ternary', cond, then, else: elseE, pos: this.posOf(q) };
   }
   private parseOr(): Expr {
     let left = this.parseAnd();
@@ -297,7 +324,10 @@ class Parser {
     for (;;) {
       if (this.at('dot')) {
         this.advance();
-        const prop = this.expect('ident');
+        // Property position is unambiguous, so keywords are fine here (`.at()`, `.to()`, …).
+        const prop = this.peek();
+        if (prop.kind !== 'ident' && prop.kind !== 'keyword') this.fail('expected a member name');
+        this.advance();
         expr = { type: 'member', object: expr, property: prop.value, pos: this.posOf(prop) };
       } else if (this.at('lbracket')) {
         const lb = this.advance();
@@ -359,6 +389,18 @@ class Parser {
         const inner = this.parseExpr();
         this.expect('rparen');
         return inner;
+      }
+      case 'lbracket': {
+        // List literal `[a, b, c]` — only in value position; postfix `expr[n]` stays the history operator.
+        const lb = this.advance();
+        const items: Expr[] = [];
+        while (!this.at('rbracket') && !this.at('eof')) {
+          items.push(this.parseExpr());
+          if (this.at('comma')) this.advance();
+          else break;
+        }
+        this.expect('rbracket');
+        return { type: 'list', items, pos: this.posOf(lb) };
       }
       default:
         this.fail('expected an expression');

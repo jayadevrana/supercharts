@@ -8,7 +8,7 @@ export type TokenKind =
   | 'string'
   | 'ident'
   | 'keyword'
-  | 'op' // + - * / % == != < > <= >= =
+  | 'op' // + - * / % == != < > <= >= = ?
   | 'lparen'
   | 'rparen'
   | 'lbrace'
@@ -41,6 +41,9 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
   'for',
   'in',
   'to',
+  'while',
+  'break',
+  'continue',
   'fn',
   'draw',
   'mark',
