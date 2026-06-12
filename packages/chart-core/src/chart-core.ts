@@ -17,7 +17,7 @@ import { TooltipLayer } from './layers/tooltip';
 import { FootprintLayer } from './layers/footprint';
 import { SignalsTrendScoreLayer } from './layers/signals-trend-score';
 import { SmcLayer } from './layers/smc';
-import { IndicatorsLayer } from './layers/indicators';
+import { IndicatorsLayer, ShadeLayer } from './layers/indicators';
 import { MaCrossLayer } from './layers/ma-cross';
 import { EconomicEventsLayer } from './layers/economic-events';
 import { fitTarget, isNearRange, rangesOverlap, smoothStep, type PriceRange } from './price-fit';
@@ -400,6 +400,8 @@ export class ChartCore {
     // PulseScript user-script output (draw line/band → lines/bands, mark → dots), above the
     // classic indicators layer so script overlays sit on top.
     this.registerLayer(new IndicatorsLayer({ id: 'pulse-script', zIndex: 13 }));
+    // PulseScript `paint bg` shading — under the candles so price action stays readable.
+    this.registerLayer(new ShadeLayer({ id: 'pulse-bg', zIndex: 2 }));
     this.registerLayer(new MaCrossLayer());
     this.registerLayer(new EconomicEventsLayer());
     this.registerLayer(new DrawingLayer());

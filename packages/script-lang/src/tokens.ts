@@ -46,6 +46,7 @@ export const KEYWORDS: ReadonlySet<string> = new Set([
   'continue',
   'fn',
   'draw',
+  'paint',
   'mark',
   'buy',
   'sell',

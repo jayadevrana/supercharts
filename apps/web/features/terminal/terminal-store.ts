@@ -47,6 +47,13 @@ export interface PulseResult {
   inputs: InputDef[];
   plotCount: number;
   markCount: number;
+  /** Counts for the newer output channels (levels / markers / paints / alerts). */
+  levelCount?: number;
+  shapeCount?: number;
+  paintCount?: number;
+  alertCount?: number;
+  /** The most recent `alert("…")` events of the run (capped), newest last. */
+  alerts?: { bar: number; text: string }[];
   ranAt: number;
 }
 
@@ -124,6 +131,8 @@ export interface PaneState {
   classicIndicators: IndicatorInstance[];
   /** PulseScript editor + render state for this pane. */
   pulse: PulseState;
+  /** Vertical price-scale mode (TV parity INC-12). Undefined = linear (legacy panes). */
+  scaleMode?: 'linear' | 'log' | 'percent';
 }
 
 interface TerminalStore {
@@ -160,6 +169,7 @@ interface TerminalStore {
   setPaneSymbol: (id: string, symbol: string) => void;
   setPaneInterval: (id: string, interval: Interval) => void;
   setPaneChartType: (id: string, t: ChartType) => void;
+  setPaneScaleMode: (id: string, mode: NonNullable<PaneState['scaleMode']>) => void;
   togglePaneOverlay: (id: string, overlay: keyof PaneState['overlays']) => void;
   toggleSmcOverlay: (id: string, overlay: keyof PaneState['smc']) => void;
   setHeatmapSetting: (id: string, key: keyof PaneState['heatmapSettings'], value: number) => void;
@@ -345,6 +355,11 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
   setPaneChartType: (id, t) =>
     set((state) => ({
       panes: state.panes.map((p) => (p.id === id ? { ...p, chartType: t } : p)),
+    })),
+
+  setPaneScaleMode: (id, mode) =>
+    set((state) => ({
+      panes: state.panes.map((p) => (p.id === id ? { ...p, scaleMode: mode } : p)),
     })),
 
   togglePaneOverlay: (id, overlay) =>

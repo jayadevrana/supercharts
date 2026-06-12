@@ -53,6 +53,7 @@ export type Stmt =
   | { type: 'continue'; pos: Pos }
   | { type: 'fn'; name: string; params: Param[]; body: Stmt[]; ret: Expr | null; pos: Pos }
   | { type: 'draw'; call: Expr; pos: Pos }
+  | { type: 'paint'; call: Expr; pos: Pos }
   | { type: 'mark'; kind: MarkKind; at: Expr | null; text: Expr | null; pos: Pos }
   | { type: 'expr'; expr: Expr; pos: Pos };
 

@@ -114,6 +114,8 @@ class Parser {
           return this.parseFn();
         case 'draw':
           return this.parseDraw();
+        case 'paint':
+          return this.parsePaint();
         case 'mark':
           return this.parseMark();
         default:
@@ -222,6 +224,13 @@ class Parser {
     const kw = this.advance();
     const call = this.parseExpr();
     return { type: 'draw', call, pos: this.posOf(kw) };
+  }
+
+  /** `paint bg(color)` / `paint candles(color)` — per-bar colour outputs. */
+  private parsePaint(): Stmt {
+    const kw = this.advance();
+    const call = this.parseExpr();
+    return { type: 'paint', call, pos: this.posOf(kw) };
   }
 
   private parseMark(): Stmt {
@@ -348,8 +357,8 @@ class Parser {
     const args: Arg[] = [];
     while (!this.at('rparen') && !this.at('eof')) {
       const t = this.peek();
-      // named arg: IDENT ':' expr
-      if (t.kind === 'ident' && this.peek(1).kind === 'colon') {
+      // named arg: NAME ':' expr — keywords allowed as names (`at:`, `shape:`), unambiguous here
+      if ((t.kind === 'ident' || t.kind === 'keyword') && this.peek(1).kind === 'colon') {
         const name = this.advance().value;
         this.advance(); // ':'
         args.push({ name, value: this.parseExpr(), pos: this.posOf(t) });

@@ -24,10 +24,16 @@ export interface RecordValue {
   [key: string]: Value;
 }
 
+export type PlotKind = 'line' | 'hist' | 'band' | 'area' | 'steps' | 'dots';
+export type PlotDash = 'solid' | 'dashed' | 'dotted';
 export interface Plot {
   title: string;
   color: string | null;
-  kind: 'line' | 'hist' | 'band';
+  kind: PlotKind;
+  /** Line width / dot radius in px (style: `width:` named arg). */
+  width?: number;
+  /** Stroke style (`style: "dashed"` / `"dotted"`). */
+  dash?: PlotDash;
   values: (number | null)[];
   /** Second edge of a `band(upper, lower, …)` output. */
   values2?: (number | null)[];
@@ -37,6 +43,39 @@ export interface Mark {
   kind: MarkKind;
   price: number | null;
   text: string | null;
+}
+/** `draw level(y, …)` — a constant horizontal line (reference level). */
+export interface LevelDef {
+  y: number;
+  title: string | null;
+  color: string | null;
+  dash: PlotDash;
+}
+export type MarkerShape =
+  | 'circle'
+  | 'square'
+  | 'diamond'
+  | 'cross'
+  | 'triangleUp'
+  | 'triangleDown'
+  | 'arrowUp'
+  | 'arrowDown'
+  | 'flag';
+/** `draw marker(cond, …)` — a per-bar shape (condition-gated), above/below the bar or at a price. */
+export interface ShapeMark {
+  bar: number;
+  shape: MarkerShape;
+  place: 'above' | 'below';
+  /** Explicit y — overrides `place` when set. */
+  price: number | null;
+  color: string | null;
+  text: string | null;
+  size: number;
+}
+/** An `alert("…")` raised while the script ran (collected, shown in the console / tester). */
+export interface AlertEvent {
+  bar: number;
+  text: string;
 }
 export type InputKind = 'num' | 'bool' | 'text' | 'source';
 /** A declared `input.*(...)` — the editor renders these as form controls and feeds overrides back. */
@@ -56,6 +95,16 @@ export interface RunResult {
   inputs: InputDef[];
   plots: Plot[];
   marks: Mark[];
+  /** Constant horizontal reference lines (`draw level`). */
+  levels: LevelDef[];
+  /** Condition-gated per-bar shapes (`draw marker`). */
+  shapes: ShapeMark[];
+  /** Per-bar background colour (`paint bg`), null = unpainted. */
+  bgFills: (string | null)[];
+  /** Per-bar candle tint (`paint candles`), null = untinted. */
+  barTints: (string | null)[];
+  /** Alerts raised via `alert("…")`. */
+  alerts: AlertEvent[];
 }
 
 export class RuntimeError extends Error {
@@ -139,6 +188,8 @@ export interface RunOptions {
   maxBars?: number;
   /** Override values for declared `input.*` controls, keyed by input id. */
   inputs?: Record<string, number | boolean | string>;
+  /** The chart timeframe of the candles (e.g. "1m", "1h") — required by `onTf` multi-timeframe reads. */
+  interval?: string;
 }
 
 /** Direct sub-expressions of an expression (for AST walks). */
@@ -202,6 +253,7 @@ function* stmtExprs(s: Stmt): Generator<Expr> {
       if (s.ret) yield s.ret;
       return;
     case 'draw':
+    case 'paint':
       yield s.call;
       return;
     case 'mark':
@@ -220,6 +272,12 @@ class Interpreter {
   private plots = new Map<string, Plot>();
   private plotOrder: string[] = [];
   private marks: Mark[] = [];
+  /** `draw level` keyed by call site — re-executing per bar overwrites (last value wins). */
+  private levels = new Map<Expr, LevelDef>();
+  private shapes: ShapeMark[] = [];
+  private bgFills: (string | null)[] = [];
+  private barTints: (string | null)[] = [];
+  private alerts: AlertEvent[] = [];
   private meta: Record<string, Value> = {};
   private i = 0; // current bar
   private loopSteps = 0;
@@ -290,6 +348,11 @@ class Interpreter {
       inputs: this.inputDefs,
       plots: this.plotOrder.map((t) => this.plots.get(t)!),
       marks: this.marks,
+      levels: [...this.levels.values()],
+      shapes: this.shapes,
+      bgFills: this.bgFills,
+      barTints: this.barTints,
+      alerts: this.alerts,
     };
   }
 
@@ -384,6 +447,9 @@ class Interpreter {
       case 'draw':
         this.evalDraw(s.call, locals);
         return;
+      case 'paint':
+        this.evalPaint(s.call, locals);
+        return;
       case 'mark': {
         const price = s.at ? this.toNumOrNull(this.evalExpr(s.at, this.i, locals)) : this.candles[this.i]!.close;
         const tv = s.text ? this.evalExpr(s.text, this.i, locals) : null;
@@ -424,21 +490,54 @@ class Interpreter {
     }
   }
 
+  /** Plot-buffer kinds a `draw` statement can produce. */
+  private static readonly DRAW_KINDS: ReadonlySet<string> = new Set(['line', 'hist', 'band', 'area', 'steps', 'dots']);
+  private static readonly MARKER_SHAPES: ReadonlySet<string> = new Set([
+    'circle',
+    'square',
+    'diamond',
+    'cross',
+    'triangleUp',
+    'triangleDown',
+    'arrowUp',
+    'arrowDown',
+    'flag',
+  ]);
+
   /**
-   * `draw line(value, …)` / `draw hist(value, …)` / `draw band(upper, lower, …)`.
-   * Captures per-bar value(s) into a plot buffer; `title`/`color` are named args.
+   * `draw <kind>(value, …)` — series plots (`line/hist/band/area/steps/dots`, with `width:` /
+   * `style: "dashed"|"dotted"` named args), constant `level(y, …)` reference lines, and
+   * condition-gated `marker(cond, …)` shapes.
    */
   private evalDraw(call: Expr, locals: Map<string, Value> | null): void {
-    if (call.type !== 'call' || call.callee.type !== 'ident' || !['line', 'hist', 'band'].includes(call.callee.name)) {
-      throw new RuntimeError("draw expects a 'line(...)', 'hist(...)' or 'band(...)' output", call.pos.line, call.pos.col);
+    if (call.type !== 'call' || call.callee.type !== 'ident') {
+      throw new RuntimeError(
+        "draw expects line(...), hist(...), band(...), area(...), steps(...), dots(...), level(...) or marker(...)",
+        call.pos.line,
+        call.pos.col,
+      );
     }
-    const kind = call.callee.name as 'line' | 'hist' | 'band';
+    const name = call.callee.name;
+    if (name === 'level') return this.evalLevel(call, locals);
+    if (name === 'marker') return this.evalMarker(call, locals);
+    if (!Interpreter.DRAW_KINDS.has(name)) {
+      throw new RuntimeError(
+        `unknown draw output '${name}' — use line/hist/band/area/steps/dots/level/marker`,
+        call.pos.line,
+        call.pos.col,
+      );
+    }
+    const kind = name as PlotKind;
     let title: string | null = null;
     let color: string | null = null;
+    let width: number | undefined;
+    let dash: PlotDash | undefined;
     const positional: Arg[] = [];
     for (const a of call.args) {
       if (a.name === 'title') title = String(this.evalExpr(a.value, this.i, locals) ?? '');
       else if (a.name === 'color') color = String(this.evalExpr(a.value, this.i, locals) ?? '');
+      else if (a.name === 'width') width = this.toNumOrNull(this.evalExpr(a.value, this.i, locals)) ?? undefined;
+      else if (a.name === 'style') dash = this.toDash(this.evalExpr(a.value, this.i, locals), a.pos);
       else if (a.name === null) positional.push(a);
     }
     const need = kind === 'band' ? 2 : 1;
@@ -453,10 +552,90 @@ class Interpreter {
       this.plotOrder.push(key);
     }
     if (color && !plot.color) plot.color = color;
+    if (width != null && plot.width == null) plot.width = width;
+    if (dash && !plot.dash) plot.dash = dash;
     plot.values[this.i] = this.toNumOrNull(this.evalExpr(positional[0]!.value, this.i, locals));
     if (kind === 'band') {
       (plot.values2 ??= [])[this.i] = this.toNumOrNull(this.evalExpr(positional[1]!.value, this.i, locals));
     }
+  }
+
+  private toDash(v: Value, pos: { line: number; col: number }): PlotDash {
+    const s = String(v ?? 'solid');
+    if (s === 'solid' || s === 'dashed' || s === 'dotted') return s;
+    throw new RuntimeError(`style must be "solid", "dashed" or "dotted" (got "${s}")`, pos.line, pos.col);
+  }
+
+  /** `draw level(y, color:, title:, style:)` — constant horizontal line; last value wins per call site. */
+  private evalLevel(call: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): void {
+    let y: number | null = null;
+    let title: string | null = null;
+    let color: string | null = null;
+    let dash: PlotDash = 'dashed';
+    for (const a of call.args) {
+      if (a.name === 'title') title = String(this.evalExpr(a.value, this.i, locals) ?? '');
+      else if (a.name === 'color') color = String(this.evalExpr(a.value, this.i, locals) ?? '');
+      else if (a.name === 'style') dash = this.toDash(this.evalExpr(a.value, this.i, locals), a.pos);
+      else if (a.name === null && y === null) y = this.toNumOrNull(this.evalExpr(a.value, this.i, locals));
+    }
+    if (y === null) return; // a none level on this bar — keep any previous value
+    this.levels.set(call, { y, title, color, dash });
+  }
+
+  /** `draw marker(cond, at: "above"|"below"|price, shape:, color:, text:, size:)`. */
+  private evalMarker(call: Extract<Expr, { type: 'call' }>, locals: Map<string, Value> | null): void {
+    const positional = call.args.filter((a) => a.name === null);
+    if (positional.length < 1) {
+      throw new RuntimeError('draw marker(...) needs a condition argument', call.pos.line, call.pos.col);
+    }
+    if (!this.truthy(this.evalExpr(positional[0]!.value, this.i, locals))) return;
+    let place: 'above' | 'below' = 'above';
+    let price: number | null = null;
+    let shape: MarkerShape = 'triangleUp';
+    let color: string | null = null;
+    let text: string | null = null;
+    let size = 4;
+    for (const a of call.args) {
+      if (a.name === 'at') {
+        const v = this.evalExpr(a.value, this.i, locals);
+        if (v === 'above' || v === 'below') place = v;
+        else {
+          const n = this.toNumOrNull(v);
+          if (n === null) return; // marker at none → skip this bar
+          price = n;
+        }
+      } else if (a.name === 'shape') {
+        const s = String(this.evalExpr(a.value, this.i, locals) ?? '');
+        if (!Interpreter.MARKER_SHAPES.has(s)) {
+          throw new RuntimeError(
+            `unknown marker shape "${s}" (use ${[...Interpreter.MARKER_SHAPES].join('/')})`,
+            a.pos.line,
+            a.pos.col,
+          );
+        }
+        shape = s as MarkerShape;
+      } else if (a.name === 'color') color = String(this.evalExpr(a.value, this.i, locals) ?? '');
+      else if (a.name === 'text') {
+        const tv = this.evalExpr(a.value, this.i, locals);
+        text = isNone(tv) ? null : this.display(tv);
+      } else if (a.name === 'size') size = Math.max(1, Math.min(24, num(this.evalExpr(a.value, this.i, locals)) || 4));
+    }
+    this.shapes.push({ bar: this.i, shape, place, price, color, text, size });
+  }
+
+  /** `paint bg(color)` / `paint candles(color)` — per-bar colour buffers (none clears nothing). */
+  private evalPaint(call: Expr, locals: Map<string, Value> | null): void {
+    if (call.type !== 'call' || call.callee.type !== 'ident' || !['bg', 'candles'].includes(call.callee.name)) {
+      throw new RuntimeError("paint expects 'bg(color)' or 'candles(color)'", call.pos.line, call.pos.col);
+    }
+    const target = call.callee.name as 'bg' | 'candles';
+    const first = call.args.find((a) => a.name === null);
+    if (!first) throw new RuntimeError(`paint ${target}(...) needs a color`, call.pos.line, call.pos.col);
+    const v = this.evalExpr(first.value, this.i, locals);
+    if (isNone(v)) return;
+    const color = String(v);
+    if (target === 'bg') this.bgFills[this.i] = color;
+    else this.barTints[this.i] = color;
   }
 
   // ---- expressions ----
@@ -606,6 +785,23 @@ class Interpreter {
       const v = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
       const n = typeof v === 'string' ? Number(v.trim()) : num(v);
       return Number.isFinite(n) ? n : null;
+    }
+    if (name === 'alert') {
+      // alert("message") — collected per bar; gate with `when cond { alert(...) }`.
+      const v = e.args[0] ? this.evalExpr(e.args[0].value, bar, locals) : null;
+      if (bar === this.i) this.alerts.push({ bar, text: isNone(v) ? '' : this.display(v) });
+      return null;
+    }
+    if (name === 'rgb' || name === 'rgba') {
+      const ch = (idx: number, lo: number, hi: number, d: number): number => {
+        const n = e.args[idx] ? num(this.evalExpr(e.args[idx]!.value, bar, locals)) : d;
+        return Math.max(lo, Math.min(hi, Number.isFinite(n) ? n : d));
+      };
+      const r = Math.round(ch(0, 0, 255, 0));
+      const g = Math.round(ch(1, 0, 255, 0));
+      const b = Math.round(ch(2, 0, 255, 0));
+      if (name === 'rgb') return `rgb(${r},${g},${b})`;
+      return `rgba(${r},${g},${b},${ch(3, 0, 1, 1)})`;
     }
     if (name === 'repeat') {
       // repeat(value, count) — build a list of `count` copies (each bar gets a fresh list).

@@ -40,6 +40,12 @@ import type {
   IndicatorOverlayBand,
   IndicatorOverlayDots,
   IndicatorOverlayLine,
+  IndicatorOverlayArea,
+  IndicatorOverlayHist,
+  IndicatorOverlayLevel,
+  IndicatorOverlayMarkers,
+  IndicatorOverlayTints,
+  ShadeLayer,
   EconomicEventMarker,
 } from '@supercharts/chart-core';
 import { computeAll, INDICATOR_LOOKUP, nakedPOC } from '@supercharts/indicators';
@@ -1318,9 +1324,14 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     if (!core) return;
     const layer = core.getLayer<IndicatorsLayer>('pulse-script');
     if (!layer) return;
+    const bgLayer = core.getLayer<ShadeLayer>('pulse-bg');
     const clear = (): void => {
       layer.visible = false;
       layer.options = { lines: [], bands: [], dots: [] };
+      if (bgLayer) {
+        bgLayer.visible = false;
+        bgLayer.options = { colors: [] };
+      }
     };
     const pulse = pane.pulse;
     if (pulse.runToken === 0) {
@@ -1334,11 +1345,14 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       return;
     }
     try {
-      const res: RunResult = runScript(pulse.source, bars, { inputs: pulse.inputValues });
+      const res: RunResult = runScript(pulse.source, bars, { inputs: pulse.inputValues, interval: pane.interval });
       const lines: IndicatorOverlayLine[] = [];
       const bands: IndicatorOverlayBand[] = [];
       const dots: IndicatorOverlayDots[] = [];
+      const areas: IndicatorOverlayArea[] = [];
+      const hists: IndicatorOverlayHist[] = [];
       const palette = ['#38bdf8', '#f59e0b', '#a78bfa', '#34d399', '#f472b6', '#facc15'];
+      const DASH: Record<string, [number, number] | undefined> = { dashed: [6, 4], dotted: [2, 3], solid: undefined };
       res.plots.forEach((p, idx) => {
         const color = p.color || palette[idx % palette.length]!;
         const vals = p.values.map((v) => (v == null ? NaN : v));
@@ -1351,8 +1365,22 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             borderColor: color,
             borderWidth: 0.8,
           });
+        } else if (p.kind === 'area') {
+          areas.push({ id: 'pulse_' + idx, values: vals, color, fillColor: pulseFill(color), lineWidth: p.width ?? 1.5 });
+        } else if (p.kind === 'hist') {
+          hists.push({ id: 'pulse_' + idx, values: vals, color });
+        } else if (p.kind === 'dots') {
+          dots.push({ id: 'pulse_' + idx, values: vals, color, radius: p.width ?? 2.5 });
         } else {
-          lines.push({ id: 'pulse_' + idx, channel: p.title || 'plot' + idx, values: vals, color, lineWidth: 1.6 });
+          lines.push({
+            id: 'pulse_' + idx,
+            channel: p.title || 'plot' + idx,
+            values: vals,
+            color,
+            lineWidth: p.width ?? 1.6,
+            dash: DASH[p.dash ?? 'solid'],
+            step: p.kind === 'steps',
+          });
         }
       });
       // marks → colored dots at the mark's bar + price (buy green, sell red, note grey).
@@ -1370,10 +1398,58 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       for (const [kind, vals] of byKind) {
         dots.push({ id: 'pulse_mark_' + kind, values: vals, color: markColor[kind] ?? '#94a3b8', radius: 4 });
       }
-      const hasOutput = lines.length > 0 || bands.length > 0 || dots.length > 0;
+      // levels / markers / candle tints — the script's reference lines + shape stamps.
+      const levels: IndicatorOverlayLevel[] = res.levels.map((l, i) => ({
+        id: 'pulse_level_' + i,
+        y: l.y,
+        color: l.color || '#94a3b8',
+        dash: DASH[l.dash] ?? [6, 4],
+        label: l.title ?? undefined,
+      }));
+      const markers: IndicatorOverlayMarkers[] = res.shapes.length
+        ? [
+            {
+              id: 'pulse_shapes',
+              items: res.shapes
+                .filter((s) => s.bar >= 0 && s.bar < bars.length)
+                .map((s) => ({
+                  index: s.bar,
+                  shape: s.shape,
+                  place: s.place,
+                  price: s.price,
+                  color:
+                    s.color ||
+                    (s.shape === 'triangleUp' || s.shape === 'arrowUp'
+                      ? '#22c55e'
+                      : s.shape === 'triangleDown' || s.shape === 'arrowDown'
+                        ? '#ef4444'
+                        : '#38bdf8'),
+                  text: s.text,
+                  size: s.size,
+                })),
+            },
+          ]
+        : [];
+      const tints: IndicatorOverlayTints[] = res.barTints.some((t) => t)
+        ? [{ id: 'pulse_tint', colors: res.barTints }]
+        : [];
+      const hasOutput =
+        lines.length > 0 ||
+        bands.length > 0 ||
+        dots.length > 0 ||
+        areas.length > 0 ||
+        hists.length > 0 ||
+        levels.length > 0 ||
+        markers.length > 0 ||
+        tints.length > 0;
+      const hasBg = res.bgFills.some((f) => f);
       if (pulse.enabled) {
-        layer.options = { lines, bands, dots };
+        layer.options = { lines, bands, dots, areas, hists, levels, markers, tints };
         layer.visible = hasOutput;
+        if (bgLayer) {
+          bgLayer.options = { colors: hasBg ? res.bgFills : [] };
+          bgLayer.visible = hasBg;
+        }
       } else {
         clear();
       }
@@ -1384,6 +1460,11 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         inputs: res.inputs,
         plotCount: res.plots.length,
         markCount: res.marks.length,
+        levelCount: res.levels.length,
+        shapeCount: res.shapes.length,
+        paintCount: res.bgFills.filter(Boolean).length + res.barTints.filter(Boolean).length,
+        alertCount: res.alerts.length,
+        alerts: res.alerts.slice(-20),
         ranAt: Date.now(),
       });
     } catch (err) {
