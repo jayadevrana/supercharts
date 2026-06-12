@@ -4,20 +4,32 @@ import type { Layer, RenderContext } from './types';
 /**
  * Tooltip layer.
  *
- * Renders a small floating panel anchored to the crosshair with the OHLCV of the
- * hovered candle plus a buy/sell delta strip. Drawn last (zIndex 97) so it sits on
- * top of every chart layer except the axis chrome.
+ * Always highlights the hovered candle's column. The floating OHLCV panel that chases
+ * the cursor is opt-in (`options.showPanel`) — the fixed symbol status line is the
+ * default OHLC reading surface (TV model), so the panel ships off.
  */
 export class TooltipLayer implements Layer {
   readonly id = 'tooltip';
   readonly zIndex = 97;
   visible = true;
+  options: { showPanel: boolean } = { showPanel: false };
 
   render(ctx: RenderContext): void {
     const { ctx: c, theme, crosshair, frame, geometry, timeScale } = ctx;
     if (!crosshair) return;
     const candle = findCandleAt(frame.candles, crosshair.time);
     if (!candle) return;
+
+    // Subtle highlight on the hovered candle column — independent of the panel.
+    c.save();
+    const colCenter = Math.round(timeScale.timeToX((candle.openTime + candle.closeTime) / 2));
+    const colHalfW = Math.max(2, timeScale.barPx() * 0.78) / 2;
+    c.fillStyle = candle.close >= candle.open ? theme.bullDim : theme.bearDim;
+    c.globalAlpha = 0.18;
+    c.fillRect(colCenter - colHalfW, geometry.pricePane.y, colHalfW * 2, geometry.pricePane.height);
+    c.restore();
+
+    if (!this.options.showPanel) return;
 
     const lines: Array<[string, string, string?]> = [
       ['O', formatLoose(candle.open), theme.textMuted],
@@ -77,14 +89,6 @@ export class TooltipLayer implements Layer {
     const dt = new Date(candle.openTime);
     const stamp = `${pad2(dt.getUTCMonth() + 1)}/${pad2(dt.getUTCDate())} ${pad2(dt.getUTCHours())}:${pad2(dt.getUTCMinutes())} UTC`;
     c.fillText(stamp, x + padding, y - 4);
-
-    // Subtle highlight on the candle column
-    const xCenter = Math.round(timeScale.timeToX((candle.openTime + candle.closeTime) / 2));
-    const halfW = Math.max(2, timeScale.barPx() * 0.78) / 2;
-    c.fillStyle = candle.close >= candle.open ? theme.bullDim : theme.bearDim;
-    c.globalAlpha = 0.18;
-    c.fillRect(xCenter - halfW, geometry.pricePane.y, halfW * 2, geometry.pricePane.height);
-    c.globalAlpha = 1;
 
     c.restore();
   }
