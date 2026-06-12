@@ -123,6 +123,11 @@ export class ChartCore {
   private priceFitLastT = 0;
   /** Cumulative vertical drag of the current pan gesture (manual-override detector). */
   private gestureDy = 0;
+  /**
+   * Whether the bottom volume band is part of the layout. When false the price pane takes
+   * the full height — the band must never sit reserved-but-empty under a volume-less chart.
+   */
+  private showVolumePane: boolean;
 
   constructor(opts: ChartCoreOptions) {
     this.opts = opts;
@@ -142,7 +147,8 @@ export class ChartCore {
     const w = Math.max(100, rect.width);
     const h = Math.max(100, rect.height);
     this.dpr = window.devicePixelRatio || 1;
-    this.geometry = computeGeometry(w, h, { showVolumePane: opts.showVolumePane ?? true });
+    this.showVolumePane = opts.showVolumePane ?? true;
+    this.geometry = computeGeometry(w, h, { showVolumePane: this.showVolumePane });
     const barDur = opts.initialBarDurationMs ?? 60_000;
     const barW = opts.initialBarWidth ?? 8;
     this.timeScale = new TimeScale({
@@ -187,6 +193,16 @@ export class ChartCore {
   setTheme(theme: ChartTheme): void {
     this.theme = theme;
     this.markDirty();
+  }
+
+  /**
+   * Show/hide the bottom volume band. Hiding hands its height back to the price pane
+   * (no reserved-but-empty strip); the price scale refits so candles fill the new height.
+   */
+  setVolumePaneVisible(visible: boolean): void {
+    if (this.showVolumePane === visible) return;
+    this.showVolumePane = visible;
+    this.resize();
   }
 
   /**
@@ -442,7 +458,7 @@ export class ChartCore {
     // observer-driven resize loop on subsequent layout changes.
     if (this.canvas.width !== bitmapW) this.canvas.width = bitmapW;
     if (this.canvas.height !== bitmapH) this.canvas.height = bitmapH;
-    this.geometry = computeGeometry(w, h, { showVolumePane: this.opts.showVolumePane ?? true });
+    this.geometry = computeGeometry(w, h, { showVolumePane: this.showVolumePane });
     this.timeScale.state.width = this.geometry.pricePane.width;
     this.priceScale.state.height = this.geometry.pricePane.height;
     this.volumeScale.state.height = this.geometry.volumePane.height;

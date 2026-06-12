@@ -170,6 +170,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     const core = new ChartCore({
       canvas,
       theme: resolvedTheme,
+      showVolumePane: pane.overlays.volume,
       onPointerEvent: (e) => {
         if (e.type === 'contextmenu') {
           setMenu({ x: e.x, y: e.y });
@@ -1833,6 +1834,9 @@ function applyOverlays(core: ChartCore, pane: PaneState): void {
   // fresh chart is truly blank (candles only).
   const volume = core.getLayer('volume');
   if (volume) volume.visible = pane.overlays.volume;
+  // …and the band itself collapses when hidden, returning its height to the candles
+  // (otherwise an empty 18% strip sits at the bottom of every volume-less chart).
+  core.setVolumePaneVisible(pane.overlays.volume);
 }
 
 /** Translucent fill for a PulseScript `band` derived from its line color. */
