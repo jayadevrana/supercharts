@@ -212,6 +212,31 @@ export class ChartCore {
     this.resize();
   }
 
+  /**
+   * Fit the visible window to the last `spanMs` of data (TV range presets: 1D, 5D, 1M…).
+   * Omitting `spanMs` fits ALL loaded candles. Re-arms follow + price auto-fit so the
+   * jump lands on a live, fully-fitted view.
+   */
+  fitTimeSpan(spanMs?: number): void {
+    const candles = this.frame.candles;
+    if (candles.length === 0) return;
+    this.stopInertia();
+    this.cancelWheelZoom();
+    const last = candles[candles.length - 1]!;
+    const first = candles[0]!;
+    const barDur = last.closeTime - last.openTime || this.timeScale.state.barDurationMs || 60_000;
+    const span = Math.max(spanMs ?? last.closeTime - first.openTime, barDur * 10);
+    const margin = barDur * 6;
+    this.timeScale.state.rightTime = last.closeTime + margin;
+    this.timeScale.state.pxPerMs = this.timeScale.state.width / (span + margin);
+    this.timeScale.state.barWidth = Math.max(1, barDur * this.timeScale.state.pxPerMs);
+    this.autoFollow = true;
+    this.setPriceAutoFit(true);
+    this.fitPriceScaleToVisible(true);
+    this.scheduleRangeChange();
+    this.markDirty();
+  }
+
   // ---- Price-scale modes (linear / log / percent), invert, auto-fit ----
 
   /**

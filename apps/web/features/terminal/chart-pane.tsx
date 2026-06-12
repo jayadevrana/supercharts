@@ -55,6 +55,7 @@ import { ENTRY_INDEX, INDICATOR_DND_MIME, buildInstance } from './indicators-dia
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { IndicatorLegend } from './indicator-legend';
 import { SymbolStatusLine } from './symbol-status-line';
+import { ChartFooter, resolvePresetSpan, type RangePreset } from './chart-footer';
 import { buildLegendRows } from './indicator-legend-util';
 import { buildDataWindow } from './data-window-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
@@ -149,12 +150,21 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const requestIndicatorSettings = useTerminalStore((s) => s.requestIndicatorSettings);
   const setDataWindow = useTerminalStore((s) => s.setDataWindow);
   const rightRailTab = useTerminalStore((s) => s.rightRailTab);
+  const setPaneInterval = useTerminalStore((s) => s.setPaneInterval);
+  const setPaneScaleMode = useTerminalStore((s) => s.setPaneScaleMode);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
   const activeRef = useRef<boolean>(active);
   drawToolRef.current = drawTool;
   activeRef.current = active;
+  // Footer (TV parity): live scale state mirrored from the core, the active range-preset
+  // chip, and a span to apply once candles land after a preset-driven interval switch.
+  const [scaleState, setScaleState] = useState<{ mode: 'linear' | 'log' | 'percent'; inverted: boolean; auto: boolean }>(
+    { mode: 'linear', inverted: false, auto: true },
+  );
+  const [presetLabel, setPresetLabel] = useState<string | null>(null);
+  const pendingSpanRef = useRef<{ span: number | undefined } | null>(null);
   // On-chart indicator legend (M2): per-instance computed channels live in a ref (large arrays
   // stay out of React state); `legendTick` bumps a re-render when they recompute, and `hoverTime`
   // tracks the crosshair candle so the legend shows that bar's values (latest when off-chart).
@@ -361,6 +371,12 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         }
         candleBufRef.current = candles;
         core.setCandles(transformCandles(candles, pane.chartType, pane.symbol));
+        // A range preset that switched the interval parks its span here until the new
+        // interval's candles land — apply it now so 1D/1M/1Y… jumps show the full window.
+        if (pendingSpanRef.current) {
+          core.fitTimeSpan(pendingSpanRef.current.span);
+          pendingSpanRef.current = null;
+        }
         if (active && candles.length > 0) {
           setReplayBounds({
             from: candles[0]!.openTime,
@@ -558,6 +574,22 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     chartRef.current?.setPriceScaleMode(pane.scaleMode ?? 'linear');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.scaleMode, pane.symbol, pane.interval]);
+
+  // Footer toggles mirror the live scale state (mode flips, auto re-arm/manual override).
+  useEffect(() => {
+    const core = chartRef.current;
+    if (!core) return undefined;
+    setScaleState(core.getScaleState());
+    return core.onScaleState(setScaleState);
+    // Re-subscribes when the ChartCore is rebuilt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.symbol, pane.interval]);
+
+  // A manual timeframe/symbol switch (top bar) drops the range-preset highlight; a
+  // preset-driven switch keeps it (its span is still parked in pendingSpanRef).
+  useEffect(() => {
+    if (!pendingSpanRef.current) setPresetLabel(null);
+  }, [pane.interval, pane.symbol]);
 
   // Cross-pane crosshair sync: publish the active pane's hover time + mirror others.
   useEffect(() => {
@@ -1733,6 +1765,30 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         indicators={pane.classicIndicators}
         view={subView}
         hoverTime={hoverTime}
+      />
+      <ChartFooter
+        activeLabel={presetLabel}
+        onPreset={(p: RangePreset) => {
+          const span = resolvePresetSpan(p.span, Date.now());
+          setPresetLabel(p.label);
+          if (pane.interval !== p.interval) {
+            // The interval switch rebuilds the chart + reloads candles; the span applies
+            // once they land (see the initial-load path).
+            pendingSpanRef.current = { span };
+            setPaneInterval(pane.id, p.interval);
+          } else {
+            chartRef.current?.fitTimeSpan(span);
+          }
+        }}
+        mode={scaleState.mode}
+        auto={scaleState.auto}
+        onTogglePercent={() =>
+          setPaneScaleMode(pane.id, (pane.scaleMode ?? 'linear') === 'percent' ? 'linear' : 'percent')
+        }
+        onToggleLog={() =>
+          setPaneScaleMode(pane.id, (pane.scaleMode ?? 'linear') === 'log' ? 'linear' : 'log')
+        }
+        onAutoFit={() => chartRef.current?.setAutoFit()}
       />
     </div>
   );
