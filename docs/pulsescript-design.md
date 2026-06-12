@@ -1,5 +1,10 @@
 # PulseScript — SuperCharts' own chart-scripting language
 
+> **This is the original design/build doc (Phase 6).** The language has since grown well past
+> it — for what PulseScript can do today see **`docs/pulsescript-language.md`** (full
+> reference) and **`docs/pulsescript-parity.md`** (audited capability matrix vs Pine Script +
+> the next planned increments).
+
 > **Original language.** PulseScript is designed from scratch for SuperCharts. It borrows only
 > the *general, non-copyrightable concept* of a bar-by-bar series model (the same idea behind
 > spreadsheets, kdb+, and every charting DSL) — **not** the syntax, keyword set, API surface, or
