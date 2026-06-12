@@ -12,10 +12,13 @@ export function SymbolStatusLine({
   candle,
   prevClose,
   atCrosshair,
+  venue,
 }: {
   candle: Candle | null;
   prevClose: number | null;
   atCrosshair: boolean;
+  /** Data venue tag, TV-style ("Binance"). Omitted when unknown. */
+  venue?: string;
 }) {
   if (!candle) return null;
   const up = candle.close >= candle.open;
@@ -39,6 +42,7 @@ export function SymbolStatusLine({
       className="pointer-events-auto flex items-center gap-1.5 rounded bg-surface/75 px-1.5 py-[3px] text-[11px] leading-none tabular-nums backdrop-blur-[1px]"
       title={atCrosshair ? 'Values at the crosshair bar' : 'Latest bar'}
     >
+      {venue ? <span className="text-muted-foreground/60">{venue} ·</span> : null}
       <Item label="O" value={candle.open} />
       <Item label="H" value={candle.high} />
       <Item label="L" value={candle.low} />

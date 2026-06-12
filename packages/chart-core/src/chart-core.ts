@@ -605,6 +605,18 @@ export class ChartCore {
     let lastY = 0;
     let priceAxisDrag = false;
     let timeAxisDrag = false;
+    /** Cursor affordances: crosshair over the plot, resize arrows over the axes, grabbing mid-pan. */
+    let currentCursor = '';
+    const setCursor = (c: string): void => {
+      if (c === currentCursor) return;
+      currentCursor = c;
+      cvs.style.cursor = c;
+    };
+    const hoverCursor = (x: number, y: number): void => {
+      if (x >= this.geometry.axisPane.x) setCursor('ns-resize');
+      else if (y >= this.geometry.timeAxisPane.y) setCursor('ew-resize');
+      else setCursor('crosshair');
+    };
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -647,6 +659,7 @@ export class ChartCore {
       else if (!suppressed) {
         dragging = true;
         this.panSamples.push({ t: performance.now(), x, y });
+        setCursor('grabbing');
       }
       lastX = x;
       lastY = y;
@@ -688,7 +701,8 @@ export class ChartCore {
         if (this.priceAutoFit) this.fitPriceScaleToVisible(true);
         this.scheduleRangeChange();
       } else {
-        // Hover → crosshair update.
+        // Hover → crosshair update + per-region cursor affordance.
+        hoverCursor(x, y);
         if (x >= 0 && x <= this.geometry.pricePane.width && y >= 0 && y <= this.geometry.pricePane.height + this.geometry.volumePane.height) {
           const time = this.timeScale.xToTime(x);
           const price = this.priceScale.yToPrice(y);
@@ -717,6 +731,7 @@ export class ChartCore {
       const rect = cvs.getBoundingClientRect();
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
+      hoverCursor(x, y); // gesture over → back to the region cursor
       this.opts.onPointerEvent?.(this.toPointerEvent('pointerup', e, x, y));
       // Momentum pan: only after a real chart pan. Drawing gestures never set `dragging`
       // (shouldSuppressPan gated the pointerdown); re-check suppression at release too in

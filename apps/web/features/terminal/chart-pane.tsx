@@ -1650,9 +1650,20 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           ref={canvasRef}
           className="absolute inset-0 h-full w-full"
         />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute bottom-8 left-2 z-10 select-none text-[13px] font-semibold tracking-tight text-foreground/[0.16]"
+        >
+          ⚡ SuperCharts
+        </div>
         <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[72%] flex-col items-start gap-0.5">
           <div className="flex items-center gap-1">
-            <SymbolStatusLine candle={statusCandle} prevClose={statusPrevClose} atCrosshair={hoverTime != null} />
+            <SymbolStatusLine
+              candle={statusCandle}
+              prevClose={statusPrevClose}
+              atCrosshair={hoverTime != null}
+              venue={venueLabel(pane.symbol)}
+            />
             {legendRows.length > 0 ? (
               <button
                 type="button"
@@ -2127,6 +2138,13 @@ function pulseFill(color: string): string {
     return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, 0.12)`;
   }
   return 'rgba(56,189,248,0.12)';
+}
+
+/** "BINANCE:BTCUSDT" → "Binance" · "CUSTOM:my-set" → "Custom" — TV-style venue tag. */
+function venueLabel(symbolId: string): string | undefined {
+  const venue = symbolId.split(':')[0];
+  if (!venue || venue === symbolId) return undefined;
+  return venue.charAt(0).toUpperCase() + venue.slice(1).toLowerCase();
 }
 
 function estimateRowSize(symbol: string): number {
