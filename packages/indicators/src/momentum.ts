@@ -7,7 +7,7 @@
  */
 
 import type { Candle } from '@supercharts/types';
-import { ema, sma, rma, wma, pricesFromCandles, type PriceSource } from './ma';
+import { ema, sma, smaNan, rma, wma, pricesFromCandles, type PriceSource } from './ma';
 import { stdev } from './volatility';
 import { trueRange } from './volatility';
 import { rsi } from './oscillators';
@@ -38,28 +38,6 @@ export function linreg(values: readonly number[], length: number): number[] {
     const slope = (length * sumXY - sumX * sumY) / denom;
     const intercept = (sumY - slope * sumX) / length;
     out[i] = intercept + slope * (length - 1);
-  }
-  return out;
-}
-
-/**
- * NaN-tolerant simple moving average: emits a value once the trailing window is fully finite,
- * and recovers after a gap. The shared `sma` uses a running sum that a leading NaN poisons
- * permanently — these oscillators smooth NaN-prefixed derived series (RSI, ROC, vigor), so
- * they need this instead.
- */
-function smaNan(values: readonly number[], length: number): number[] {
-  const out = new Array<number>(values.length).fill(NaN);
-  if (length < 1) return out;
-  for (let i = length - 1; i < values.length; i++) {
-    let sum = 0;
-    let ok = true;
-    for (let j = i - length + 1; j <= i; j++) {
-      const v = values[j]!;
-      if (!Number.isFinite(v)) { ok = false; break; }
-      sum += v;
-    }
-    if (ok) out[i] = sum / length;
   }
   return out;
 }

@@ -66,6 +66,27 @@ export function ema(values: readonly number[], length: number): number[] {
   return out;
 }
 
+/**
+ * NaN-tolerant simple moving average: emits a value once the trailing window is fully finite,
+ * and recovers after a gap. Use this (not `sma`) to smooth a DERIVED series that has a NaN
+ * warm-up prefix — `sma`'s running sum is permanently poisoned by a single leading NaN.
+ */
+export function smaNan(values: readonly number[], length: number): number[] {
+  const out = new Array<number>(values.length).fill(NaN);
+  if (length < 1) return out;
+  for (let i = length - 1; i < values.length; i++) {
+    let sum = 0;
+    let ok = true;
+    for (let j = i - length + 1; j <= i; j++) {
+      const v = values[j]!;
+      if (!Number.isFinite(v)) { ok = false; break; }
+      sum += v;
+    }
+    if (ok) out[i] = sum / length;
+  }
+  return out;
+}
+
 export function wma(values: readonly number[], length: number): number[] {
   const out = new Array<number>(values.length).fill(NaN);
   if (length <= 0) return out;

@@ -22,6 +22,10 @@ import {
   bop, connorsRsi, smi, wavetrend, squeezeMomentum, williamsVixFix, choppiness, vortex,
   massIndex, schaffTrendCycle,
 } from './momentum';
+import {
+  adl, chaikinOscillator, easeOfMovement, priceVolumeTrend, negativeVolumeIndex,
+  positiveVolumeIndex, klinger, forceIndex, bullBearPower, netVolume,
+} from './flow';
 import { INDICATOR_LOOKUP } from './registry';
 
 export interface IndicatorRef {
@@ -350,6 +354,32 @@ export function computeAll(
       return single('value', massIndex(candles, { length: numberInput(inputs.length, 25), emaLength: numberInput(inputs.emaLength, 9) }));
     case 'stc':
       return single('value', schaffTrendCycle(candles, { fast: numberInput(inputs.fast, 23), slow: numberInput(inputs.slow, 50), cycle: numberInput(inputs.cycle, 10), source: (inputs.source as PriceSource) ?? 'close' }));
+
+    // ─── Volume & money flow ───
+    case 'adl':
+      return single('value', adl(candles));
+    case 'chaikin_osc':
+      return single('value', chaikinOscillator(candles, { fast: numberInput(inputs.fast, 3), slow: numberInput(inputs.slow, 10) }));
+    case 'eom':
+      return single('value', easeOfMovement(candles, { length: numberInput(inputs.length, 14) }));
+    case 'pvt':
+      return single('value', priceVolumeTrend(candles));
+    case 'nvi':
+      return single('value', negativeVolumeIndex(candles));
+    case 'pvi':
+      return single('value', positiveVolumeIndex(candles));
+    case 'klinger': {
+      const f = klinger(candles, { fast: numberInput(inputs.fast, 34), slow: numberInput(inputs.slow, 55), signal: numberInput(inputs.signal, 13) });
+      return new Map<string, number[]>([['kvo', f.kvo], ['signal', f.signal]]);
+    }
+    case 'force_index':
+      return single('value', forceIndex(candles, { length: numberInput(inputs.length, 13) }));
+    case 'bull_bear_power': {
+      const f = bullBearPower(candles, { length: numberInput(inputs.length, 13) });
+      return new Map<string, number[]>([['bull', f.bull], ['bear', f.bear]]);
+    }
+    case 'net_volume':
+      return single('histogram', netVolume(candles));
   }
   return empty;
 }

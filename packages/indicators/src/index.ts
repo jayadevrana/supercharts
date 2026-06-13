@@ -8,6 +8,7 @@
 export * from './ma';
 export * from './oscillators';
 export * from './momentum';
+export * from './flow';
 export * from './volatility';
 export * from './trend';
 export * from './volume';
