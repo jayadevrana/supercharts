@@ -6,16 +6,18 @@ import { api } from '@/lib/api';
 import { toast } from '@/components/use-toast';
 import {
   AlarmClock,
-  BellRing,
-  ChevronDown,
+  AreaChart,
+  BarChart3,
+  CandlestickChart,
   Code2,
   Cog,
   Crosshair,
   History,
+  LineChart,
   Save,
   Search,
-  Workflow,
 } from 'lucide-react';
+import { IntervalSelector } from './interval-selector';
 import { LayoutPicker } from './layout-picker';
 import { MT5Chip } from './mt5-chip';
 import { StrategyBuilderDialog } from './strategy-builder-dialog';
@@ -24,7 +26,7 @@ import { BrandMark } from '@/components/brand-mark';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Badge } from '@/components/ui/badge';
 import { useWSStatus } from '@/lib/ws-client';
@@ -34,28 +36,8 @@ import { ImportCsvDialog } from './import-csv-dialog';
 import { BacktestDialog } from './backtest-dialog';
 import { WebhooksDialog } from './webhooks-dialog';
 import { BroadcastDialog } from './broadcast-dialog';
-import type { ChartType, Interval } from '@supercharts/types';
+import type { ChartType } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
-
-const INTERVALS: { value: Interval; label: string; group: 'seconds' | 'minutes' | 'hours' | 'days' | 'longer' }[] = [
-  { value: '1s', label: '1s', group: 'seconds' },
-  { value: '5s', label: '5s', group: 'seconds' },
-  { value: '15s', label: '15s', group: 'seconds' },
-  { value: '30s', label: '30s', group: 'seconds' },
-  { value: '1m', label: '1m', group: 'minutes' },
-  { value: '3m', label: '3m', group: 'minutes' },
-  { value: '5m', label: '5m', group: 'minutes' },
-  { value: '15m', label: '15m', group: 'minutes' },
-  { value: '30m', label: '30m', group: 'minutes' },
-  { value: '1h', label: '1h', group: 'hours' },
-  { value: '2h', label: '2h', group: 'hours' },
-  { value: '4h', label: '4h', group: 'hours' },
-  { value: '6h', label: '6h', group: 'hours' },
-  { value: '12h', label: '12h', group: 'hours' },
-  { value: '1d', label: '1D', group: 'days' },
-  { value: '1w', label: '1W', group: 'days' },
-  { value: '1mo', label: '1M', group: 'longer' },
-];
 
 const CHART_TYPES: Array<{ value: ChartType; label: string; group: string }> = [
   // OHLC
@@ -86,6 +68,20 @@ const CHART_TYPES: Array<{ value: ChartType; label: string; group: string }> = [
   { value: 'point_and_figure', label: 'Point & figure', group: 'Algorithmic' },
   { value: 'range_bar', label: 'Range', group: 'Algorithmic' },
 ];
+
+/** A representative lucide icon for the chart-type trigger (TV shows the family at a glance). */
+function chartTypeIcon(type: ChartType): React.ReactNode {
+  const cls = 'h-4 w-4';
+  if (type === 'line' || type === 'line_markers' || type === 'step_line') return <LineChart className={cls} />;
+  if (type === 'area' || type === 'hlc_area' || type === 'baseline') return <AreaChart className={cls} />;
+  if (type === 'bar' || type === 'column' || type === 'high_low') return <BarChart3 className={cls} />;
+  return <CandlestickChart className={cls} />;
+}
+
+/** Thin vertical rule separating logical top-bar groups, TradingView-style. */
+function Divider() {
+  return <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />;
+}
 
 export function TerminalTopBar() {
   const {
@@ -165,21 +161,16 @@ export function TerminalTopBar() {
         value={active.symbol}
         onPick={(s) => setPaneSymbol(active.id, s)}
       />
-      <Select value={active.interval} onValueChange={(v) => setPaneInterval(active.id, v as Interval)}>
-        <SelectTrigger className="w-24">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {INTERVALS.filter((g) => supportsInterval(active.symbol, g.value)).map((g) => (
-            <SelectItem key={g.value} value={g.value}>
-              {g.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <Divider />
+      <IntervalSelector
+        value={active.interval}
+        symbol={active.symbol}
+        onChange={(v) => setPaneInterval(active.id, v)}
+      />
+      <Divider />
       <Select value={active.chartType} onValueChange={(v) => setPaneChartType(active.id, v as ChartType)}>
-        <SelectTrigger className="w-40">
-          <SelectValue />
+        <SelectTrigger className="w-auto px-2" aria-label="Chart type" title="Chart type">
+          {chartTypeIcon(active.chartType)}
         </SelectTrigger>
         <SelectContent>
           {CHART_TYPES.map((c) => (
@@ -193,6 +184,7 @@ export function TerminalTopBar() {
         </SelectContent>
       </Select>
       <LayoutPicker />
+      <Divider />
       <IndicatorsDialog />
       <Button
         variant="ghost"
@@ -209,6 +201,7 @@ export function TerminalTopBar() {
         <BroadcastDialog />
         <WebhooksDialog />
         <OandaConnectDialog />
+        <Divider />
         <MT5Chip />
         <StrategyBuilderDialog
           defaultSymbol={active.symbol}
@@ -388,22 +381,6 @@ function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: strin
       </PopoverContent>
     </Popover>
   );
-}
-
-function supportsInterval(symbol: string, interval: Interval): boolean {
-  const venue = symbol.split(':')[0]?.toUpperCase();
-  // Binance Spot REST/klines: 1s, 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1mo.
-  // We've never wired 5s/15s/30s so hide them for Binance until aggregation lands.
-  if (venue === 'BINANCE') {
-    const ok = new Set<Interval>(['1s','1m','3m','5m','15m','30m','1h','2h','4h','6h','12h','1d','1w','1mo']);
-    return ok.has(interval);
-  }
-  // OANDA candles: S5, S15, S30, M1, M5, M15, M30, H1, H2, H4, H12, D, W, M.
-  if (venue === 'OANDA') {
-    const ok = new Set<Interval>(['5s','15s','30s','1m','5m','15m','30m','1h','2h','4h','12h','1d','1w','1mo']);
-    return ok.has(interval);
-  }
-  return true;
 }
 
 const CURATED_SYMBOLS: Array<{ id: string; kind: 'crypto' | 'forex' }> = [
