@@ -221,12 +221,20 @@ export function TerminalTopBar() {
           size="sm"
           loading={saving}
           onClick={saveLayout}
-          className="gap-1 text-muted-foreground hover:text-foreground"
+          className="px-2 text-muted-foreground hover:text-foreground"
+          title="Save layout (⌘S)"
+          aria-label="Save layout"
         >
-          <Save className="h-3.5 w-3.5" /> Save layout
+          <Save className="h-4 w-4" />
         </Button>
-        <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground hover:text-foreground">
-          <History className="h-3.5 w-3.5" /> History
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-2 text-muted-foreground hover:text-foreground"
+          title="Saved layouts history"
+          aria-label="Saved layouts history"
+        >
+          <History className="h-4 w-4" />
         </Button>
         <Button
           variant={syncCrosshair ? 'subtle' : 'ghost'}

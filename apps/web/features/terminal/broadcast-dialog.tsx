@@ -157,8 +157,8 @@ export function BroadcastDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground hover:text-foreground" title="Broadcast to a Telegram channel">
-          <Megaphone className="h-3.5 w-3.5" /> Broadcast
+        <Button variant="ghost" size="sm" className="px-2 text-muted-foreground hover:text-foreground" title="Broadcast to a Telegram channel" aria-label="Telegram broadcast">
+          <Megaphone className="h-4 w-4" />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">

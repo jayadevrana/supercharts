@@ -120,11 +120,12 @@ export function WebhooksDialog() {
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1 text-muted-foreground hover:text-foreground"
+          className="relative px-2 text-muted-foreground hover:text-foreground"
           title="Inbound webhooks — receive alerts via HTTP"
+          aria-label="Inbound webhooks"
         >
-          <Webhook className="h-3.5 w-3.5" /> Webhook
-          {data?.forwardTelegram ? <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
+          <Webhook className="h-4 w-4" />
+          {data?.forwardTelegram ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-lg">

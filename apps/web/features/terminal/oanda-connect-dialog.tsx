@@ -96,9 +96,9 @@ export function OandaConnectDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-1 text-muted-foreground hover:text-foreground" title="Connect OANDA for live forex / metals">
-          <Plug className="h-3.5 w-3.5" /> OANDA
-          {connected ? <span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
+        <Button variant="ghost" size="sm" className="relative px-2 text-muted-foreground hover:text-foreground" title="Connect OANDA for live forex / metals" aria-label="Connect OANDA">
+          <Plug className="h-4 w-4" />
+          {connected ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">

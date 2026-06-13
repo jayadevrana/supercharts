@@ -137,10 +137,11 @@ export function ImportCsvDialog() {
         <Button
           variant="ghost"
           size="sm"
-          className="gap-1 text-muted-foreground hover:text-foreground"
+          className="px-2 text-muted-foreground hover:text-foreground"
           title="Import custom OHLC data from a CSV file"
+          aria-label="Import CSV data"
         >
-          <Upload className="h-3.5 w-3.5" /> Import
+          <Upload className="h-4 w-4" />
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
