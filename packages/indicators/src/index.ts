@@ -6,6 +6,7 @@
  */
 
 export * from './ma';
+export * from './ma-advanced';
 export * from './oscillators';
 export * from './momentum';
 export * from './flow';

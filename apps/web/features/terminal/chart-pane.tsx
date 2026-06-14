@@ -1258,6 +1258,14 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         case 'hma':
         case 'dema':
         case 'tema':
+        case 'vwma':
+        case 'smma':
+        case 'alma':
+        case 'lsma':
+        case 'kama':
+        case 't3':
+        case 'zlema':
+        case 'mcginley':
         case 'vwap': {
           const v = channels.get('value');
           if (v) lines.push({ id: inst.id, channel: 'value', values: v, color: color('color') });

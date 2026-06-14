@@ -12,7 +12,9 @@
  */
 
 import type { Candle, IndicatorInstance } from '@supercharts/types';
-import { sma, ema, wma, hma, dema, tema, type PriceSource } from './ma';
+import { sma, ema, wma, hma, dema, tema, rma, type PriceSource } from './ma';
+import { vwma, alma, kama, t3, zlema, mcginley } from './ma-advanced';
+import { linreg } from './momentum';
 import { rsi, macd, stochastic, williamsR, cci, mfi, roc } from './oscillators';
 import { atr, bollinger, keltner, donchian } from './volatility';
 import { adx, supertrend, psar, ichimoku, aroon } from './trend';
@@ -107,6 +109,45 @@ export function computeAll(
       const len = numberInput(inputs.length, 21);
       const src = (inputs.source as PriceSource) ?? 'close';
       return single('value', tema(candles.map((c) => priceField(c, src)), len));
+    }
+    case 'vwma': {
+      const len = numberInput(inputs.length, 20);
+      return single('value', vwma(candles, len, (inputs.source as PriceSource) ?? 'close'));
+    }
+    case 'smma': {
+      const len = numberInput(inputs.length, 21);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', rma(candles.map((c) => priceField(c, src)), len));
+    }
+    case 'alma': {
+      const len = numberInput(inputs.length, 21);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', alma(candles.map((c) => priceField(c, src)), len, numberInput(inputs.offset, 0.85), numberInput(inputs.sigma, 6)));
+    }
+    case 'lsma': {
+      const len = numberInput(inputs.length, 25);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', linreg(candles.map((c) => priceField(c, src)), len));
+    }
+    case 'kama': {
+      const len = numberInput(inputs.length, 10);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', kama(candles.map((c) => priceField(c, src)), len, numberInput(inputs.fast, 2), numberInput(inputs.slow, 30)));
+    }
+    case 't3': {
+      const len = numberInput(inputs.length, 8);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', t3(candles.map((c) => priceField(c, src)), len, numberInput(inputs.vfactor, 0.7)));
+    }
+    case 'zlema': {
+      const len = numberInput(inputs.length, 21);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', zlema(candles.map((c) => priceField(c, src)), len));
+    }
+    case 'mcginley': {
+      const len = numberInput(inputs.length, 14);
+      const src = (inputs.source as PriceSource) ?? 'close';
+      return single('value', mcginley(candles.map((c) => priceField(c, src)), len));
     }
     case 'rsi':
       return single(
