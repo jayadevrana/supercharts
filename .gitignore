@@ -1,6 +1,8 @@
 node_modules
 dist
 .next
+.sites-stage
+.sites-artifacts
 out
 build
 coverage
