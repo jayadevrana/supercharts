@@ -89,16 +89,6 @@ interface BinanceKlineMsg {
   };
 }
 
-interface BinanceDepthMsg {
-  e: 'depthUpdate';
-  E: number;
-  s: string;
-  U: number; // first update id
-  u: number; // final update id
-  b: [string, string][]; // bids
-  a: [string, string][]; // asks
-}
-
 interface BinanceBookTickerMsg {
   // no event type field on bookTicker stream
   u: number;

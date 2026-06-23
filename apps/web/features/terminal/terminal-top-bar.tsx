@@ -3,17 +3,21 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
+import { formatRelativeTime } from '@/lib/format';
 import { toast } from '@/components/use-toast';
 import {
   AlarmClock,
   AreaChart,
   BarChart3,
+  Camera,
   CandlestickChart,
   Code2,
   Cog,
   Crosshair,
   History,
   LineChart,
+  Maximize2,
+  Minimize2,
   Save,
   Search,
 } from 'lucide-react';
@@ -38,6 +42,7 @@ import { WebhooksDialog } from './webhooks-dialog';
 import { BroadcastDialog } from './broadcast-dialog';
 import type { ChartType } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
+import { PANE_LAYOUTS } from './layouts';
 
 const CHART_TYPES: Array<{ value: ChartType; label: string; group: string }> = [
   // OHLC
@@ -69,6 +74,64 @@ const CHART_TYPES: Array<{ value: ChartType; label: string; group: string }> = [
   { value: 'range_bar', label: 'Range', group: 'Algorithmic' },
 ];
 
+const RECENT_LAYOUT_LIMIT = 8;
+const KNOWN_LAYOUT_IDS = new Set(PANE_LAYOUTS.map((l) => l.id));
+
+interface SavedLayoutRecord {
+  id: string;
+  name: string;
+  grid: string;
+  config: unknown;
+  isDefault: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function savedLayoutConfig(layout: SavedLayoutRecord): Record<string, unknown> | null {
+  return asRecord(layout.config);
+}
+
+function getRestorableLayoutId(layout: SavedLayoutRecord): string | null {
+  const layoutId = savedLayoutConfig(layout)?.layoutId;
+  return typeof layoutId === 'string' && KNOWN_LAYOUT_IDS.has(layoutId) ? layoutId : null;
+}
+
+function getSavedPaneCount(layout: SavedLayoutRecord): number | null {
+  const config = savedLayoutConfig(layout);
+  const paneCount = asRecord(config?.layout)?.paneCount;
+  if (typeof paneCount === 'number' && Number.isFinite(paneCount) && paneCount > 0) {
+    return Math.trunc(paneCount);
+  }
+
+  const panes = config?.panes;
+  if (Array.isArray(panes) && panes.length > 0) return panes.length;
+
+  const legacyGrid = Number(layout.grid);
+  return Number.isFinite(legacyGrid) && legacyGrid > 0 ? legacyGrid : null;
+}
+
+function getSavedSymbolSummary(layout: SavedLayoutRecord): string | null {
+  const panes = savedLayoutConfig(layout)?.panes;
+  if (!Array.isArray(panes)) return null;
+
+  const symbols: string[] = [];
+  for (const item of panes) {
+    const symbol = asRecord(item)?.symbol;
+    if (typeof symbol === 'string' && symbol && !symbols.includes(symbol)) symbols.push(symbol);
+  }
+  if (symbols.length === 0) return null;
+
+  const visible = symbols.slice(0, 2);
+  const remaining = symbols.length - visible.length;
+  return remaining > 0 ? `${visible.join(' · ')} +${remaining}` : visible.join(' · ');
+}
+
 /** A representative lucide icon for the chart-type trigger (TV shows the family at a glance). */
 function chartTypeIcon(type: ChartType): React.ReactNode {
   const cls = 'h-4 w-4';
@@ -83,12 +146,40 @@ function Divider() {
   return <span className="mx-1 h-5 w-px shrink-0 bg-border" aria-hidden />;
 }
 
+function getActiveChartCanvas(paneId: string): HTMLCanvasElement | null {
+  const panels = document.querySelectorAll<HTMLElement>('[data-testid="chart-panel"]');
+  for (const panel of panels) {
+    if (panel.dataset.paneId === paneId) {
+      return panel.querySelector<HTMLCanvasElement>('[data-testid="chart-canvas"]');
+    }
+  }
+  return null;
+}
+
+function snapshotFilename(symbol: string, interval: string): string {
+  const safeSymbol = symbol.replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'chart';
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `${safeSymbol}-${interval}-${stamp}.png`;
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export function TerminalTopBar() {
   const {
     panes,
     activePaneId,
     layoutId,
     layout,
+    setLayout,
     setPaneSymbol,
     setPaneInterval,
     setPaneChartType,
@@ -99,12 +190,51 @@ export function TerminalTopBar() {
     showBottomPanel,
     setShowBottomPanel,
   } = useTerminalStore();
-  const active = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
+  const active = panes.find((p) => p.id === activePaneId) ?? panes[0];
   const [saving, setSaving] = useState(false);
+  const [layoutsOpen, setLayoutsOpen] = useState(false);
+  const [savedLayouts, setSavedLayouts] = useState<SavedLayoutRecord[]>([]);
+  const [layoutsLoading, setLayoutsLoading] = useState(false);
+  const [layoutsError, setLayoutsError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const wsStatus = useWSStatus();
   // Strategy + Alerts dialogs are self-contained (own their open state).
 
+  const loadSavedLayouts = useCallback(async () => {
+    setLayoutsLoading(true);
+    setLayoutsError(null);
+    try {
+      const result = await api<{ items: SavedLayoutRecord[] }>('/layouts');
+      setSavedLayouts(result.items.slice(0, RECENT_LAYOUT_LIMIT));
+    } catch (err) {
+      setSavedLayouts([]);
+      setLayoutsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLayoutsLoading(false);
+    }
+  }, []);
+
+  const applySavedGrid = useCallback(
+    (saved: SavedLayoutRecord) => {
+      const savedLayoutId = getRestorableLayoutId(saved);
+      if (!savedLayoutId) {
+        toast({
+          title: 'Saved layout is view-only',
+          description: 'This entry does not include a supported pane layout id.',
+          tone: 'warn',
+        });
+        return;
+      }
+
+      setLayout(savedLayoutId);
+      setLayoutsOpen(false);
+      toast({ title: 'Layout grid applied', description: saved.name, tone: 'success' });
+    },
+    [setLayout],
+  );
+
   const saveLayout = useCallback(async () => {
+    if (!active) return;
     if (saving) return;
     setSaving(true);
     try {
@@ -129,6 +259,7 @@ export function TerminalTopBar() {
         }),
       });
       toast({ title: 'Layout saved', description: name, tone: 'success' });
+      if (layoutsOpen) void loadSavedLayouts();
     } catch (err) {
       toast({
         title: 'Could not save layout',
@@ -138,7 +269,71 @@ export function TerminalTopBar() {
     } finally {
       setSaving(false);
     }
-  }, [active.symbol, layout, layoutId, panes, saving]);
+  }, [active, layout, layoutId, layoutsOpen, loadSavedLayouts, panes, saving]);
+
+  const downloadChartSnapshot = useCallback(() => {
+    if (!active) return;
+    const canvas = getActiveChartCanvas(active.id);
+    if (!canvas || canvas.width === 0 || canvas.height === 0) {
+      toast({ title: 'Chart snapshot unavailable', description: 'No rendered chart canvas was found.', tone: 'warn' });
+      return;
+    }
+
+    try {
+      canvas.toBlob((blob) => {
+        if (!blob) {
+          toast({
+            title: 'Could not export chart',
+            description: 'The chart canvas did not produce an image.',
+            tone: 'error',
+          });
+          return;
+        }
+        downloadBlob(blob, snapshotFilename(active.symbol, active.interval));
+        toast({
+          title: 'Chart snapshot downloaded',
+          description: `${active.symbol} · ${active.interval}`,
+          tone: 'success',
+        });
+      }, 'image/png');
+    } catch (err) {
+      toast({
+        title: 'Could not export chart',
+        description: err instanceof Error ? err.message : String(err),
+        tone: 'error',
+      });
+    }
+  }, [active]);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (!document.fullscreenEnabled) {
+      toast({ title: 'Fullscreen is not available', tone: 'warn' });
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch (err) {
+      toast({
+        title: 'Could not toggle fullscreen',
+        description: err instanceof Error ? err.message : String(err),
+        tone: 'error',
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    onFullscreenChange();
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -152,25 +347,38 @@ export function TerminalTopBar() {
     return () => window.removeEventListener('keydown', onKey);
   }, [saveLayout]);
 
+  useEffect(() => {
+    if (layoutsOpen) void loadSavedLayouts();
+  }, [layoutsOpen, loadSavedLayouts]);
+
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface/85 px-3 backdrop-blur-xl">
+    <header className="scroll-thin flex h-12 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b border-border bg-surface/85 px-3 backdrop-blur-xl">
       <Link href="/" className="mr-1">
         <BrandMark size={24} withWordmark={false} />
       </Link>
       <SymbolSearch
-        value={active.symbol}
-        onPick={(s) => setPaneSymbol(active.id, s)}
+        value={active?.symbol ?? ''}
+        onPick={(s) => {
+          if (active) setPaneSymbol(active.id, s);
+        }}
       />
       <Divider />
       <IntervalSelector
-        value={active.interval}
-        symbol={active.symbol}
-        onChange={(v) => setPaneInterval(active.id, v)}
+        value={active?.interval ?? '1m'}
+        symbol={active?.symbol ?? ''}
+        onChange={(v) => {
+          if (active) setPaneInterval(active.id, v);
+        }}
       />
       <Divider />
-      <Select value={active.chartType} onValueChange={(v) => setPaneChartType(active.id, v as ChartType)}>
+      <Select
+        value={active?.chartType ?? 'candlestick'}
+        onValueChange={(v) => {
+          if (active) setPaneChartType(active.id, v as ChartType);
+        }}
+      >
         <SelectTrigger className="w-auto px-2" aria-label="Chart type" title="Chart type">
-          {chartTypeIcon(active.chartType)}
+          {chartTypeIcon(active?.chartType ?? 'candlestick')}
         </SelectTrigger>
         <SelectContent>
           {CHART_TYPES.map((c) => (
@@ -197,6 +405,27 @@ export function TerminalTopBar() {
       </Button>
       <BacktestDialog />
       <ImportCsvDialog />
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={downloadChartSnapshot}
+        className="shrink-0 px-2 text-muted-foreground hover:text-foreground"
+        title="Download chart snapshot"
+        aria-label="Download chart snapshot"
+      >
+        <Camera className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => void toggleFullscreen()}
+        className="shrink-0 px-2 text-muted-foreground hover:text-foreground"
+        title={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+        aria-pressed={isFullscreen}
+      >
+        {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+      </Button>
       <div className="ml-auto flex items-center gap-2">
         <BroadcastDialog />
         <WebhooksDialog />
@@ -204,8 +433,8 @@ export function TerminalTopBar() {
         <Divider />
         <MT5Chip />
         <StrategyBuilderDialog
-          defaultSymbol={active.symbol}
-          defaultInterval={active.interval}
+          defaultSymbol={active?.symbol ?? 'BINANCE:BTCUSDT'}
+          defaultInterval={active?.interval ?? '1m'}
         />
         <Button
           variant="ghost"
@@ -215,7 +444,7 @@ export function TerminalTopBar() {
         >
           <AlarmClock className="h-3.5 w-3.5" /> {replayMode ? 'Live' : 'Replay'}
         </Button>
-        <AlertsDialog activeSymbol={active.symbol} />
+        <AlertsDialog activeSymbol={active?.symbol ?? 'BINANCE:BTCUSDT'} />
         <Button
           variant="ghost"
           size="sm"
@@ -227,15 +456,115 @@ export function TerminalTopBar() {
         >
           <Save className="h-4 w-4" />
         </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-2 text-muted-foreground hover:text-foreground"
-          title="Saved layouts history"
-          aria-label="Saved layouts history"
-        >
-          <History className="h-4 w-4" />
-        </Button>
+        <Popover open={layoutsOpen} onOpenChange={setLayoutsOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="px-2 text-muted-foreground hover:text-foreground"
+              title="Saved layouts history"
+              aria-label="Saved layouts history"
+            >
+              <History className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-[360px] p-0">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5">
+              <div className="min-w-0">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Saved layouts
+                </div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  Recent saved chart grids
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="xs"
+                loading={layoutsLoading}
+                onClick={() => void loadSavedLayouts()}
+                className="shrink-0"
+              >
+                Refresh
+              </Button>
+            </div>
+            {layoutsLoading ? (
+              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
+                Loading saved layouts...
+              </div>
+            ) : layoutsError ? (
+              <div className="space-y-3 px-3 py-4 text-center">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Could not load saved layouts</div>
+                  <div className="mt-1 break-words text-xs text-muted-foreground">{layoutsError}</div>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => void loadSavedLayouts()}>
+                  Retry
+                </Button>
+              </div>
+            ) : savedLayouts.length === 0 ? (
+              <div className="px-3 py-8 text-center">
+                <div className="text-sm font-medium text-foreground">No saved layouts yet</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Save a chart layout to see it here.
+                </div>
+              </div>
+            ) : (
+              <div className="max-h-80 overflow-y-auto scroll-thin">
+                {savedLayouts.map((saved) => {
+                  const savedLayoutId = getRestorableLayoutId(saved);
+                  const paneCount = getSavedPaneCount(saved);
+                  const symbolSummary = getSavedSymbolSummary(saved);
+                  const sameGrid = savedLayoutId === layoutId;
+                  return (
+                    <div
+                      key={saved.id}
+                      className="flex items-center gap-3 border-b border-border/60 px-3 py-2.5 last:border-b-0 hover:bg-muted"
+                      title={new Date(saved.updatedAt).toLocaleString()}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-sm font-medium text-foreground">{saved.name}</span>
+                          {saved.isDefault ? <Badge tone="accent">default</Badge> : null}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
+                          <span>{formatRelativeTime(saved.updatedAt)}</span>
+                          <span>·</span>
+                          <span>
+                            {paneCount == null
+                              ? `grid ${saved.grid}`
+                              : `${paneCount} pane${paneCount === 1 ? '' : 's'}`}
+                          </span>
+                          {symbolSummary ? (
+                            <>
+                              <span>·</span>
+                              <span className="max-w-[180px] truncate">{symbolSummary}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                      {savedLayoutId ? (
+                        <Button
+                          variant={sameGrid ? 'subtle' : 'outline'}
+                          size="xs"
+                          disabled={sameGrid}
+                          onClick={() => applySavedGrid(saved)}
+                          className="shrink-0"
+                        >
+                          {sameGrid ? 'Current' : 'Apply grid'}
+                        </Button>
+                      ) : (
+                        <Badge tone="muted" className="shrink-0">
+                          view only
+                        </Badge>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </PopoverContent>
+        </Popover>
         <Button
           variant={syncCrosshair ? 'subtle' : 'ghost'}
           size="sm"

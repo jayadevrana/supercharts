@@ -42,7 +42,7 @@ export function toRenko(input: ReadonlyArray<Candle>, opts: RenkoOptions): Candl
         if (price >= upTarget) {
           const open = direction === 1 ? lastBrickClose : lastBrickClose + brick;
           const close = open + brick;
-          out.push(buildBrick(k, synthTime, stepMs, open, close, brick));
+          out.push(buildBrick(k, synthTime, stepMs, open, close));
           lastBrickClose = close;
           direction = 1;
           synthTime += stepMs;
@@ -51,7 +51,7 @@ export function toRenko(input: ReadonlyArray<Candle>, opts: RenkoOptions): Candl
         if (price <= downTarget) {
           const open = direction === -1 ? lastBrickClose : lastBrickClose - brick;
           const close = open - brick;
-          out.push(buildBrick(k, synthTime, stepMs, open, close, brick));
+          out.push(buildBrick(k, synthTime, stepMs, open, close));
           lastBrickClose = close;
           direction = -1;
           synthTime += stepMs;
@@ -70,7 +70,6 @@ function buildBrick(
   stepMs: number,
   open: number,
   close: number,
-  brickSize: number,
 ): Candle {
   const high = Math.max(open, close);
   const low = Math.min(open, close);

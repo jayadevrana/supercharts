@@ -30,7 +30,7 @@ export function formatRelativeTime(ms: number): string {
 }
 
 export function formatSymbolLabel(symbolId: string): string {
-  const [venue, raw] = symbolId.split(':');
+  const [, raw] = symbolId.split(':');
   if (!raw) return symbolId;
   if (raw.includes('_')) return raw.replace('_', ' / ');
   // Crypto: split into BASE/QUOTE for common quote sizes.

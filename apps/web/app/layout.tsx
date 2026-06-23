@@ -10,6 +10,12 @@ export const metadata: Metadata = {
   applicationName: 'SuperCharts',
   authors: [{ name: 'SuperCharts' }],
   metadataBase: new URL('http://localhost:3000'),
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: '32x32' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+  },
 };
 
 export const viewport: Viewport = {

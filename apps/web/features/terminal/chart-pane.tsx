@@ -60,8 +60,8 @@ import { SymbolStatusLine } from './symbol-status-line';
 import { ChartFooter, resolvePresetSpan, type RangePreset } from './chart-footer';
 import { TradeButtons } from './trade-buttons';
 import { isStaleBook, topOfBook, type TopOfBook } from './trade-buttons-util';
-import { buildLegendRows } from './indicator-legend-util';
-import { buildDataWindow } from './data-window-util';
+import { buildLegendRows, formatIndicatorValue } from './indicator-legend-util';
+import { buildDataWindow, type DataWindowIndicator } from './data-window-util';
 import type { SignalsTrendScoreFrame } from '@supercharts/chart-core';
 import { StsDashboard, type MtfRow } from './sts-dashboard';
 import { TimeSalesPanel, type TapeRow } from './time-sales-panel';
@@ -72,7 +72,6 @@ import type {
   ChartType,
   DeepTradeBubble,
   FootprintBar,
-  Interval,
   LiquidityHeatmapCell,
   ServerToClientMessage,
 } from '@supercharts/types';
@@ -141,7 +140,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // Alerts targeting this pane's (symbol, interval). The MA cross layer renders
   // the FIRST matching alert; the rest still fire server-side but don't draw.
   const [paneAlerts, setPaneAlerts] = useState<AlertDefinition[]>([]);
-  const alertsRefreshTick = useRef(0);
+  const [alertsRefreshTick, setAlertsRefreshTick] = useState(0);
   const { theme } = useTheme();
   const resolvedTheme = useMemo(() => (theme === 'dark' ? DARK_THEME : LIGHT_THEME), [theme]);
   const drawTool = useTerminalStore((s) => s.drawTool);
@@ -183,11 +182,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // stay out of React state); `legendTick` bumps a re-render when they recompute, and `hoverTime`
   // tracks the crosshair candle so the legend shows that bar's values (latest when off-chart).
   const indChannelsRef = useRef<Map<string, Record<string, number[]>>>(new Map());
+  const pulseWindowSeriesRef = useRef<Array<{ label: string; color: string; values: number[] }>>([]);
+  const [candleTick, setCandleTick] = useState(0);
   const [legendTick, setLegendTick] = useState(0);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   // Bumped (debounced via the chart's range-change callback) when the visible range pans/zooms,
   // so the React-rendered oscillator sub-panes re-read the chart's time projection and stay aligned.
-  const [subTick, setSubTick] = useState(0);
+  const [, setSubTick] = useState(0);
   // Collapse toggle for the on-chart indicator legend (the symbol status line stays visible).
   const [legendCollapsed, setLegendCollapsed] = useState(false);
   // True while an indicator row from the browser dialog is dragged over this chart (drag-to-add, M6).
@@ -254,6 +255,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
                 core.setCandles(
                   transformCandles(candleBufRef.current, pane.chartType, pane.symbol),
                 );
+                setCandleTick((t) => t + 1);
               }
               loadedRangeRef.current.from = newFrom;
             })
@@ -385,6 +387,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         }
         candleBufRef.current = candles;
         core.setCandles(transformCandles(candles, pane.chartType, pane.symbol));
+        setCandleTick((t) => t + 1);
         // A range preset that switched the interval parks its span here until the new
         // interval's candles land — apply it now so 1D/1M/1Y… jumps show the full window.
         if (pendingSpanRef.current) {
@@ -443,6 +446,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           if (msg.candles?.length) {
             candleBufRef.current = msg.candles;
             core.setCandles(transformCandles(msg.candles, pane.chartType, pane.symbol));
+            setCandleTick((t) => t + 1);
             const lastK = msg.candles[msg.candles.length - 1]!;
             const firstK = msg.candles[0]!;
             setLast({
@@ -484,6 +488,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             // multiple new bricks/lines/columns, so rebuild from the buffer.
             core.setCandles(transformCandles(candleBufRef.current, pane.chartType, pane.symbol));
           }
+          setCandleTick((t) => t + 1);
           if (pane.overlays.profile) {
             const profile = buildVisibleRangeProfile(
               candleBufRef.current.slice(-500),
@@ -591,7 +596,6 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // on a symbol/interval switch, so a log chart stays log across timeframe changes.
   useEffect(() => {
     chartRef.current?.setPriceScaleMode(pane.scaleMode ?? 'linear');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.scaleMode, pane.symbol, pane.interval]);
 
   // Footer toggles mirror the live scale state (mode flips, auto re-arm/manual override).
@@ -601,7 +605,6 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     setScaleState(core.getScaleState());
     return core.onScaleState(setScaleState);
     // Re-subscribes when the ChartCore is rebuilt.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.symbol, pane.interval]);
 
   // A manual timeframe/symbol switch (top bar) drops the range-preset highlight; a
@@ -651,8 +654,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     }
     indChannelsRef.current = next;
     setLegendTick((t) => t + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.classicIndicators, candleBufRef.current.length, candleBufRef.current[candleBufRef.current.length - 1]?.close]);
+  }, [pane.classicIndicators, candleTick]);
 
   useEffect(() => {
     const core = chartRef.current;
@@ -739,11 +741,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       regimeLabel: rg?.currentLabel ?? null,
     };
      
-  }, [
-    pane.smc,
-    candleBufRef.current.length,
-    candleBufRef.current[candleBufRef.current.length - 1]?.close,
-  ]);
+  }, [pane.smc, candleTick]);
 
   // Signals & Trend Score: recompute the indicator whenever candles refresh or
   // the indicator settings change, then push the result into the canvas layer.
@@ -828,9 +826,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   }, [
     pane.overlays.signalsTrendScore,
     pane.stsSettings,
-    candleBufRef.current.length,
-    // Tick on the close of the last candle so the indicator updates live.
-    candleBufRef.current[candleBufRef.current.length - 1]?.close,
+    candleTick,
   ]);
 
   /* ─── MA cross alert visualization ─── */
@@ -856,7 +852,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     return () => {
       cancelled = true;
     };
-  }, [pane.symbol, pane.interval, alertsRefreshTick.current]);
+  }, [pane.symbol, pane.interval, alertsRefreshTick]);
 
   // Recompute the MA line + crosses whenever candles or the active alert change.
   useEffect(() => {
@@ -918,8 +914,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     backtestPreview,
     pane.id,
     pane.overlays.maSignals,
-    candleBufRef.current.length,
-    candleBufRef.current[candleBufRef.current.length - 1]?.close,
+    candleTick,
   ]);
 
   // Economic calendar overlay — push real macro events into the dedicated layer when toggled.
@@ -973,8 +968,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       });
       // If the fire is for THIS pane, nudge the recomputation pipeline.
       if (e.symbol === pane.symbol && e.interval === pane.interval) {
-        alertsRefreshTick.current += 1;
-        setPaneAlerts((prev) => prev.slice());
+        setAlertsRefreshTick((t) => t + 1);
       }
     });
     return off;
@@ -1394,8 +1388,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     }
     layer.visible = lines.length > 0 || bands.length > 0 || dots.length > 0;
     layer.options = { lines, bands, dots };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.classicIndicators, candleBufRef.current.length, candleBufRef.current[candleBufRef.current.length - 1]?.close]);
+  }, [pane.classicIndicators, candleTick]);
 
   // PulseScript — run the active script over THIS pane's candles (so plot values align to the
   // rendered bars) and push draw/mark output to the dedicated 'pulse-script' overlay layer.
@@ -1418,11 +1411,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
     const pulse = pane.pulse;
     if (pulse.runToken === 0) {
       // Untouched pane — stay dormant until the user runs a script.
+      pulseWindowSeriesRef.current = [];
       clear();
       return;
     }
     const bars = candleBufRef.current;
     if (!pulse.source.trim() || bars.length === 0) {
+      pulseWindowSeriesRef.current = [];
       clear();
       return;
     }
@@ -1435,10 +1430,18 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       const hists: IndicatorOverlayHist[] = [];
       const palette = ['#38bdf8', '#f59e0b', '#a78bfa', '#34d399', '#f472b6', '#facc15'];
       const DASH: Record<string, [number, number] | undefined> = { dashed: [6, 4], dotted: [2, 3], solid: undefined };
+      const windowSeries: Array<{ label: string; color: string; values: number[] }> = [];
       res.plots.forEach((p, idx) => {
         const color = p.color || palette[idx % palette.length]!;
         const vals = p.values.map((v) => (v == null ? NaN : v));
+        const title = p.title || `plot ${idx + 1}`;
         if (p.kind === 'band' && p.values2) {
+          windowSeries.push({ label: `${title} upper`, color, values: vals });
+          windowSeries.push({
+            label: `${title} lower`,
+            color,
+            values: p.values2.map((v) => (v == null ? NaN : v)),
+          });
           bands.push({
             id: 'pulse_' + idx,
             upper: vals,
@@ -1448,15 +1451,19 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             borderWidth: 0.8,
           });
         } else if (p.kind === 'area') {
+          windowSeries.push({ label: title, color, values: vals });
           areas.push({ id: 'pulse_' + idx, values: vals, color, fillColor: pulseFill(color), lineWidth: p.width ?? 1.5 });
         } else if (p.kind === 'hist') {
+          windowSeries.push({ label: title, color, values: vals });
           hists.push({ id: 'pulse_' + idx, values: vals, color });
         } else if (p.kind === 'dots') {
+          windowSeries.push({ label: title, color, values: vals });
           dots.push({ id: 'pulse_' + idx, values: vals, color, radius: p.width ?? 2.5 });
         } else {
+          windowSeries.push({ label: title, color, values: vals });
           lines.push({
             id: 'pulse_' + idx,
-            channel: p.title || 'plot' + idx,
+            channel: title,
             values: vals,
             color,
             lineWidth: p.width ?? 1.6,
@@ -1488,6 +1495,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         dash: DASH[l.dash] ?? [6, 4],
         label: l.title ?? undefined,
       }));
+      for (const [i, l] of res.levels.entries()) {
+        windowSeries.push({
+          label: l.title || `level ${i + 1}`,
+          color: l.color || '#94a3b8',
+          values: new Array<number>(bars.length).fill(l.y),
+        });
+      }
       const markers: IndicatorOverlayMarkers[] = res.shapes.length
         ? [
             {
@@ -1535,6 +1549,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       } else {
         clear();
       }
+      pulseWindowSeriesRef.current = windowSeries;
       setPulseResult(pane.id, {
         ok: true,
         error: null,
@@ -1550,6 +1565,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         ranAt: Date.now(),
       });
     } catch (err) {
+      pulseWindowSeriesRef.current = [];
       clear();
       setPulseResult(pane.id, {
         ok: false,
@@ -1561,11 +1577,10 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
         ranAt: Date.now(),
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.id, pane.pulse.enabled, pane.pulse.source, pane.pulse.runToken, pane.pulse.inputValues, candleBufRef.current.length]);
+  }, [pane.id, pane.interval, pane.pulse, setPulseResult, candleTick]);
 
   // Legend (M2): candle index under the crosshair (latest when off-chart), then the rows.
-  const legendHoverIdx = useMemo(() => {
+  const legendHoverIdx = (() => {
     const bars = candleBufRef.current;
     if (bars.length === 0) return -1;
     if (hoverTime == null) return bars.length - 1;
@@ -1580,8 +1595,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       } else hi = mid - 1;
     }
     return ans;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hoverTime, legendTick, candleBufRef.current.length]);
+  })();
   const legendRows = useMemo(
     () => buildLegendRows(pane.classicIndicators, (t) => INDICATOR_LOOKUP[t], indChannelsRef.current, legendHoverIdx),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1589,14 +1603,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   );
 
   // Live time→x projection mirrored from the chart so the oscillator sub-panes share its axis.
-  // Recomputes on pan/zoom (subTick), crosshair move (hoverTime), data load (loading) and new
-  // bars (legendTick / buffer length). Reading the ref here is safe — it's set on mount and these
-  // deps cover every change that moves the projection.
-  const subView = useMemo<SubPaneView | null>(
-    () => chartRef.current?.getTimeProjection() ?? null,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subTick, hoverTime, legendTick, loading, pane.symbol, pane.interval, candleBufRef.current.length],
-  );
+  // Re-read on each render; pan/zoom, crosshair, loading, and candle changes already trigger renders.
+  const subView: SubPaneView | null = chartRef.current?.getTimeProjection() ?? null;
 
   // Bar feeding the symbol status line: the crosshair candle (or latest) + its prior close.
   const statusBuf = candleBufRef.current;
@@ -1610,45 +1618,30 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // (switching to the tab re-runs this via the rightRailTab dep, so it populates immediately).
   useEffect(() => {
     if (!active || rightRailTab !== 'data') return;
-    setDataWindow(
-      buildDataWindow(
-        pane.id,
-        candleBufRef.current,
-        legendHoverIdx,
-        hoverTime != null,
-        pane.classicIndicators,
-        (t) => INDICATOR_LOOKUP[t],
-        indChannelsRef.current,
-      ),
+    const snapshot = buildDataWindow(
+      pane.id,
+      candleBufRef.current,
+      legendHoverIdx,
+      hoverTime != null,
+      pane.classicIndicators,
+      (t) => INDICATOR_LOOKUP[t],
+      indChannelsRef.current,
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, rightRailTab, legendHoverIdx, legendTick, pane.classicIndicators, hoverTime, pane.id, setDataWindow]);
+    const pulseIndicator = pulseDataWindowIndicator(pulseWindowSeriesRef.current, legendHoverIdx);
+    setDataWindow(
+      pulseIndicator
+        ? { ...snapshot, indicators: [...snapshot.indicators, pulseIndicator] }
+        : snapshot,
+    );
+  }, [active, rightRailTab, legendHoverIdx, legendTick, pane.classicIndicators, pane.pulse, candleTick, hoverTime, pane.id, setDataWindow]);
 
   return (
     <div
       onClick={onClick}
-      className={`relative flex h-full flex-col overflow-hidden rounded-lg border ${
-        active ? 'border-accent/60 shadow-[0_0_0_1px_hsl(var(--accent)/0.4)]' : 'border-border'
-      } bg-surface/70`}
+      className={`relative flex h-full flex-col overflow-hidden bg-surface/70 ${
+        active ? 'shadow-[inset_0_0_0_1px_hsl(var(--accent)/0.45)]' : ''
+      }`}
     >
-      <div className="flex items-center justify-between border-b border-border/60 px-3 py-1.5">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="dot-pulse bg-bull" />
-          <span className="font-semibold tracking-tight text-foreground">{formatSymbolLabel(pane.symbol)}</span>
-          <Badge tone="muted" className="text-[9px]">
-            {pane.interval}
-          </Badge>
-          <Badge tone="muted" className="text-[9px]">
-            {pane.chartType.replace('_', ' ')}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-3 text-xs tabular-nums">
-          <span className="text-foreground">{last ? formatPrice(last.price) : '—'}</span>
-          <span className={(last?.change ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
-            {last ? formatPercent(last.change) : '—'}
-          </span>
-        </div>
-      </div>
       <div
         data-testid="chart-container"
         className="relative min-h-0 min-w-0 flex-1"
@@ -1692,6 +1685,20 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
           ⚡ SuperCharts
         </div>
         <div className="pointer-events-none absolute left-2 top-2 z-20 flex max-w-[72%] flex-col items-start gap-0.5">
+          <div className="pointer-events-auto flex max-w-full items-center gap-1.5 rounded bg-surface/80 px-1.5 py-[3px] text-[11px] leading-none tabular-nums text-muted-foreground backdrop-blur-[1px]">
+            <span className="dot-pulse bg-bull" />
+            <span className="truncate font-semibold tracking-tight text-foreground">{formatSymbolLabel(pane.symbol)}</span>
+            <Badge tone="muted" className="px-1 py-0 text-[9px] leading-4">
+              {pane.interval}
+            </Badge>
+            <Badge tone="muted" className="hidden px-1 py-0 text-[9px] leading-4 sm:inline-flex">
+              {pane.chartType.replace('_', ' ')}
+            </Badge>
+            <span className="ml-1 text-foreground">{last ? formatPrice(last.price) : '—'}</span>
+            <span className={(last?.change ?? 0) >= 0 ? 'text-bull' : 'text-bear'}>
+              {last ? formatPercent(last.change) : '—'}
+            </span>
+          </div>
           <div className="flex items-center gap-1">
             <SymbolStatusLine
               candle={statusCandle}
@@ -1909,7 +1916,14 @@ function ChartContextMenu({
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
   const setPaneOverlay = useTerminalStore((s) => s.setPaneOverlay);
   const requestDialog = useTerminalStore((s) => s.requestDialog);
+  const requestOrderSide = useTerminalStore((s) => s.requestOrderSide);
   const priceLabel = corePriceFormat(menu.price);
+  const timeLabel = new Date(menu.time).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
   const [copied, setCopied] = useState(false);
   const { x, y, region } = menu;
 
@@ -1958,6 +1972,46 @@ function ChartContextMenu({
         style={{ left: x, top: y }}
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="px-2.5 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Cursor ticket
+          </div>
+          <div className="mt-1 min-w-0 text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">{formatSymbolLabel(pane.symbol)}</span>
+            <span className="mx-1 text-muted-foreground/70">at</span>
+            <span className="tabular-nums text-foreground">{priceLabel}</span>
+            <div className="mt-0.5 truncate tabular-nums">{timeLabel}</div>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              role="menuitem"
+              aria-label={`Prepare sell ticket at ${priceLabel}`}
+              title="Open Trade with sell selected"
+              onClick={() => {
+                requestOrderSide('sell');
+                onClose();
+              }}
+              className="rounded-md border border-red-500/25 bg-red-500/10 px-2 py-1.5 text-[11px] font-semibold text-red-500 transition-colors hover:bg-red-500/15"
+            >
+              Prep sell
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              aria-label={`Prepare buy ticket at ${priceLabel}`}
+              title="Open Trade with buy selected"
+              onClick={() => {
+                requestOrderSide('buy');
+                onClose();
+              }}
+              className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-semibold text-emerald-500 transition-colors hover:bg-emerald-500/15"
+            >
+              Prep buy
+            </button>
+          </div>
+        </div>
+        <MenuSeparator />
         <MenuItem
           label={copied ? 'Copied' : `Copy price ${priceLabel}`}
           onClick={() => {
@@ -2196,6 +2250,24 @@ function venueLabel(symbolId: string): string | undefined {
   const venue = symbolId.split(':')[0];
   if (!venue || venue === symbolId) return undefined;
   return venue.charAt(0).toUpperCase() + venue.slice(1).toLowerCase();
+}
+
+function pulseDataWindowIndicator(
+  series: Array<{ label: string; color: string; values: number[] }>,
+  index: number,
+): DataWindowIndicator | null {
+  if (series.length === 0 || index < 0) return null;
+  return {
+    id: 'pulse-script',
+    name: 'PulseScript',
+    color: series[0]?.color ?? '#38bdf8',
+    visible: true,
+    channels: series.map((s) => ({
+      label: s.label,
+      value: formatIndicatorValue(s.values[index]),
+      color: s.color,
+    })),
+  };
 }
 
 function estimateRowSize(symbol: string): number {

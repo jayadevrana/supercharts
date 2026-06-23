@@ -27,9 +27,6 @@ export interface StsDashboardProps {
   showBottomStrip?: boolean;
 }
 
-const TF_ICON_COLOR_BULL = 'text-bull';
-const TF_ICON_COLOR_BEAR = 'text-bear';
-
 export function StsDashboard({
   frame,
   mtfRows,
@@ -43,7 +40,7 @@ export function StsDashboard({
     <div className="pointer-events-none absolute inset-0">
       <TopRightDashboard rows={mtfRows} showBullScore={showBullScore} showBearScore={showBearScore} />
       {showBottomStrip ? (
-        <BottomStrip frame={frame} last={last} bottomTfLabels={bottomTfLabels} mtfRows={mtfRows} />
+        <BottomStrip last={last} bottomTfLabels={bottomTfLabels} mtfRows={mtfRows} />
       ) : null}
     </div>
   );
@@ -133,12 +130,10 @@ function Cell({
 // -----------------------------------------------------------------------------
 
 function BottomStrip({
-  frame,
   last,
   bottomTfLabels,
   mtfRows,
 }: {
-  frame: SignalsTrendScoreFrame;
   last: SignalsTrendScoreFrame['last'];
   bottomTfLabels: string[];
   mtfRows: MtfRow[];

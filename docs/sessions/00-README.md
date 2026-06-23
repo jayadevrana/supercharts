@@ -37,7 +37,7 @@ If a session starts producing numbers no command produced, or drifts off-task: k
 ## Universal rules (baked into every kickoff prompt)
 
 - **One increment per session** — finish, verify, commit, update logs, STOP.
-- **Never break the live config**: 48 alerts on 1d EMA(5)×EMA(10), bot `@dipaloMA_bot`, Telegram delivery.
+- **Never break the live config**: 48 alerts on 1d EMA(5)×EMA(10), Telegram delivery configured locally (bot details redacted).
 - **Never fabricate**: no fake market data, no metric that wasn't copy-pasted from a command run in that session.
 - **Verify loop**: typecheck touched packages → relevant Vitest → headless-browser check on /terminal → commit small.
 - **End ritual**: tick the roadmap box → Recent log entry (cap 5, older → `docs/changelog.md` verbatim) → one commit.

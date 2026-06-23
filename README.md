@@ -1,71 +1,153 @@
 # SuperCharts
 
-Institutional-grade web charting terminal for crypto and forex. Live tick data, multi-window grid (1/4/8/16 panes), volume profile, footprint candles, deep-trade bubbles, liquidity heatmap, drawing tools, news, and replay.
+Institutional-grade browser charting terminal for crypto, forex, and multi-asset market analysis.
 
-> SuperCharts is an original product. It is inspired by professional charting terminals but does not copy any other vendor's branding, icons, or proprietary UI.
+SuperCharts is built for traders who want the professional workflow of a premium charting terminal without paying for multiple subscriptions just to get the basics: multi-pane charts, order-flow views, footprint context, custom indicators, scripting, alerts, backtesting, and MT5 automation in one local-first workspace.
 
-## Workspace
+> SuperCharts is an original product. It is inspired by professional charting workflows, but it does not copy another vendor's branding, proprietary APIs, protected visual assets, or private implementation details.
 
-```
+![SuperCharts terminal](docs/screenshots/terminal-overview.png)
+
+## Why It Exists
+
+TradingView is excellent, but serious traders quickly run into subscription pressure: more indicators, more alerts, more charts per layout, deeper tooling, and automation usually cost more or require stitching together separate apps.
+
+SuperCharts gives you a full-stack alternative you can run, inspect, extend, and customize:
+
+- Multi-window charting layouts without paying for pane limits.
+- Advanced indicator coverage, including SMC, order-flow, liquidity, trend score, and custom PulseScript studies.
+- Local strategy testing and parameter optimization instead of exporting ideas to another tool.
+- Telegram/web alerts and MT5 bridge workflows under your control.
+- Honest provider handling: crypto order flow from Binance, forex via broker/provider integrations, and no fabricated depth or volume where the market does not provide it.
+
+## Highlights
+
+- **Trading terminal UI**: TradingView-style top bar, interval favorites, chart-type controls, right rail, left tool rail, status line, range presets, log/percent/auto scale modes, and multi-pane layouts.
+- **Live chart engine**: Canvas 2D layered renderer with candles, bars, line, area, Heikin Ashi, Renko, Kagi, Point & Figure, and other chart modes.
+- **Order-flow toolkit**: liquidity heatmap, footprint candles, volume profile, market profile/TPO, time & sales, DOM ladder, open interest, whale/block highlights, and deep-trade bubbles.
+- **Indicator system**: registry-driven classic indicators, overlay and sub-pane rendering, favorites, recently used, settings modal, legend/status line, Data Window, duplicate/reorder controls, and indicator-based alerts.
+- **PulseScript**: original Pine-like scripting language with inputs, plots, markers, levels, background/candle painting, multi-timeframe `onTf`, sandboxing, persistence, and in-app editor.
+- **Strategy research**: MA-cross backtester, strategy tester for script marks, optimizer, walk-forward testing, robustness flags, paper-trading, P&L attribution, and portfolio heat.
+- **Automation bridge**: MT5 TCP bridge, order intents, account status, bulk automation hooks, Telegram delivery, Telegram broadcast channels, and inbound webhooks.
+- **Data integrations**: Binance public streams, OANDA onboarding, Yahoo FX/metals/index fallback, GDELT news, Forex Factory calendar mirror, custom CSV OHLC imports, and optional paid-provider keys.
+
+## Screenshots
+
+| Terminal | Indicator Dialog | PulseScript |
+| --- | --- | --- |
+| ![Terminal overview](docs/screenshots/terminal-overview.png) | ![Indicator browser](docs/screenshots/indicator-browser.png) | ![PulseScript editor](docs/screenshots/pulsescript-editor.png) |
+
+| Strategy Tester | Alerts | Pricing |
+| --- | --- | --- |
+| ![Strategy tester](docs/screenshots/strategy-tester.png) | ![Alerts dialog](docs/screenshots/alerts-dialog.png) | ![Pricing](docs/screenshots/pricing.png) |
+
+## What You Get Without Paying For TradingView
+
+- **Chart layouts**: run dense 1/4/8/9/16-pane workflows locally.
+- **Indicator depth**: ship your own studies, duplicate instances, reorder them, inspect every plot value, and script custom logic.
+- **Alerts and automation**: connect Telegram, web alerts, inbound webhooks, and MT5 automation from your own server.
+- **Research tooling**: backtest and optimize strategy parameters on real candles with transparent assumptions.
+- **Data ownership**: keep layouts, scripts, custom datasets, and alert state in your own local SQLite-backed stack.
+- **Extensibility**: every package is TypeScript and organized as a pnpm monorepo, so you can change the terminal rather than waiting for a closed platform to add what you need.
+
+## Architecture
+
+```text
 supercharts/
 ├── apps/
-│   ├── web/         Next.js App Router frontend
-│   ├── api/         Fastify REST + WebSocket gateway
-│   └── ingestion/   Provider WebSocket consumers, normalizers, aggregators
+│   ├── web/          Next.js 15 App Router terminal and marketing site
+│   ├── api/          Fastify REST/WebSocket API, SQLite persistence, alert engine
+│   ├── ingestion/    Provider streams, candles, footprint, heatmap, deep trades
+│   ├── mt5-ea/       MetaTrader bridge assets
+│   └── tv-recorder/  Local capture tooling
 ├── packages/
-│   ├── types/         Shared domain types
-│   ├── market-data/   Provider adapter interface + implementations
-│   ├── chart-core/    Canvas/WebGL chart engine
-│   ├── indicators/    Pure indicator calculation functions
-│   ├── ui/            Shared React primitives
-│   └── config/        Shared TS/lint/prettier config
-├── infra/             Docker Compose, ClickHouse/Postgres/Redis init
-└── docs/              Architecture, API, data model, provider notes
+│   ├── chart-core/   Canvas chart engine and layers
+│   ├── indicators/   Pure indicator implementations and registry
+│   ├── market-data/  Provider adapters
+│   ├── script-lang/  PulseScript lexer/parser/interpreter/stdlib
+│   └── types/        Shared domain types
+├── docs/             Architecture, language docs, setup guides, changelog
+├── tests/            Vitest coverage for pure modules and API utilities
+└── infra/            Optional local infrastructure
 ```
 
-## Requirements
+Read the deeper system map in [docs/architecture.md](docs/architecture.md).
 
-- Node ≥ 20 (verified on v22+)
-- pnpm ≥ 9
-- Docker (optional — falls back to SQLite + in-memory if missing)
+## Quick Start
 
-## Quick start
+Requirements:
+
+- Node.js 20+ (Node 26 recommended for the current API runtime)
+- pnpm 9+
+- Optional: Docker for local infra experiments
 
 ```bash
 pnpm install
 cp .env.example .env
-pnpm dev
+cp .env.example apps/web/.env.local
+
+pnpm -F @supercharts/api dev
+pnpm -F @supercharts/web dev
 ```
 
-Open http://localhost:3000
+Open [http://localhost:3000](http://localhost:3000), then launch the terminal.
 
-## Data sources
+The default crypto path works with Binance public data and does not require an API key. Optional providers such as OANDA, CryptoPanic, Finnhub, Twelve Data, Polygon, and Stripe require your own keys.
 
-Live by default (no key required):
+## Environment
 
-- Binance public market data — trades, klines, depth.
-- GDELT — global macro news.
+Use [.env.example](.env.example) as the canonical reference. The important defaults:
 
-Optional, requires keys:
+- `NEXT_PUBLIC_API_URL=http://localhost:4000`
+- `NEXT_PUBLIC_WS_URL=ws://localhost:4000/ws`
+- `DATABASE_URL=file:./data/supercharts.sqlite`
+- `BINANCE_ENABLED=true`
+- `GDELT_ENABLED=true`
 
-- OANDA — forex bid/ask quotes and candles.
-- Twelve Data, Finnhub, Polygon — fallback market data.
-- CryptoPanic — crypto news.
-- CoinGecko — token metadata.
+Secrets such as `AUTH_SECRET`, `ENCRYPTION_KEY`, OANDA tokens, Telegram bot tokens, and Stripe keys must stay outside git.
 
-Missing keys do not crash the app. Adapters report `not_configured` health status and the UI surfaces a setup state for the affected feature.
+## Scripts
 
-## Forex data honesty
+```bash
+pnpm dev                 # run all app dev servers
+pnpm dev:web             # Next.js app on :3000
+pnpm dev:api             # Fastify API on :4000
+pnpm build               # build all packages/apps
+pnpm typecheck           # TypeScript checks
+pnpm test                # Vitest suite
+pnpm lint                # ESLint
+```
 
-Spot forex is decentralized. SuperCharts does not invent centralized exchange volume or order-book heatmaps for forex when the provider does not supply them. Volume labels reflect what the provider actually reports (tick volume vs. real volume vs. broker liquidity).
+## Data Honesty
 
-## Pricing
+SuperCharts does not fabricate market data.
 
-- Pro 6M — $400
-- Pro Annual — $600
+- Binance spot/futures features use Binance public streams and REST endpoints.
+- Forex order books and centralized volume are not invented when a provider does not supply them.
+- Optional providers report `not_configured` instead of silently faking responses.
+- Backtests and optimizer results should be treated as research outputs, not financial advice.
 
-Subscription gating uses Stripe. Without Stripe keys, the pricing page renders in setup mode and the billing endpoints return `not_configured`.
+## Security Notes
+
+- The current local demo uses a simplified development auth model.
+- Do not expose your local API publicly unless `DEMO_MODE=1` is enabled and you understand the read-only guard.
+- Keep `.env`, `.env.local`, SQLite databases, and screenshots with private account details out of git.
+- Review [SECURITY.md](SECURITY.md) before deploying or accepting outside contributions.
+
+## Roadmap
+
+The repo already includes terminal, alerts, indicator system, PulseScript, strategy testing, OANDA onboarding, webhooks, Telegram broadcast, CSV import, and MT5 bridge work.
+
+Next major areas:
+
+- Embedded iframe charts
+- Multi-user workspaces
+- Auth.js production auth
+- Stripe live billing
+- Mobile responsive polish
+- PWA/offline snapshots
+- WASM indicator acceleration
 
 ## License
 
-Proprietary. All rights reserved.
+Source-available proprietary software. See [LICENSE](LICENSE).

@@ -386,7 +386,7 @@ function drawSessions(ctx: RenderContext, sessions: SessionBlock[]): void {
 }
 
 function drawHvnLvn(ctx: RenderContext, hv: HvnLvnResult): void {
-  const { ctx: c, timeScale, priceScale, geometry, theme } = ctx;
+  const { ctx: c, priceScale, geometry, theme } = ctx;
   c.save();
   const x1 = geometry.pricePane.x + geometry.pricePane.width;
   const x0 = x1 - 60;

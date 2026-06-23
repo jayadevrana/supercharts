@@ -2,7 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { Interval } from '@supercharts/types';
-import { INTERVALS, INTERVAL_MS as INTERVAL_TO_MS } from '@supercharts/types';
+import {
+  CATEGORY_ORDER,
+  INTERVALS,
+  INTERVAL_MS as INTERVAL_TO_MS,
+  getCatalogSymbol,
+} from '@supercharts/types';
+import type { MarketDataProvider } from '@supercharts/market-data';
 import { buildVisibleRangeProfile } from '@supercharts/chart-core/pure';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
@@ -25,7 +31,19 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
     const results = await Promise.all(
       Object.values(ctx.providers).map((p) => p.searchSymbols(q, lim).catch(() => [])),
     );
-    return { items: results.flat().slice(0, lim) };
+    const items = results.flat().sort((a, b) => {
+      const ac = getCatalogSymbol(a.id);
+      const bc = getCatalogSymbol(b.id);
+      if (ac && !bc) return -1;
+      if (!ac && bc) return 1;
+      if (ac && bc) {
+        const cat = CATEGORY_ORDER.indexOf(ac.category) - CATEGORY_ORDER.indexOf(bc.category);
+        if (cat !== 0) return cat;
+        return ac.sort - bc.sort;
+      }
+      return 0;
+    });
+    return { items: items.slice(0, lim) };
   });
 
   fastify.get('/api/symbols/:symbolId', async (req, reply) => {
@@ -191,7 +209,7 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
     const binanceSymbols = symbols
       .filter((s) => s.startsWith('BINANCE:'))
       .map((s) => s.slice('BINANCE:'.length));
-    const items: Array<{ symbol: string; lastPrice: number; changePercent: number; quoteVolume: number }> = [];
+    const items: QuoteItem[] = [];
     if (binanceSymbols.length > 0) {
       try {
         const url = new URL('https://api.binance.com/api/v3/ticker/24hr');
@@ -217,12 +235,64 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
         /* fall through — partial response is better than 502 for a watchlist quote */
       }
     }
+    const providerQuoteSymbols = symbols.filter((s) => !s.startsWith('BINANCE:'));
+    if (providerQuoteSymbols.length > 0) {
+      const settled = await Promise.allSettled(
+        providerQuoteSymbols.map((symbol) => providerQuote(symbol, ctx)),
+      );
+      for (const r of settled) {
+        if (r.status === 'fulfilled' && r.value) items.push(r.value);
+      }
+    }
     return { items };
   });
 }
 
 const MAX_QUOTE_SYMBOLS = 200;
 const QUOTE_TIMEOUT_MS = 8_000;
+const PROVIDER_QUOTE_TTL_MS = 30_000;
+const PROVIDER_QUOTE_TIMEOUT_MS = 3_500;
+type QuoteItem = { symbol: string; lastPrice: number; changePercent: number; quoteVolume: number };
+const providerQuoteCache = new Map<string, { at: number; item: QuoteItem }>();
+
+async function providerQuote(symbol: string, ctx: IngestionContext): Promise<QuoteItem | null> {
+  const cached = providerQuoteCache.get(symbol);
+  const now = Date.now();
+  if (cached && now - cached.at < PROVIDER_QUOTE_TTL_MS) return cached.item;
+  const provider = resolveProvider(symbol, ctx);
+  if (!provider?.capabilities.historicalCandles) return null;
+
+  const item = await withTimeout(fetchProviderQuote(symbol, provider), PROVIDER_QUOTE_TIMEOUT_MS).catch(() => null);
+  if (item) providerQuoteCache.set(symbol, { at: Date.now(), item });
+  return item;
+}
+
+async function fetchProviderQuote(symbol: string, provider: MarketDataProvider): Promise<QuoteItem | null> {
+  const now = Date.now();
+  const lookback = 5 * 24 * 60 * 60_000;
+  const candles = await provider.fetchHistoricalCandles(symbol, '1m', now - lookback, now, 2);
+  const last = candles[candles.length - 1];
+  if (!last || !Number.isFinite(last.close)) return null;
+  const prev = candles.length >= 2 ? candles[candles.length - 2] : undefined;
+  const base = prev?.close ?? last.open;
+  const changePercent = base ? ((last.close - base) / base) * 100 : 0;
+  return {
+    symbol,
+    lastPrice: last.close,
+    changePercent,
+    quoteVolume: last.quoteVolume ?? last.volume ?? 0,
+  };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('provider_quote_timeout')), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
 
 function resolveProvider(symbol: string, ctx: IngestionContext) {
   const venue = symbol.split(':')[0]?.toLowerCase();

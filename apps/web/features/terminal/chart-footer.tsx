@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Interval } from '@supercharts/types';
+import { SlidersHorizontal } from 'lucide-react';
 
 /**
  * TradingView-style chart footer: range presets on the left (each = a resolution + a
@@ -81,8 +82,8 @@ export function ChartFooter({
     }`;
 
   return (
-    <div className="flex h-[26px] shrink-0 items-center justify-between border-t border-border/60 px-2 text-[11px] leading-none">
-      <div className="flex items-center gap-0.5">
+    <div className="scroll-thin flex h-[26px] shrink-0 items-center justify-between gap-3 overflow-x-auto overflow-y-hidden border-t border-border/60 px-2 text-[11px] leading-none">
+      <div className="flex shrink-0 items-center gap-0.5">
         {RANGE_PRESETS.map((p) => (
           <button
             key={p.label}
@@ -99,12 +100,19 @@ export function ChartFooter({
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <span className="tabular-nums text-muted-foreground" title="Exchange-agnostic UTC clock">
           {clock ? `${clock} UTC` : '—'}
         </span>
         <span className="h-3 w-px bg-border" />
-        <div className="flex items-center gap-0.5">
+        <div
+          className="flex items-center gap-0.5 rounded border border-border/70 bg-surface/65 px-1 py-0.5"
+          title="Price scale controls"
+        >
+          <SlidersHorizontal className="h-3 w-3 text-muted-foreground" aria-hidden />
+          <span className="px-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+            Scale
+          </span>
           <button
             type="button"
             title="Percent scale — % change vs the first visible bar"

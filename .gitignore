@@ -3,6 +3,9 @@ dist
 .next
 .sites-stage
 .sites-artifacts
+.openai/
+.claude/
+.playwright-mcp/
 out
 build
 coverage

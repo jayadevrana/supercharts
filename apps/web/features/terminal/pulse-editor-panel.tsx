@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, ChevronDown, FlaskConical, Loader2, TrendingUp, TrendingDown, Trophy } from 'lucide-react';
+import { Code2, Play, RotateCcw, TriangleAlert, CheckCircle2, Save, FolderOpen, Trash2, ChevronDown, FlaskConical, Loader2, TrendingUp, TrendingDown, Trophy, Clock3 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -350,6 +350,7 @@ export function PulseEditorPanel() {
           </div>
           <Badge tone="muted" className="text-[9px]">{formatSymbolLabel(pane.symbol)} · {pane.interval}</Badge>
           {currentName ? <Badge tone="accent" className="max-w-[160px] truncate text-[9px]">{currentName}</Badge> : null}
+          <PulseRunStatus result={result} enabled={pane.pulse.enabled} />
         </div>
         <div className="flex items-center gap-1.5">
           <Popover open={listPop} onOpenChange={setListPop}>
@@ -676,6 +677,39 @@ export function PulseEditorPanel() {
         </div>
       </div>
     </div>
+  );
+}
+
+function PulseRunStatus({ result, enabled }: { result: PulseResult | undefined; enabled: boolean }) {
+  if (!result) {
+    return (
+      <span className="hidden items-center gap-1.5 rounded-md border border-border bg-surface-raised/60 px-2 py-1 text-[10px] text-muted-foreground lg:inline-flex">
+        <Clock3 className="h-3 w-3" /> not run
+      </span>
+    );
+  }
+  if (!result.ok) {
+    return (
+      <span className="hidden max-w-[280px] items-center gap-1.5 rounded-md border border-bear/40 bg-bear/10 px-2 py-1 text-[10px] text-bear lg:inline-flex">
+        <TriangleAlert className="h-3 w-3 shrink-0" />
+        <span className="truncate">{result.error ?? 'script error'}</span>
+      </span>
+    );
+  }
+  const outputs =
+    result.plotCount +
+    result.markCount +
+    (result.levelCount ?? 0) +
+    (result.shapeCount ?? 0) +
+    (result.paintCount ?? 0);
+  const ranAt = new Date(result.ranAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return (
+    <span className="hidden items-center gap-1.5 rounded-md border border-bull/35 bg-bull/10 px-2 py-1 text-[10px] text-bull lg:inline-flex">
+      <CheckCircle2 className="h-3 w-3" />
+      <span className="tabular-nums">{outputs} outputs</span>
+      <span className="text-muted-foreground">· {ranAt}</span>
+      <span className={enabled ? 'text-bull' : 'text-muted-foreground'}>{enabled ? 'on chart' : 'hidden'}</span>
+    </span>
   );
 }
 

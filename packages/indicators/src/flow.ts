@@ -93,11 +93,11 @@ export function klinger(candles: readonly Candle[], opts: { fast?: number; slow?
   const fast = opts.fast ?? 34, slow = opts.slow ?? 55, sig = opts.signal ?? 13;
   const n = candles.length;
   const vf = new Array<number>(n).fill(NaN);
-  let trend = 0, prevTrend = 0, cm = 0, prevDm = 0;
+  let prevTrend = 0, cm = 0, prevDm = 0;
   for (let i = 1; i < n; i++) {
     const c = candles[i]!, p = candles[i - 1]!;
     const dm = c.high - c.low;
-    trend = hlc3(c) > hlc3(p) ? 1 : -1;
+    const trend = hlc3(c) > hlc3(p) ? 1 : -1;
     cm = trend === prevTrend ? cm + dm : prevDm + dm;
     const ratio = cm === 0 ? 0 : Math.abs(2 * (dm / cm - 1));
     vf[i] = c.volume * ratio * trend * 100;

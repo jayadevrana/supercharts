@@ -14,7 +14,7 @@ export function ChartGrid() {
     <div
       data-testid="chart-layout"
       data-layout-id={layout.id}
-      className="grid h-full min-h-0 w-full gap-2 p-2"
+      className="grid h-full min-h-0 w-full gap-px bg-border/60"
       style={{
         gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`,
         gridTemplateRows: `repeat(${layout.rows}, minmax(0, 1fr))`,

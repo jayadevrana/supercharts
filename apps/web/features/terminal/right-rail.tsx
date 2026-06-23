@@ -1,7 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Eye, EyeOff, LineChart, Newspaper, RefreshCw, Star, Wifi } from 'lucide-react';
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  Database,
+  Eye,
+  EyeOff,
+  Gauge,
+  Layers,
+  LineChart,
+  Newspaper,
+  RefreshCw,
+  Star,
+  Wifi,
+} from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -38,14 +52,35 @@ export function RightRail() {
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/85">
       <Tabs value={rightRailTab} onValueChange={setRightRailTab} className="flex h-full flex-col">
-        <TabsList className="mx-2 mt-3 grid w-auto grid-cols-7 self-stretch text-[10px]">
-          <TabsTrigger value="trade">Trade</TabsTrigger>
-          <TabsTrigger value="ind">Ind</TabsTrigger>
-          <TabsTrigger value="data">Data</TabsTrigger>
-          <TabsTrigger value="watch">Watch</TabsTrigger>
-          <TabsTrigger value="news">News</TabsTrigger>
-          <TabsTrigger value="scanner">Scan</TabsTrigger>
-          <TabsTrigger value="overlays">Layers</TabsTrigger>
+        <TabsList className="mx-2 mt-3 grid w-auto grid-cols-7 self-stretch">
+          <TabsTrigger value="trade" aria-label="Trade" title="Trade" className="h-8 px-0">
+            <ArrowUpRight className="h-4 w-4" />
+            <span className="sr-only">Trade</span>
+          </TabsTrigger>
+          <TabsTrigger value="ind" aria-label="Indicators" title="Indicators" className="h-8 px-0">
+            <LineChart className="h-4 w-4" />
+            <span className="sr-only">Indicators</span>
+          </TabsTrigger>
+          <TabsTrigger value="data" aria-label="Data Window" title="Data Window" className="h-8 px-0">
+            <Database className="h-4 w-4" />
+            <span className="sr-only">Data Window</span>
+          </TabsTrigger>
+          <TabsTrigger value="watch" aria-label="Watchlist" title="Watchlist" className="h-8 px-0">
+            <Star className="h-4 w-4" />
+            <span className="sr-only">Watchlist</span>
+          </TabsTrigger>
+          <TabsTrigger value="news" aria-label="News" title="News" className="h-8 px-0">
+            <Newspaper className="h-4 w-4" />
+            <span className="sr-only">News</span>
+          </TabsTrigger>
+          <TabsTrigger value="scanner" aria-label="Scanner" title="Scanner" className="h-8 px-0">
+            <Gauge className="h-4 w-4" />
+            <span className="sr-only">Scanner</span>
+          </TabsTrigger>
+          <TabsTrigger value="overlays" aria-label="Layers" title="Layers" className="h-8 px-0">
+            <Layers className="h-4 w-4" />
+            <span className="sr-only">Layers</span>
+          </TabsTrigger>
         </TabsList>
         <div className="min-h-0 flex-1 overflow-hidden">
           <TabsContent value="trade" className="h-full overflow-y-auto scroll-thin">
@@ -94,10 +129,22 @@ function DataWindowPanel() {
   const time = snap.time
     ? new Date(snap.time).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
     : '—';
-  const Row = ({ label, value, cls }: { label: string; value: string; cls?: string }) => (
+  const Row = ({ label, value, cls, bar }: { label: string; value: string; cls?: string; bar?: 'bull' | 'bear' }) => (
     <div className="flex items-center justify-between px-3 py-1 text-xs">
-      <span className="text-muted-foreground">{label}</span>
+      <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+        {bar ? (
+          <span className={`h-3 w-0.5 shrink-0 rounded-full ${bar === 'bull' ? 'bg-bull' : 'bg-bear'}`} aria-hidden />
+        ) : null}
+        <span className="truncate">{label}</span>
+      </span>
       <span className={`tabular-nums ${cls ?? 'text-foreground'}`}>{value}</span>
+    </div>
+  );
+  const Metric = ({ label, value, pct, cls }: { label: string; value: string; pct: string; cls?: string }) => (
+    <div className="min-w-0 px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{label}</div>
+      <div className={`mt-1 truncate text-xs tabular-nums ${cls ?? 'text-foreground'}`}>{value}</div>
+      <div className="mt-0.5 truncate text-[10px] tabular-nums text-muted-foreground">{pct}</div>
     </div>
   );
 
@@ -114,22 +161,33 @@ function DataWindowPanel() {
         <Row label="High" value={o.high} />
         <Row label="Low" value={o.low} />
         <Row label="Close" value={o.close} cls={sign} />
-        <Row label="Change" value={o.change} cls={sign} />
-        <Row label="Change %" value={o.changePct} cls={sign} />
+        <Row label="Change" value={o.change} cls={sign} bar={o.up ? 'bull' : 'bear'} />
+        <Row label="Change %" value={o.changePct} cls={sign} bar={o.up ? 'bull' : 'bear'} />
         <Row label="Volume" value={o.volume} />
+      </div>
+      <div className="grid grid-cols-2 divide-x divide-border/60">
+        <Metric label="H-L range" value={o.range} pct={o.rangePct} />
+        <Metric label="C-O body" value={o.body} pct={o.bodyPct} cls={o.bodyUp ? 'text-bull' : 'text-bear'} />
       </div>
       {snap.indicators.length > 0 ? (
         <div className="py-1">
+          <div className="px-3 pb-1 pt-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Indicators · {snap.indicators.length}
+          </div>
           {snap.indicators.map((ind) => (
-            <div key={ind.id} className="px-3 py-1.5">
+            <div key={ind.id} className={`px-3 py-1.5 ${ind.visible ? '' : 'opacity-50'}`}>
               <div className="mb-0.5 flex items-center gap-1.5">
                 <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ backgroundColor: ind.color }} />
                 <span className="truncate text-[11px] font-medium text-foreground">{ind.name}</span>
+                {!ind.visible ? <EyeOff className="h-3 w-3 shrink-0 text-muted-foreground" aria-label="Hidden" /> : null}
               </div>
               <div className="space-y-0.5 pl-3.5">
-                {ind.channels.map((ch) => (
-                  <div key={ch.label} className="flex items-center justify-between text-[11px]">
-                    <span className="capitalize text-muted-foreground">{ch.label}</span>
+                {ind.channels.map((ch, i) => (
+                  <div key={`${ch.label}-${i}`} className="flex items-center justify-between gap-3 text-[11px]">
+                    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ backgroundColor: ch.color }} aria-hidden />
+                      <span className="truncate">{ch.label}</span>
+                    </span>
                     <span className="tabular-nums text-foreground/90">{ch.value}</span>
                   </div>
                 ))}
@@ -199,6 +257,7 @@ function WatchlistTab({ active, onPick }: { active: string; onPick: (s: string) 
           <span>{SYMBOL_CATALOG.length} symbols · {CATEGORY_ORDER.length} groups</span>
         </div>
       </div>
+      <ActiveSymbolHeader active={active} live={data[active]} />
       {CATEGORY_ORDER.map((cat) => {
         const items = grouped.get(cat) ?? [];
         if (items.length === 0) return null;
@@ -244,7 +303,7 @@ function WatchlistTab({ active, onPick }: { active: string; onPick: (s: string) 
                             </div>
                           </>
                         ) : isOanda ? (
-                          <div className="text-[10px] uppercase tracking-[0.14em] text-warn">configure OANDA</div>
+                          <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">waiting</div>
                         ) : (
                           <Skeleton className="ml-auto h-3 w-16" />
                         )}
@@ -256,6 +315,72 @@ function WatchlistTab({ active, onPick }: { active: string; onPick: (s: string) 
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function ActiveSymbolHeader({ active, live }: { active: string; live?: TopMover }) {
+  const meta = getCatalogSymbol(active);
+  const venue = meta?.venue ?? (active.includes(':') ? active.split(':')[0] : 'CUSTOM');
+  const category = meta ? CATEGORY_LABEL[meta.category] : 'Outside catalog';
+  const label = meta?.label ?? formatSymbolLabel(active);
+  const up = live ? live.changePercent >= 0 : false;
+  const quoteState = 'waiting for quote';
+
+  return (
+    <div className="border-y border-border/60 bg-surface-sunken/45 px-3 py-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-foreground">{label}</div>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <Badge tone="muted" className="text-[9px]">
+              {venue}
+            </Badge>
+            <Badge tone={meta ? 'accent' : 'warn'} className="text-[9px]">
+              {category}
+            </Badge>
+          </div>
+        </div>
+        <div className="shrink-0 text-right tabular-nums">
+          {live ? (
+            <>
+              <div className="text-sm font-semibold text-foreground">{formatPrice(live.lastPrice)}</div>
+              <div className={`mt-0.5 flex items-center justify-end gap-1 text-[11px] ${up ? 'text-bull' : 'text-bear'}`}>
+                {up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                {formatPercent(live.changePercent)}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Live quote</div>
+              <div className="mt-0.5 text-[11px] uppercase tracking-[0.12em] text-warn">{quoteState}</div>
+            </>
+          )}
+        </div>
+      </div>
+      {live ? (
+        <div className="mt-2 grid grid-cols-3 divide-x divide-border/60 border-t border-border/60 pt-2">
+          <div className="min-w-0 pr-2">
+            <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Symbol</div>
+            <div className="mt-0.5 truncate text-[11px] text-foreground">{active}</div>
+          </div>
+          <div className="min-w-0 px-2">
+            <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Change</div>
+            <div className={`mt-0.5 truncate text-[11px] tabular-nums ${up ? 'text-bull' : 'text-bear'}`}>
+              {formatPercent(live.changePercent)}
+            </div>
+          </div>
+          <div className="min-w-0 pl-2 text-right">
+            <div className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground">Quote vol</div>
+            <div className="mt-0.5 truncate text-[11px] tabular-nums text-foreground">{formatCompact(live.quoteVolume)}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[10px] uppercase tracking-[0.14em]">
+          <span className="text-muted-foreground">Symbol</span>
+          <span className="max-w-[210px] truncate text-foreground">{active}</span>
+        </div>
+      )}
     </div>
   );
 }

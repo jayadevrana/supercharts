@@ -28,7 +28,7 @@ dual MA); Telegram delivery (chat-ID auto-detect, chart-snapshot PNG); watchlist
 subscribe; bulk MT5 automation; logs tab.
 
 **⚠️ Live config — DO NOT BREAK:** 48 alerts on **1d EMA(5) × EMA(10) close**, web + Telegram on.
-Bot `@dipaloMA_bot` (chat `6386490802`) saved.
+Telegram bot and chat are configured locally (values intentionally redacted for public source).
 
 **24-indicator request — COMPLETE:** RVOL, VWAP σ-bands, Initial Balance, Naked POC, Market
 Profile/TPO, real footprint pipeline (per-cell bid/ask + imbalance/stacked/absorption from the

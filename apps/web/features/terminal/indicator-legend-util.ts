@@ -33,14 +33,125 @@ export function legendColor(spec: IndicatorSpec, inst: IndicatorInstance): strin
     'adxColor',
     'baseColor',
     'signalColor',
+    'histogramPositive',
     'bandColor',
     'lineColor',
+    'fisherColor',
+    'kstColor',
+    'tsiColor',
+    'rvgiColor',
+    'smiColor',
+    'wt1Color',
+    'viPlusColor',
+    'kvoColor',
+    'bullColor',
   ];
   for (const k of keys) {
     const v = s[k] ?? sp[k];
     if (typeof v === 'string' && v) return v;
   }
   return '#9aa4b2';
+}
+
+const CHANNEL_STYLE_KEYS: Record<string, string[]> = {
+  value: ['color', 'lineColor'],
+  middle: ['middleColor', 'color'],
+  upper: ['upperColor', 'bandColor', 'color'],
+  lower: ['lowerColor', 'bandColor', 'color'],
+  bandwidth: ['bandwidthColor', 'bandColor', 'color'],
+  percentB: ['percentBColor', 'bandColor', 'color'],
+  macd: ['macdColor', 'color'],
+  signal: ['signalColor', 'color'],
+  histogram: ['histogramColor', 'histogramPositive', 'color'],
+  adx: ['adxColor', 'color'],
+  plusDI: ['plusColor', 'plusDIColor', 'color'],
+  minusDI: ['minusColor', 'minusDIColor', 'color'],
+  line: ['lineColor', 'upColor', 'color'],
+  direction: ['directionColor', 'downColor', 'color'],
+  conversion: ['conversionColor', 'color'],
+  base: ['baseColor', 'color'],
+  spanA: ['spanAColor', 'cloudUp', 'bandColor', 'color'],
+  spanB: ['spanBColor', 'cloudDown', 'bandColor', 'color'],
+  lagging: ['laggingColor', 'color'],
+  up: ['upColor', 'color'],
+  down: ['downColor', 'color'],
+  oscillator: ['oscillatorColor', 'upColor', 'color'],
+  k: ['kColor', 'color'],
+  d: ['dColor', 'signalColor', 'color'],
+  vwap: ['vwapColor', 'color'],
+  upper1: ['upper1Color', 'bandColor', 'color'],
+  lower1: ['lower1Color', 'bandColor', 'color'],
+  upper2: ['upper2Color', 'bandColor', 'color'],
+  lower2: ['lower2Color', 'bandColor', 'color'],
+  ibHigh: ['highColor', 'color'],
+  ibLow: ['lowColor', 'color'],
+  ibMid: ['midColor', 'color'],
+  poc: ['pocColor', 'color'],
+  fisher: ['fisherColor', 'color'],
+  trigger: ['triggerColor', 'signalColor', 'color'],
+  kst: ['kstColor', 'color'],
+  tsi: ['tsiColor', 'color'],
+  rvgi: ['rvgiColor', 'color'],
+  smi: ['smiColor', 'color'],
+  wt1: ['wt1Color', 'color'],
+  wt2: ['wt2Color', 'signalColor', 'color'],
+  viPlus: ['viPlusColor', 'plusColor', 'color'],
+  viMinus: ['viMinusColor', 'minusColor', 'color'],
+  kvo: ['kvoColor', 'color'],
+  bull: ['bullColor', 'upColor', 'color'],
+  bear: ['bearColor', 'downColor', 'color'],
+};
+
+const DEFAULT_CHANNEL_LABELS: Record<string, string> = {
+  value: 'Value',
+  macd: 'MACD',
+  signal: 'Signal',
+  histogram: 'Histogram',
+  k: '%K',
+  d: '%D',
+  adx: 'ADX',
+  plusDI: '+DI',
+  minusDI: '-DI',
+  percentB: '%B',
+  spanA: 'Span A',
+  spanB: 'Span B',
+  ibHigh: 'IB High',
+  ibLow: 'IB Low',
+  ibMid: 'IB Mid',
+  upper1: 'Upper 1',
+  lower1: 'Lower 1',
+  upper2: 'Upper 2',
+  lower2: 'Lower 2',
+  viPlus: 'VI+',
+  viMinus: 'VI-',
+  kvo: 'KVO',
+  wt1: 'WT1',
+  wt2: 'WT2',
+};
+
+/** Plot/channel colour, using the same style keys as the chart renderers. */
+export function channelColor(spec: IndicatorSpec, inst: IndicatorInstance, channel: string): string {
+  const style = (inst.style ?? {}) as Record<string, unknown>;
+  const defaults = (spec.style ?? {}) as Record<string, unknown>;
+  const keys = CHANNEL_STYLE_KEYS[channel] ?? [`${channel}Color`, 'color'];
+  for (const key of keys) {
+    const value = style[key] ?? defaults[key];
+    if (typeof value === 'string' && value) return value;
+  }
+  return legendColor(spec, inst);
+}
+
+/** Human-readable plot/channel label, with explicit registry overrides first. */
+export function channelLabel(spec: IndicatorSpec, channel: string): string {
+  const labels = spec.channelLabels;
+  return labels?.[channel] ?? DEFAULT_CHANNEL_LABELS[channel] ?? titleizeChannel(channel);
+}
+
+function titleizeChannel(channel: string): string {
+  return channel
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**

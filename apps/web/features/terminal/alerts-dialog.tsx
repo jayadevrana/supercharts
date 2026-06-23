@@ -16,7 +16,6 @@ import {
   Layers as LayersIcon,
   ListPlus,
   ChevronLeft,
-  ChevronRight,
   Star,
   Pencil,
   Zap,
@@ -111,7 +110,6 @@ import type {
   AlertEvent,
   Interval,
   MaCrossAlertConfig,
-  TelegramConfig,
 } from '@supercharts/types';
 import { INTERVALS, SYMBOL_CATALOG, CATEGORY_LABEL, CATEGORY_ORDER, getCatalogSymbol } from '@supercharts/types';
 import { formatPrice, formatRelativeTime, formatSymbolLabel } from '@/lib/format';

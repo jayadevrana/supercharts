@@ -1,14 +1,11 @@
 import type {
   Candle,
   Interval,
-  OrderBookDelta,
   ProviderCapabilities,
   ProviderHealthStatus,
-  QuoteTick,
   Symbol as MarketSymbol,
-  TradeTick,
 } from '@supercharts/types';
-import { INTERVAL_MS, getCatalogSymbol } from '@supercharts/types';
+import { INTERVAL_MS, OANDA_INSTRUMENTS, getCatalogSymbol } from '@supercharts/types';
 import {
   TinyEmitter,
   type MarketDataProvider,
@@ -74,7 +71,7 @@ const SPECIAL_TICKERS: Record<string, string> = {
 };
 
 /** All OANDA raws this provider can serve (FX derived + specials). */
-const FX_RAWS = new Set<string>();
+const SUPPORTED_RAWS = new Set<string>([...OANDA_INSTRUMENTS, ...Object.keys(SPECIAL_TICKERS)]);
 
 export interface YahooProviderOptions {
   fetchFn?: typeof fetch;
@@ -146,10 +143,10 @@ export class YahooProvider implements MarketDataProvider {
   }
 
   async searchSymbols(query: string, limit = 50): Promise<MarketSymbol[]> {
-    const q = query.trim().toUpperCase();
-    const raws = [...Object.keys(SPECIAL_TICKERS), ...FX_RAWS];
+    const q = normalizeSearchQuery(query);
+    const raws = [...SUPPORTED_RAWS];
     return raws
-      .filter((r) => !q || r.includes(q))
+      .filter((r) => !q || r.includes(q) || r.replace('_', '').includes(q))
       .slice(0, limit)
       .map((r) => this.buildSymbol(r));
   }
@@ -324,6 +321,11 @@ export class YahooProvider implements MarketDataProvider {
 
 function noopHandle(symbol: string): SubscriptionHandle {
   return { symbol, unsubscribe: () => {} };
+}
+
+function normalizeSearchQuery(query: string): string {
+  const q = query.trim().toUpperCase();
+  return q.includes(':') ? q.split(':').at(-1)!.replace(/[^A-Z0-9]/g, '') : q.replace(/[^A-Z0-9]/g, '');
 }
 
 interface YahooChartResponse {

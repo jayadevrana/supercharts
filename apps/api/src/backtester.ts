@@ -438,7 +438,6 @@ function buildRealismTrades(
       const raw = pickSource(bar, source);
       if (open) {
         close(open, i, raw, 'cross');
-        open = null;
       }
       // Entry slippage works against the trade: a buy fills higher, a sell fills lower.
       const entryFill = c.side === 'buy' ? raw * (1 + slip) : raw * (1 - slip);

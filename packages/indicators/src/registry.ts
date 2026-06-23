@@ -27,6 +27,8 @@ export interface IndicatorSpec {
   pane: IndicatorPaneHint;
   /** Output channels exposed to the signal language. */
   channels: string[];
+  /** Optional user-facing names for output channels in legends and the Data Window. */
+  channelLabels?: Record<string, string>;
   /** Inputs the user can tune. */
   inputs: IndicatorInputSpec[];
   /** Default style fields the UI lets the user override. */
@@ -876,8 +878,39 @@ const SEARCH_ALIASES: Record<string, string[]> = {
   net_volume: ['net volume', 'netvol'],
 };
 
+const CHANNEL_LABELS: Record<string, Record<string, string>> = {
+  macd: { macd: 'MACD', signal: 'Signal', histogram: 'Histogram' },
+  stochastic: { k: '%K', d: '%D' },
+  bollinger: { middle: 'Basis', upper: 'Upper', lower: 'Lower', bandwidth: 'Bandwidth', percentB: '%B' },
+  keltner: { middle: 'Basis', upper: 'Upper', lower: 'Lower' },
+  donchian: { upper: 'Upper', lower: 'Lower', middle: 'Middle' },
+  adx: { adx: 'ADX', plusDI: '+DI', minusDI: '-DI' },
+  supertrend: { line: 'Supertrend', direction: 'Direction' },
+  ichimoku: { conversion: 'Conversion', base: 'Base', spanA: 'Span A', spanB: 'Span B', lagging: 'Lagging' },
+  aroon: { up: 'Aroon Up', down: 'Aroon Down', oscillator: 'Oscillator' },
+  vwap_bands: { vwap: 'VWAP', upper1: 'Upper 1', lower1: 'Lower 1', upper2: 'Upper 2', lower2: 'Lower 2' },
+  initial_balance: { ibHigh: 'IB High', ibLow: 'IB Low', ibMid: 'IB Mid' },
+  naked_poc: { poc: 'POC' },
+  stoch_rsi: { k: '%K', d: '%D' },
+  awesome: { histogram: 'Histogram' },
+  fisher: { fisher: 'Fisher', trigger: 'Trigger' },
+  kst: { kst: 'KST', signal: 'Signal' },
+  tsi: { tsi: 'TSI', signal: 'Signal' },
+  rvgi: { rvgi: 'RVGI', signal: 'Signal' },
+  smi: { smi: 'SMI', signal: 'Signal' },
+  wavetrend: { wt1: 'WT1', wt2: 'WT2' },
+  squeeze_momentum: { histogram: 'Histogram' },
+  williams_vix_fix: { histogram: 'Histogram' },
+  vortex: { viPlus: 'VI+', viMinus: 'VI-' },
+  klinger: { kvo: 'KVO', signal: 'Signal' },
+  bull_bear_power: { bull: 'Bull Power', bear: 'Bear Power' },
+  net_volume: { histogram: 'Histogram' },
+};
+
 for (const s of INDICATOR_REGISTRY) {
   if (!s.aliases) s.aliases = SEARCH_ALIASES[s.type];
+  const channelLabels = CHANNEL_LABELS[s.type];
+  if (!s.channelLabels && channelLabels) s.channelLabels = channelLabels;
 }
 
 export const INDICATOR_LOOKUP: Record<string, IndicatorSpec> = Object.fromEntries(

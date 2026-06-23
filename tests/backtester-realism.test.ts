@@ -123,7 +123,7 @@ describe('backtester realism options', () => {
     expect(r.trades[0]!.pnlPercent).toBeCloseTo(-5, 8);
     // Without the stop the same series rides to the end-of-data close at 106 (+3.9215…%).
     const legacy = runMaCrossBacktest(B, CFG, '1h');
-    expect(legacy.trades[0]!.pnlPercent).toBeCloseTo(3.9215686274509804, 10);
+    expect(legacy.trades[0]!.pnlPercent).toBeCloseTo(((106 - 102) / 102) * 100, 10);
   });
 
   it('take profit: intrabar exit at the TP level off the candle high', () => {

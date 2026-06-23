@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import type { Candle, IndicatorInstance } from '@supercharts/types';
 import { computeAll, INDICATOR_LOOKUP, type IndicatorSpec } from '@supercharts/indicators';
-import { formatIndicatorValue, legendColor } from './indicator-legend-util';
+import { channelColor, formatIndicatorValue, legendColor } from './indicator-legend-util';
 
 /**
  * The chart's live time→x projection, mirrored from ChartCore.getTimeProjection(). Lets each
@@ -184,10 +184,6 @@ function SubPaneGroup({
           <line x1={crosshairX} x2={crosshairX} y1={0} y2={HEIGHT} stroke="rgba(255,255,255,0.22)" strokeWidth={1} />
         ) : null}
         {computed.map(({ inst, spec, channels }) => {
-          const colorFor = (channel: string): string => {
-            const k = channel === 'value' ? 'color' : `${channel}Color`;
-            return String(inst.style[k] ?? spec.style[k] ?? spec.style.color ?? '#42a5f5');
-          };
           return spec.channels.map((ch) => {
             const arr = channels.get(ch);
             if (!arr) return null;
@@ -225,7 +221,7 @@ function SubPaneGroup({
                 key={`${inst.id}-${ch}`}
                 d={buildPath(candles, arr, i0, i1, timeToX, yFor)}
                 fill="none"
-                stroke={colorFor(ch)}
+                stroke={channelColor(spec, inst, ch)}
                 strokeWidth={ch === spec.channels[0] ? 1.5 : 1}
               />
             );
