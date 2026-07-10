@@ -12,7 +12,6 @@ import {
   Camera,
   CandlestickChart,
   Code2,
-  Cog,
   Crosshair,
   History,
   LineChart,
@@ -21,6 +20,7 @@ import {
   Save,
   Search,
 } from 'lucide-react';
+import { WorkspaceSettingsPopover } from './workspace-settings-popover';
 import { IntervalSelector } from './interval-selector';
 import { LayoutPicker } from './layout-picker';
 import { MT5Chip } from './mt5-chip';
@@ -441,6 +441,9 @@ export function TerminalTopBar() {
           size="sm"
           onClick={() => setReplayMode(!replayMode)}
           className="gap-1 text-muted-foreground hover:text-foreground"
+          title={replayMode ? 'Exit bar replay and return to live data' : 'Enter bar replay'}
+          aria-label={replayMode ? 'Exit bar replay and return to live data' : 'Enter bar replay'}
+          aria-pressed={replayMode}
         >
           <AlarmClock className="h-3.5 w-3.5" /> {replayMode ? 'Live' : 'Replay'}
         </Button>
@@ -575,9 +578,7 @@ export function TerminalTopBar() {
           <Crosshair className="h-3.5 w-3.5" /> Sync
         </Button>
         <ThemeToggle />
-        <Button variant="outline" size="icon" aria-label="Settings">
-          <Cog className="h-4 w-4" />
-        </Button>
+        <WorkspaceSettingsPopover />
         {process.env.NEXT_PUBLIC_DEMO_MODE === '1' && (
           <Badge tone="accent" className="hidden md:inline-flex" title="Public read-only demo — changes are disabled">
             demo · read-only
