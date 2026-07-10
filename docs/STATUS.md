@@ -34,6 +34,7 @@ increment per session, tick the box there AND log here.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-10 | **M1/SCAN-3** — Custom screen builder (RSI/Close-vs-EMA/RVOL rows → SignalCondition via pure `scanner-screen-util.ts`, ALL/ANY, explicit Run) + per-user saved screens (`scanner_screens` table + CRUD `/api/scanner/screens`, chips w/ load+delete) | `dad7d64` | 5 tests → 434/434; UI screen RSI>55∧RVOL>1.5 = exactly API matches (DOT/ETH); save→load→delete round-trip server-verified; 0 console errors |
 | 2026-07-10 | **SCAN-2** — Scanner tab is a real screener: mode chips (Movers + All + 6 presets), timeframe pills, sortable columns (pure `scanner-tab-util.ts`), click-to-open, refresh, error+Retry, honest footer. New `scanner-tab.tsx` extracted from right-rail | `dac7efe` | 5 util tests → suite 429/429; browser: Volume-surge preset = exactly the API's 7 matches (RVOL>2), sort asc/desc verified, row click loaded BTCUSDT, honest 0-match state, 0 console errors |
 | 2026-07-10 | **SCAN-1** — screener query engine: pure `runScan` (apps/api/src/scanner.ts) + 6 presets (scan-presets.ts) + `ensureBarsMany` (candle-window.ts) + `POST /api/scanner/scan` / `GET /api/scanner/presets` (routes/scanner.ts) | `3868ebb` | 8 tests → suite 414/414; live 1h oversold: 48 scanned, 42 ok/6 insufficient/1 match; BTC RSI cross-checked 72.185 both paths |
 | 2026-07-10 | **LAUNCH PLAN** set — north star, pricing rec, 25-session backlog, GTM, kill list | `8508123` `01375aa` | docs/LAUNCH-PLAN.md; designs in .audit/launch/*.json |
@@ -43,12 +44,11 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- (nothing — pick up **SCAN-3** next)
+- (nothing — pick up **M2/SCAN-4** next: PulseScript-powered scans)
 
 ## Next
 
-**Owner goal (2026-07-10): 10-milestone track in LAUNCH-PLAN Phase A** — M1/SCAN-3 (custom
-screen builder + saved screens) → M2/SCAN-4 (PulseScript scans) → M3-M5/DOCS (public docs with
+**Owner goal (2026-07-10): 10-milestone track in LAUNCH-PLAN Phase A** — next **M2/SCAN-4** (PulseScript scans) → M3-M5/DOCS (public docs with
 a runnable example per function, Pine-reference style + “Coming from Pine” side-by-sides,
 linked from the home page) → M6-M10/PULSE (sub-pane plots, script drawing objects, alert()
 bridge to Telegram, interpreter optimization w/ benchmark, editor autocomplete/hover/squiggles)

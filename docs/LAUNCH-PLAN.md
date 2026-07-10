@@ -60,7 +60,7 @@ verification specs per item live in `.audit/launch/` design files (scanner/docs)
 |---|----|---------|------|
 | 1 | SCAN-1 | Screener query engine: pure `runScan` + `POST /api/scanner/scan` + 6 presets, reusing signal-eval + computeAll; per-symbol honest status | [x] `3868ebb` |
 | 2 | SCAN-2 | Scanner tab → real screener UI: preset chips, timeframe pills, sortable columns, click-to-open, honest states (`scanner-tab.tsx`) | [x] `dac7efe` |
-| 3 | M1/SCAN-3 | Custom screen builder (metric·operator·value rows → indicator_compare conditions, all/any) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [ ] |
+| 3 | M1/SCAN-3 | Custom screen builder (metric·operator·value rows → indicator_compare conditions, all/any) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [x] `dad7d64` |
 | 4 | M2/SCAN-4 | PulseScript-powered scan: run a saved script across the universe; matched = alert()/mark on the last closed bar; per-symbol script errors isolated | [ ] |
 | 5 | M3/DOCS-1 | Public `/docs` shell + home-page & header links + Getting started + Language tour + `?pulse=` run-in-terminal deep link; code blocks share the editor tokenizer | [ ] |
 | 6 | M4/DOCS-2 | Pine-reference-style API docs: EVERY `ta.*`/`math.*`/`input.*`/output with signature + a runnable example per function (typed `Record<keyof typeof TA, DocEntry>` — typecheck fails on drift; every example interpreter-tested) | [ ] |
