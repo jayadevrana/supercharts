@@ -8,6 +8,7 @@ export type ProviderId =
   | 'okx'
   | 'bybit'
   | 'oanda'
+  | 'kite'
   | 'yahoo'
   | 'twelvedata'
   | 'finnhub'
