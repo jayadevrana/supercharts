@@ -26,6 +26,13 @@ Landed since the 2026-06-06 audit (verified in CLAUDE.md log + source): INC-1 (a
 
 Verdicts: WIRED = end-to-end real · PARTIAL = incomplete/mislabeled · DEAD = no-op · UNAVAIL-OK = disabled with reason.
 
+> **Slice 1 status (2026-07-10, commits `f79dcfb`…`0bbbaad`):** D1–D7 and P1–P2 below are
+> **FIXED and verified** (396/396 tests; browser evidence in the session log). The same pass
+> surfaced and fixed two latent data-loss bugs: (a) client/server drawing-id mismatch — the
+> POST assigns a new nanoid the client never adopted, so same-session PUT/DELETE 404'd; and
+> (b) `lib/api.ts` sent a JSON content-type on body-less DELETEs → Fastify 400 → **every UI
+> drawing delete silently failed**. P3–P9 remain for slices S2/S3.
+
 ### DEAD controls (fix first — spec §5 no-dead-control contract)
 
 | # | Control | Location | Defect |

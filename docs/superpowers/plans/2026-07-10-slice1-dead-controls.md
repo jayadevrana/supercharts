@@ -28,10 +28,10 @@
 - Produces: `snapToOhlc(candles: {openTime,open,high,low,close}[], time: number, price: number): {time,price} | null` — nearest candle by time, nearest of O/H/L/C by price; null when no candles.
 - Produces store fields: `magnetSnap: boolean`, `drawingsLocked: boolean`, `drawingsHidden: boolean`, `toggleMagnetSnap()`, `toggleDrawingsLocked()`, `toggleDrawingsHidden()`, `clearDrawingsRequest: {token:number}|null`, `requestClearDrawings()`.
 
-- [ ] Write failing tests (snap picks nearest candle + nearest OHLC value; empty → null; store toggles flip + request bumps token)
-- [ ] Run `pnpm vitest run tests/drawing-snap.test.ts tests/terminal-drawing-flags.test.ts` → FAIL (module not found)
-- [ ] Implement `drawing-snap.ts` + store fields
-- [ ] Tests pass; commit `feat(terminal): magnet/lock/hide drawing flags + pure OHLC snap helper`
+- [x] Write failing tests (snap picks nearest candle + nearest OHLC value; empty → null; store toggles flip + request bumps token)
+- [x] Run `pnpm vitest run tests/drawing-snap.test.ts tests/terminal-drawing-flags.test.ts` → FAIL (module not found)
+- [x] Implement `drawing-snap.ts` + store fields
+- [x] Tests pass; commit `feat(terminal): magnet/lock/hide drawing flags + pure OHLC snap helper`
 
 ### Task 2: DrawingController honors flags + snap + clearAll
 
@@ -42,18 +42,18 @@
 - Consumes: constructor gains optional `getMagnet?: () => boolean; getLocked?: () => boolean; getHidden?: () => boolean; snapPoint?: (time:number, price:number) => {time:number; price:number}`.
 - Produces: `clearAll(): void` (deletes all drawings, one `onDelete(id)` each), `refreshVisibility(): void` (pushes `[]` to core when hidden, else current set).
 
-- [ ] `handle()`: return early when hidden; skip select/drag branch when locked (creation still allowed — TV semantics); apply `snapPoint` to `e.time/e.price` at every point-capture site when `getMagnet?.()`
-- [ ] Typecheck chart-core untouched; `pnpm -F @supercharts/web typecheck` clean
-- [ ] Commit `feat(terminal): drawing controller lock/hide/magnet + clearAll`
+- [x] `handle()`: return early when hidden; skip select/drag branch when locked (creation still allowed — TV semantics); apply `snapPoint` to `e.time/e.price` at every point-capture site when `getMagnet?.()`
+- [x] Typecheck chart-core untouched; `pnpm -F @supercharts/web typecheck` clean
+- [x] Commit `feat(terminal): drawing controller lock/hide/magnet + clearAll`
 
 ### Task 3: Left rail — real meta toggles + wired ⋯ menu + aria
 
 **Files:**
 - Modify: `apps/web/features/terminal/left-rail.tsx`
 
-- [ ] Split `TOOLS` meta group out: magnet/lock/hide render as toggle buttons bound to the new store flags (NOT `drawTool`), with `aria-pressed` + `aria-label`; draw tools get `aria-label={label}` + `aria-pressed={drawTool===id}`
-- [ ] ⋯ button → Radix popover menu, one real item: "Remove all drawings (active pane)" → `window.confirm` → `requestClearDrawings()`; menu item disabled with reason when `drawingsHidden`
-- [ ] Browser-verify: magnet/lock/hide toggle highlight; panning no longer breaks; commit `fix(terminal): left-rail meta tools are real toggles; wire overflow menu`
+- [x] Split `TOOLS` meta group out: magnet/lock/hide render as toggle buttons bound to the new store flags (NOT `drawTool`), with `aria-pressed` + `aria-label`; draw tools get `aria-label={label}` + `aria-pressed={drawTool===id}`
+- [x] ⋯ button → Radix popover menu, one real item: "Remove all drawings (active pane)" → `window.confirm` → `requestClearDrawings()`; menu item disabled with reason when `drawingsHidden`
+- [x] Browser-verify: magnet/lock/hide toggle highlight; panning no longer breaks; commit `fix(terminal): left-rail meta tools are real toggles; wire overflow menu`
 
 ### Task 4: ChartPane wiring + ChartCore cursorStyle
 
@@ -65,26 +65,26 @@
 - Consumes: Task 1 store flags via `useTerminalStore.getState()` reads inside callbacks (refs pattern — no re-render on toggle), Task 2 controller API.
 - `snapPoint` implementation: `snapToOhlc(candleBufRef.current, time, price)` (buffer already interval-aligned).
 
-- [ ] Wire `getMagnet/getLocked/getHidden/snapPoint` into the `new DrawingController` site; effect on `drawingsHidden` → `controller.refreshVisibility()`; effect on `clearDrawingsRequest` token (active pane only) → `controller.clearAll()`
-- [ ] `drawTool === 'cursor' ? 'default' : 'crosshair'` → `core.setCursorStyle(...)` effect — makes Cursor vs Crosshair a real distinction
-- [ ] Typecheck web + chart-core; browser-verify magnet snap on a trend line, lock blocks drag, hide empties layer, clear-all removes + persists deletes; commit `feat(chart): cursor style modes + drawing flag wiring`
+- [x] Wire `getMagnet/getLocked/getHidden/snapPoint` into the `new DrawingController` site; effect on `drawingsHidden` → `controller.refreshVisibility()`; effect on `clearDrawingsRequest` token (active pane only) → `controller.clearAll()`
+- [x] `drawTool === 'cursor' ? 'default' : 'crosshair'` → `core.setCursorStyle(...)` effect — makes Cursor vs Crosshair a real distinction
+- [x] Typecheck web + chart-core; browser-verify magnet snap on a trend line, lock blocks drag, hide empties layer, clear-all removes + persists deletes; commit `feat(chart): cursor style modes + drawing flag wiring`
 
 ### Task 5: Replay steps by real pane interval
 
 **Files:**
 - Modify: `apps/web/features/terminal/replay-bar.tsx`
 
-- [ ] Replace `stepRef = useRef(60_000)` with `INTERVAL_MS[activePane.interval] ?? 60_000` derived from store (`panes`/`activePaneId` selectors); autoplay effect uses the same value (add to deps)
-- [ ] Browser-verify on a 1h chart: one step moves the cursor readout by 1 hour; commit `fix(terminal): replay steps by the active pane interval, not a fixed minute`
+- [x] Replace `stepRef = useRef(60_000)` with `INTERVAL_MS[activePane.interval] ?? 60_000` derived from store (`panes`/`activePaneId` selectors); autoplay effect uses the same value (add to deps)
+- [x] Browser-verify on a 1h chart: one step moves the cursor readout by 1 hour; commit `fix(terminal): replay steps by the active pane interval, not a fixed minute`
 
 ### Task 6: Settings cog → real workspace-settings popover
 
 **Files:**
 - Modify: `apps/web/features/terminal/terminal-top-bar.tsx:578`
 
-- [ ] Replace the inert cog with a popover: **Workspace** switches (Left toolbar / Right panel / Script dock — `setShowLeftRail/setShowRightRail/setShowBottomPanel`) + **Active pane** switches (Buy/Sell buttons → `setPaneOverlay('tradeButtons')`, MA signal labels → `maSignals`, Volume → `volume`), every switch `aria-pressed`, popover labelled "Workspace settings"
-- [ ] Add missing `title`/`aria-label` to the top-bar Replay toggle (audit gap) while in the file
-- [ ] Browser-verify each switch has a visible effect; commit `feat(terminal): real workspace settings popover behind the settings cog`
+- [x] Replace the inert cog with a popover: **Workspace** switches (Left toolbar / Right panel / Script dock — `setShowLeftRail/setShowRightRail/setShowBottomPanel`) + **Active pane** switches (Buy/Sell buttons → `setPaneOverlay('tradeButtons')`, MA signal labels → `maSignals`, Volume → `volume`), every switch `aria-pressed`, popover labelled "Workspace settings"
+- [x] Add missing `title`/`aria-label` to the top-bar Replay toggle (audit gap) while in the file
+- [x] Browser-verify each switch has a visible effect; commit `feat(terminal): real workspace settings popover behind the settings cog`
 
 ### Task 7: Delete orphaned dialog + docs truth-up
 
@@ -92,9 +92,9 @@
 - Delete: `apps/web/features/terminal/signal-builder-dialog.tsx` (verify: `grep -rn "signal-builder-dialog" apps packages` → only self)
 - Modify: `docs/architecture.md` (remove `code-terminal-dialog`/`signal-builder-dialog` mentions; note left-rail flags now controlled)
 
-- [ ] Grep-verify orphan, delete, typecheck web, full `pnpm test`
-- [ ] Update `.audit/terminal-rebuild/PHASE0-BASELINE.md` inventory rows D1–D7/P1–P2 → fixed
-- [ ] Commit `chore(terminal): remove orphaned signal-builder dialog; docs truth-up`
+- [x] Grep-verify orphan, delete, typecheck web, full `pnpm test`
+- [x] Update `.audit/terminal-rebuild/PHASE0-BASELINE.md` inventory rows D1–D7/P1–P2 → fixed
+- [x] Commit `chore(terminal): remove orphaned signal-builder dialog; docs truth-up`
 
 ## Self-review notes
 
