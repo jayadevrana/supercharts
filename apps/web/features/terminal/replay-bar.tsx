@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { History, Pause, Play, StepBack, StepForward, X } from 'lucide-react';
+import { INTERVAL_MS } from '@supercharts/types';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { useTerminalStore } from './terminal-store';
@@ -31,8 +32,12 @@ export function ReplayBar() {
   const setReplayCursor = useTerminalStore((s) => s.setReplayCursor);
   const setReplayPlaying = useTerminalStore((s) => s.setReplayPlaying);
   const setReplaySpeed = useTerminalStore((s) => s.setReplaySpeed);
+  const activeInterval = useTerminalStore(
+    (s) => s.panes.find((p) => p.id === s.activePaneId)?.interval ?? '1m',
+  );
 
-  const stepRef = useRef<number>(60_000);
+  // One step = one bar of the ACTIVE pane's interval ('tick' maps to 0 → fall back to 1m).
+  const stepMs = INTERVAL_MS[activeInterval] || 60_000;
 
   const range = Math.max(1, replayBounds.to - replayBounds.from);
   const progress = Math.max(0, Math.min(1000, ((replayCursor - replayBounds.from) / range) * 1000));
@@ -48,7 +53,6 @@ export function ReplayBar() {
 
   useEffect(() => {
     if (!replayPlaying || !replayMode) return;
-    const step = stepRef.current;
     const id = setInterval(() => {
       const cur = useTerminalStore.getState().replayCursor;
       const max = useTerminalStore.getState().replayBounds.to;
@@ -56,10 +60,10 @@ export function ReplayBar() {
         setReplayPlaying(false);
         return;
       }
-      setReplayCursor(Math.min(max, cur + step));
+      setReplayCursor(Math.min(max, cur + stepMs));
     }, Math.max(80, 1000 / replaySpeed));
     return () => clearInterval(id);
-  }, [replayPlaying, replayMode, replaySpeed, setReplayCursor, setReplayPlaying]);
+  }, [replayPlaying, replayMode, replaySpeed, stepMs, setReplayCursor, setReplayPlaying]);
 
   if (!replayMode) return null;
 
@@ -90,7 +94,7 @@ export function ReplayBar() {
             disabled={atStart}
             title="Step back 1 bar"
             aria-label="Step back 1 bar"
-            onClick={() => stepCursor(-stepRef.current)}
+            onClick={() => stepCursor(-stepMs)}
           >
             <StepBack className="h-3 w-3" aria-hidden="true" />
             <span className="text-[10px]">1 bar</span>
@@ -120,7 +124,7 @@ export function ReplayBar() {
             disabled={atLiveEdge}
             title="Step forward 1 bar"
             aria-label="Step forward 1 bar"
-            onClick={() => stepCursor(stepRef.current)}
+            onClick={() => stepCursor(stepMs)}
           >
             <span className="text-[10px]">1 bar</span>
             <StepForward className="h-3 w-3" aria-hidden="true" />
