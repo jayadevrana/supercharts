@@ -25,10 +25,16 @@ increment per session, tick the box there AND log here.
    running on :3000 (web) / :4000 (api) — check before starting new ones
    (`lsof -i tcp:3000 -i tcp:4000`); restart recipe in CLAUDE.md → Ops.
 
-## Done (newest first — commit hashes are the ground truth)
+## Done (newest first)
+
+> ⚠️ The owner rewrote git history between sessions (public-repo prep) — hashes older than
+> `3f446d6` below no longer resolve; the ITEM entries + file contents are the ground truth.
+> Also landed by the owner meanwhile: a **Zerodha Kite data provider** (instruments, candles,
+> search; env loading) with its own tests — now part of the suite.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-10 | **SCAN-2** — Scanner tab is a real screener: mode chips (Movers + All + 6 presets), timeframe pills, sortable columns (pure `scanner-tab-util.ts`), click-to-open, refresh, error+Retry, honest footer. New `scanner-tab.tsx` extracted from right-rail | `dac7efe` | 5 util tests → suite 429/429; browser: Volume-surge preset = exactly the API's 7 matches (RVOL>2), sort asc/desc verified, row click loaded BTCUSDT, honest 0-match state, 0 console errors |
 | 2026-07-10 | **SCAN-1** — screener query engine: pure `runScan` (apps/api/src/scanner.ts) + 6 presets (scan-presets.ts) + `ensureBarsMany` (candle-window.ts) + `POST /api/scanner/scan` / `GET /api/scanner/presets` (routes/scanner.ts) | `3868ebb` | 8 tests → suite 414/414; live 1h oversold: 48 scanned, 42 ok/6 insufficient/1 match; BTC RSI cross-checked 72.185 both paths |
 | 2026-07-10 | **LAUNCH PLAN** set — north star, pricing rec, 25-session backlog, GTM, kill list | `8508123` `01375aa` | docs/LAUNCH-PLAN.md; designs in .audit/launch/*.json |
 | 2026-07-10 | **PulseScript ergonomics + editor colors** — `pulse 1` header, colon bodies, no-let assignment; CodeMirror tokenizer + palette (pulse-language.ts) | `d352f2c` `8c90707` | 10 tests → 406/406; browser: 7+ token colors, sample runs live |
@@ -37,17 +43,16 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- **SCAN-2** (backlog #2): Scanner tab → real screener UI. Design:
-  `.audit/launch/scanner-design.json`. Plan: extract `scanner-tab.tsx` from
-  `right-rail.tsx:580` (keep Top movers as a mode), preset chips from GET /api/scanner/presets,
-  interval pills (15m/1h/4h/1d), sortable metric columns via pure `scanner-tab-util.ts`
-  (tested), matched-rows view + honest scanned/no-data/match counts, click row → open symbol,
-  30s refresh, error+Retry state.
+- (nothing — pick up **SCAN-3** next)
 
-## Next (after SCAN-2)
+## Next
 
-SCAN-3 (custom screen builder + per-user saved screens) → SCAN-4 (PulseScript scans) →
-DOCS-1..3 (public /docs, design in .audit/launch/docs-design.json) → IND-1..2 → Phase B (auth).
+**SCAN-3** (backlog #3): custom screen builder (SignalCondition rows: metric/operator/value)
++ per-user saved screens — `scanner_screens` table + CRUD route mirroring `routes/scripts.ts`;
+UI extends `scanner-tab.tsx` with a "Custom" mode + builder rows; POST /api/scanner/scan already
+accepts `screen: {conditions, logic, indicatorSpecs}` so the server side is mostly done.
+Then SCAN-4 (PulseScript scans) → DOCS-1..3 (design: .audit/launch/docs-design.json) →
+IND-1..2 → Phase B (auth).
 
 ## Known landmines for newcomers
 
