@@ -55,18 +55,28 @@ Execution rule: one session = one item, verified + committed, tick the box. Full
 verification specs per item live in `.audit/launch/` design files (scanner/docs) and
 `docs/sessions/` (auth/billing/deploy already have kickoff files 12–14).
 
-### Phase A — Launch surface (the owner's three explicit asks; no auth dependency)
-| # | ID | Session | Done |
+### Phase A — Launch surface (OWNER GOAL 2026-07-10: "PulseScript everything Pine has + scanner + docs with examples, linked from home" — 10 milestones)
+| # | ID | Milestone | Done |
 |---|----|---------|------|
-| 1 | SCAN-1 | Screener query engine: pure `runScan` + `POST /api/scanner/scan` + presets (oversold/overbought/breakout/volume-surge/MA-cross), reusing signal-eval + computeAll; per-symbol honest status | [x] `3868ebb` |
-| 2 | SCAN-2 | Scanner tab → real screener UI: preset chips, timeframe pills, sortable metric columns, click-to-open, refresh cadence, honest states (extract `scanner-tab.tsx` from right-rail) | [x] `dac7efe` |
-| 3 | SCAN-3 | Custom screen builder (SignalCondition rows) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [ ] |
-| 4 | SCAN-4 | PulseScript-powered scan: run a saved script across the universe, matched = last-closed-bar alert()/mark; per-symbol script errors isolated | [ ] |
-| 5 | DOCS-1 | Public /docs shell + shared-tokenizer highlighting + Getting started + Language tour + `?pulse=` run-in-terminal deep link + header nav link | [ ] |
-| 6 | DOCS-2 | Exhaustive API reference (ta.* 61 · math.* 24+3 · input.* 6 · outputs) as typed `Record<keyof typeof TA, DocEntry>` — typecheck fails if the language changes without docs; every example interpreter-tested | [ ] |
-| 7 | DOCS-3 | Backtesting/Optimizer docs + 10-strategy cookbook (interpreter-verified, new ergonomics) + sitemap/robots/metadata SEO | [ ] |
-| 8 | IND-1 | Indicator coverage batch 1: DEMA/TEMA/VWMA + input bounds/tooltips/offset/BB source (punchlist INC-10, session file 06) | [ ] |
-| 9 | IND-2 | Indicator coverage batch 2: remaining classics → registry ≥45, fixture-tested | [ ] |
+| 1 | SCAN-1 | Screener query engine: pure `runScan` + `POST /api/scanner/scan` + 6 presets, reusing signal-eval + computeAll; per-symbol honest status | [x] `3868ebb` |
+| 2 | SCAN-2 | Scanner tab → real screener UI: preset chips, timeframe pills, sortable columns, click-to-open, honest states (`scanner-tab.tsx`) | [x] `dac7efe` |
+| 3 | M1/SCAN-3 | Custom screen builder (metric·operator·value rows → indicator_compare conditions, all/any) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [ ] |
+| 4 | M2/SCAN-4 | PulseScript-powered scan: run a saved script across the universe; matched = alert()/mark on the last closed bar; per-symbol script errors isolated | [ ] |
+| 5 | M3/DOCS-1 | Public `/docs` shell + home-page & header links + Getting started + Language tour + `?pulse=` run-in-terminal deep link; code blocks share the editor tokenizer | [ ] |
+| 6 | M4/DOCS-2 | Pine-reference-style API docs: EVERY `ta.*`/`math.*`/`input.*`/output with signature + a runnable example per function (typed `Record<keyof typeof TA, DocEntry>` — typecheck fails on drift; every example interpreter-tested) | [ ] |
+| 7 | M5/DOCS-3 | Cookbook (10 interpreter-verified strategies) + Backtesting/Optimizer pages + **“Coming from Pine” page with side-by-side Pine-concept → PulseScript examples** + sitemap/SEO | [ ] |
+| 8 | M6/PULSE-1 | Sub-pane script plots: `meta(overlay: false)` renders plots in a real oscillator sub-pane (INC-11 pipeline), like RSI/MACD | [ ] |
+| 9 | M7/PULSE-2 | Script drawing objects: levels/zones/labels/rays from scripts (Pine line/box/label CAPABILITY, original API) rendered via the drawings/indicators layers | [ ] |
+| 10 | M8/PULSE-3 | `alert()` → real alert-engine bridge: arm a saved script as a live server-side alert with Telegram delivery + web toast (the wedge feature) | [ ] |
+| 11 | M9/PULSE-4 | Interpreter optimization: committed benchmark harness, then hot-path work (ident resolution, per-bar Map churn, series cache) — target ≥3× on the cookbook bench, zero semantic changes (byte-identical outputs) | [ ] |
+| 12 | M10/PULSE-5 | Editor intelligence: autocomplete + signature help + hover docs (sourced from the SAME typed doc entries as M4) + inline error squiggles at parser/runtime positions | [ ] |
+| 13 | IND-1 | Indicator coverage batch 1: DEMA/TEMA/VWMA + input bounds/tooltips/offset/BB source (punchlist INC-10) | [ ] |
+| 14 | IND-2 | Indicator coverage batch 2: remaining classics → registry ≥45, fixture-tested | [ ] |
+
+**Pine-parity definition (hard rule intact):** capability parity, never identifier/syntax parity —
+PulseScript stays an original language. Remaining language-core gaps tracked in
+`docs/pulsescript-parity.md` (match/destructuring land inside M8; `trade.*` strategy objects stay
+post-launch — the backtester already covers marks-as-strategy).
 
 ### Phase B — Multi-user foundation (folds rebuild S2/S3/S5; the 48 live alerts must never blink)
 | # | ID | Session | Done |

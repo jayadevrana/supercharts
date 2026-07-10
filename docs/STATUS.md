@@ -47,12 +47,12 @@ increment per session, tick the box there AND log here.
 
 ## Next
 
-**SCAN-3** (backlog #3): custom screen builder (SignalCondition rows: metric/operator/value)
-+ per-user saved screens — `scanner_screens` table + CRUD route mirroring `routes/scripts.ts`;
-UI extends `scanner-tab.tsx` with a "Custom" mode + builder rows; POST /api/scanner/scan already
-accepts `screen: {conditions, logic, indicatorSpecs}` so the server side is mostly done.
-Then SCAN-4 (PulseScript scans) → DOCS-1..3 (design: .audit/launch/docs-design.json) →
-IND-1..2 → Phase B (auth).
+**Owner goal (2026-07-10): 10-milestone track in LAUNCH-PLAN Phase A** — M1/SCAN-3 (custom
+screen builder + saved screens) → M2/SCAN-4 (PulseScript scans) → M3-M5/DOCS (public docs with
+a runnable example per function, Pine-reference style + “Coming from Pine” side-by-sides,
+linked from the home page) → M6-M10/PULSE (sub-pane plots, script drawing objects, alert()
+bridge to Telegram, interpreter optimization w/ benchmark, editor autocomplete/hover/squiggles)
+→ IND-1..2 → Phase B (auth).
 
 ## Known landmines for newcomers
 
