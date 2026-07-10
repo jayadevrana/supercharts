@@ -5,6 +5,7 @@ dist
 .sites-artifacts
 .openai/
 .claude/
+.worktrees/
 .playwright-mcp/
 out
 build
