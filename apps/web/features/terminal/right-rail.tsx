@@ -27,6 +27,7 @@ import { formatCompact, formatPercent, formatPrice, formatRelativeTime, formatSy
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { OrderPanel } from './order-panel';
 import { IndicatorPanel } from './indicator-panel';
+import { ScannerTab } from './scanner-tab';
 import type { NewsItem, ProviderHealthStatus } from '@supercharts/types';
 import {
   CATEGORY_LABEL,
@@ -577,66 +578,6 @@ function NewsTab({ symbol }: { symbol: string }) {
   );
 }
 
-function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
-  const [items, setItems] = useState<TopMover[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const r = await api<{ items: TopMover[] }>('/scanner/top-movers');
-        if (!cancelled) setItems(r.items);
-      } catch {
-        if (!cancelled) setItems([]);
-      }
-    };
-    load();
-    const id = setInterval(load, 12_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  if (!items) {
-    return (
-      <div className="space-y-2 p-3">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <Skeleton key={i} className="h-10" />
-        ))}
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-        Top movers · last 24h · Binance USDT pairs
-      </div>
-      <div className="divide-y divide-border/60">
-        {items.map((m) => {
-          const up = m.changePercent >= 0;
-          return (
-            <button
-              key={m.symbol}
-              onClick={() => onPick(m.symbol)}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-surface-raised"
-            >
-              <div className="flex items-center gap-2">
-                {up ? <ArrowUpRight className="h-3.5 w-3.5 text-bull" /> : <ArrowDownRight className="h-3.5 w-3.5 text-bear" />}
-                <span className="text-sm font-medium">{formatSymbolLabel(m.symbol)}</span>
-              </div>
-              <div className="flex items-center gap-3 text-xs tabular-nums">
-                <span className="text-muted-foreground">{formatCompact(m.quoteVolume)}</span>
-                <span className={up ? 'text-bull' : 'text-bear'}>{formatPercent(m.changePercent)}</span>
-                <span className="text-foreground">{formatPrice(m.lastPrice)}</span>
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 function OverlaysTab({ pane }: { pane: PaneState }) {
   const togglePaneOverlay = useTerminalStore((s) => s.togglePaneOverlay);
