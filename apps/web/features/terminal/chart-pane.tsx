@@ -86,6 +86,7 @@ import { Badge } from '@/components/ui/badge';
 import type { PaneState } from './terminal-store';
 import { useTerminalStore } from './terminal-store';
 import { DrawingController } from './drawing-controller';
+import { snapToOhlc } from './drawing-snap';
 import type { DrawingObject } from '@supercharts/types';
 
 interface ChartPaneProps {
@@ -165,6 +166,8 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const setPaneInterval = useTerminalStore((s) => s.setPaneInterval);
   const setPaneScaleMode = useTerminalStore((s) => s.setPaneScaleMode);
   const requestOrderSide = useTerminalStore((s) => s.requestOrderSide);
+  const drawingsHidden = useTerminalStore((s) => s.drawingsHidden);
+  const clearDrawingsRequest = useTerminalStore((s) => s.clearDrawingsRequest);
   // Refs so the drawing controller (created once per symbol/interval) sees the latest
   // tool selection and active-pane state without remounting.
   const drawToolRef = useRef<string | null>(drawTool);
@@ -300,6 +303,11 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       userId: 'demo',
       getTool: () => (activeRef.current ? drawToolRef.current : null),
       clearTool: () => setDrawTool(null),
+      // Global drawing meta-modes (left rail) — read live so no remount on toggle.
+      getMagnet: () => useTerminalStore.getState().magnetSnap,
+      getLocked: () => useTerminalStore.getState().drawingsLocked,
+      getHidden: () => useTerminalStore.getState().drawingsHidden,
+      snapPoint: (time, price) => snapToOhlc(candleBufRef.current, time, price) ?? { time, price },
       initial: [],
       handlers: {
         onCreate: async (d) => {
@@ -591,6 +599,26 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   useEffect(() => {
     chartRef.current?.setTheme(resolvedTheme);
   }, [resolvedTheme]);
+
+  // Cursor vs Crosshair tool (left rail): the cursor tool shows a plain arrow, everything
+  // else keeps the trading crosshair. Re-applies after a ChartCore rebuild.
+  useEffect(() => {
+    chartRef.current?.setCursorStyle(active && drawTool === 'cursor' ? 'default' : 'crosshair');
+  }, [drawTool, active, pane.symbol, pane.interval]);
+
+  // Hide-all drawings (left rail) — re-push the set with the flag applied.
+  useEffect(() => {
+    drawingControllerRef.current?.refreshVisibility();
+  }, [drawingsHidden, pane.symbol, pane.interval]);
+
+  // One-shot "remove all drawings" request from the left-rail menu — active pane only.
+  const lastClearTokenRef = useRef(0);
+  useEffect(() => {
+    const token = clearDrawingsRequest?.token ?? 0;
+    if (!token || token === lastClearTokenRef.current) return;
+    lastClearTokenRef.current = token;
+    if (active) drawingControllerRef.current?.clearAll();
+  }, [clearDrawingsRequest, active]);
 
   // Price-scale mode (linear / log / percent). Re-applies after the ChartCore is rebuilt
   // on a symbol/interval switch, so a log chart stays log across timeframe changes.

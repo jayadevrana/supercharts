@@ -93,6 +93,8 @@ export class ChartCore {
     drawings: [],
   };
   private crosshair: RenderContext['crosshair'] = null;
+  /** Plot-area cursor glyph — 'crosshair' (default) or 'default' arrow (cursor tool). */
+  private plotCursor: 'crosshair' | 'default' = 'crosshair';
   /** Time mirrored from another pane (for cross-pane crosshair sync). */
   private externalTime: number | null = null;
   private rafId = 0;
@@ -480,6 +482,14 @@ export class ChartCore {
     };
   }
 
+  /** Switch the plot-area cursor glyph (TV cursor-tool semantics: arrow vs cross). */
+  setCursorStyle(style: 'crosshair' | 'default'): void {
+    if (this.plotCursor === style) return;
+    this.plotCursor = style;
+    // Apply immediately; the per-move affordance logic owns it from the next hover on.
+    this.canvas.style.cursor = style;
+  }
+
   /**
    * Sync a crosshair time from an external pane. The chart draws a soft vertical line
    * at this time as long as there is no local crosshair.
@@ -615,7 +625,7 @@ export class ChartCore {
     const hoverCursor = (x: number, y: number): void => {
       if (x >= this.geometry.axisPane.x) setCursor('ns-resize');
       else if (y >= this.geometry.timeAxisPane.y) setCursor('ew-resize');
-      else setCursor('crosshair');
+      else setCursor(this.plotCursor);
     };
 
     const onWheel = (e: WheelEvent) => {
