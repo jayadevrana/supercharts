@@ -219,7 +219,7 @@ async function start(): Promise<void> {
   }));
 
   marketRoutes(app, ingestion);
-  scannerRoutes(app, ingestion);
+  scannerRoutes(app, ingestion, db);
   drawingRoutes(app, db);
   layoutRoutes(app, db);
   scriptRoutes(app, db);

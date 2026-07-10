@@ -152,6 +152,17 @@ function migrate(db: DatabaseSync): void {
     );
     CREATE INDEX IF NOT EXISTS idx_user_scripts_user ON user_scripts(user_id, updated_at);
 
+    CREATE TABLE IF NOT EXISTS scanner_screens (
+      id         TEXT PRIMARY KEY,
+      user_id    TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      config     TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_scanner_screens_user ON scanner_screens(user_id, updated_at);
+
     CREATE TABLE IF NOT EXISTS drawing_objects (
       id         TEXT PRIMARY KEY,
       user_id    TEXT NOT NULL,

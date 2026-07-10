@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Play, Plus, RefreshCw, Save, Trash2, TriangleAlert, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { formatCompact, formatPercent, formatPrice, formatSymbolLabel } from '@/lib/format';
 import { sortScanRows, summarizeScan, type ScanSortDir, type ScanSortKey, type UiScanRow } from './scanner-tab-util';
+import { buildCustomScreen, describeRow, type ScreenRow } from './scanner-screen-util';
 
 /** 24h Binance movers row (legacy Movers mode — endpoint untouched). */
 interface TopMover {
@@ -29,6 +30,14 @@ interface ScanResponse {
   interval: string;
   scannedAt: number;
 }
+
+interface SavedScreen {
+  id: string;
+  name: string;
+  config: { logic: 'all' | 'any'; rows: ScreenRow[]; interval?: string };
+}
+
+const DEFAULT_ROW: ScreenRow = { kind: 'rsi', length: 14, op: '<', value: 30 };
 
 const SCAN_INTERVALS = ['15m', '1h', '4h', '1d'] as const;
 const SCAN_REFRESH_MS = 30_000;
@@ -67,12 +76,27 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
   const [sortDir, setSortDir] = useState<ScanSortDir>('desc');
   const [movers, setMovers] = useState<TopMover[] | null>(null);
   const scanSeq = useRef(0);
+  // Custom builder (SCAN-3): rows + logic, and per-user saved screens.
+  const [rows, setRows] = useState<ScreenRow[]>([DEFAULT_ROW]);
+  const [logic, setLogic] = useState<'all' | 'any'>('all');
+  const [saved, setSaved] = useState<SavedScreen[]>([]);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const logicRef = useRef(logic);
+  logicRef.current = logic;
+
+  const loadSaved = useCallback(() => {
+    void api<{ items: SavedScreen[] }>('/scanner/screens')
+      .then((r) => setSaved(r.items))
+      .catch(() => setSaved([]));
+  }, []);
 
   useEffect(() => {
     void api<{ presets: ScanPresetMeta[] }>('/scanner/presets')
       .then((r) => setPresets(r.presets))
       .catch(() => setPresets([]));
-  }, []);
+    loadSaved();
+  }, [loadSaved]);
 
   // Movers mode — the pre-existing 24h list, verbatim behavior.
   useEffect(() => {
@@ -99,7 +123,8 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
     setScanLoading(true);
     try {
       const body: Record<string, unknown> = { interval };
-      if (mode !== 'all') body.preset = mode;
+      if (mode === 'custom') body.screen = buildCustomScreen(rowsRef.current, logicRef.current);
+      else if (mode !== 'all') body.preset = mode;
       const r = await api<ScanResponse>('/scanner/scan', { method: 'POST', body: JSON.stringify(body) });
       if (seq === scanSeq.current) {
         setScan(r);
@@ -113,8 +138,9 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
   }, [mode, interval]);
 
   // Scan modes — fetch on mode/interval change + slow refresh (server caches 20s anyway).
+  // Custom mode runs only on the explicit Run button (rows change on every keystroke).
   useEffect(() => {
-    if (mode === 'movers') return;
+    if (mode === 'movers' || mode === 'custom') return;
     setScan(null);
     setScanError(null);
     void runScanNow();
@@ -144,27 +170,70 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
     <div className="flex h-full flex-col">
       {/* Mode chips */}
       <div className="flex flex-wrap gap-1 border-b border-border/60 px-2 py-2">
-        {[{ id: 'movers', name: 'Movers', description: '24h top movers · Binance USDT pairs' }, { id: 'all', name: 'All', description: 'Metrics table across the whole catalog' }, ...presets].map(
-          (p) => (
-            <button
-              key={p.id}
-              onClick={() => setMode(p.id)}
-              title={p.description}
-              aria-pressed={mode === p.id}
-              className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
-                mode === p.id ? 'bg-accent/15 text-accent' : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground'
-              }`}
-            >
-              {p.name}
-            </button>
-          ),
-        )}
+        {[
+          { id: 'movers', name: 'Movers', description: '24h top movers · Binance USDT pairs' },
+          { id: 'all', name: 'All', description: 'Metrics table across the whole catalog' },
+          ...presets,
+          { id: 'custom', name: 'Custom', description: 'Build your own screen — conditions evaluated on real closed bars' },
+        ].map((p) => (
+          <button
+            key={p.id}
+            onClick={() => {
+              setMode(p.id);
+              if (p.id === 'custom') {
+                setScan(null);
+                setScanError(null);
+              }
+            }}
+            title={p.description}
+            aria-pressed={mode === p.id}
+            className={`rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
+              mode === p.id ? 'bg-accent/15 text-accent' : 'text-muted-foreground hover:bg-surface-raised hover:text-foreground'
+            }`}
+          >
+            {p.name}
+          </button>
+        ))}
       </div>
 
       {mode === 'movers' ? (
         <MoversList items={movers} onPick={onPick} />
       ) : (
         <>
+          {mode === 'custom' ? (
+            <ScreenBuilder
+              rows={rows}
+              setRows={setRows}
+              logic={logic}
+              setLogic={setLogic}
+              saved={saved}
+              onRun={() => void runScanNow()}
+              running={scanLoading}
+              onSave={async () => {
+                const name = window.prompt('Screen name', 'My screen')?.trim();
+                if (!name) return;
+                try {
+                  await api('/scanner/screens', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, config: { logic, rows, interval } }),
+                  });
+                  loadSaved();
+                } catch {
+                  /* surfaced by list not updating; S2-ASYNC adds shared error toasts */
+                }
+              }}
+              onLoad={(s) => {
+                setRows(s.config.rows);
+                setLogic(s.config.logic);
+                setScan(null);
+              }}
+              onDelete={async (id) => {
+                if (!window.confirm('Delete this saved screen?')) return;
+                await api(`/scanner/screens/${id}`, { method: 'DELETE' }).catch(() => {});
+                loadSaved();
+              }}
+            />
+          ) : null}
           {/* Timeframe pills + refresh */}
           <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1.5">
             {SCAN_INTERVALS.map((tf) => (
@@ -201,6 +270,11 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
               <Button size="xs" variant="outline" onClick={() => void runScanNow()}>
                 Retry
               </Button>
+            </div>
+          ) : !scan && mode === 'custom' && !scanLoading ? (
+            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+              Build conditions above, then press <span className="font-semibold text-foreground">Run</span> — the screen
+              evaluates on real closed bars across the whole catalog.
             </div>
           ) : !scan ? (
             <div className="space-y-2 p-3">
@@ -283,6 +357,146 @@ function SortHeader({ label, active, dir, onClick, right }: { label: string; act
       {label}
       {active ? (dir === 'asc' ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />) : null}
     </button>
+  );
+}
+
+/** Custom-screen builder rows + saved-screen chips (SCAN-3). */
+function ScreenBuilder({
+  rows,
+  setRows,
+  logic,
+  setLogic,
+  saved,
+  onRun,
+  running,
+  onSave,
+  onLoad,
+  onDelete,
+}: {
+  rows: ScreenRow[];
+  setRows: (r: ScreenRow[]) => void;
+  logic: 'all' | 'any';
+  setLogic: (l: 'all' | 'any') => void;
+  saved: SavedScreen[];
+  onRun: () => void;
+  running: boolean;
+  onSave: () => void;
+  onLoad: (s: SavedScreen) => void;
+  onDelete: (id: string) => void;
+}) {
+  const patch = (i: number, next: ScreenRow) => setRows(rows.map((r, j) => (j === i ? next : r)));
+  const numInput = (value: number, onChange: (v: number) => void, width = 'w-14', label = 'value') => (
+    <input
+      type="number"
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      className={`${width} rounded border border-border bg-surface-sunken px-1 py-0.5 text-right text-[11px] tabular-nums`}
+    />
+  );
+  const sel = (value: string, options: Array<[string, string]>, onChange: (v: string) => void, label: string) => (
+    <select
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="rounded border border-border bg-surface-sunken px-1 py-0.5 text-[11px]"
+    >
+      {options.map(([v, l]) => (
+        <option key={v} value={v}>
+          {l}
+        </option>
+      ))}
+    </select>
+  );
+
+  return (
+    <div className="space-y-1.5 border-b border-border/60 px-2 py-2">
+      {saved.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Saved</span>
+          {saved.map((s) => (
+            <span key={s.id} className="inline-flex items-center gap-0.5 rounded bg-surface-raised px-1.5 py-0.5 text-[10px]">
+              <button onClick={() => onLoad(s)} title={s.config.rows.map((r) => describeRow(r)).join(' · ')} className="hover:text-accent">
+                {s.name}
+              </button>
+              <button onClick={() => onDelete(s.id)} aria-label={`Delete saved screen ${s.name}`} className="text-muted-foreground hover:text-bear">
+                <Trash2 className="h-2.5 w-2.5" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {rows.map((row, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1 text-[11px]">
+          {sel(
+            row.kind,
+            [
+              ['rsi', 'RSI'],
+              ['price_vs_ema', 'Close vs EMA'],
+              ['rvol', 'RVOL'],
+            ],
+            (v) => {
+              if (v === 'rsi') patch(i, { kind: 'rsi', length: 14, op: '<', value: 30 });
+              else if (v === 'price_vs_ema') patch(i, { kind: 'price_vs_ema', length: 21, op: 'crosses_above' });
+              else patch(i, { kind: 'rvol', op: '>', value: 2 });
+            },
+            'condition type',
+          )}
+          {row.kind !== 'rvol' ? numInput(row.length, (v) => patch(i, { ...row, length: Math.max(1, v) }), 'w-12', 'length') : null}
+          {row.kind === 'price_vs_ema'
+            ? sel(
+                row.op,
+                [
+                  ['crosses_above', 'crosses ↑'],
+                  ['crosses_below', 'crosses ↓'],
+                  ['>', 'above'],
+                  ['<', 'below'],
+                ],
+                (v) => patch(i, { ...row, op: v as typeof row.op }),
+                'operator',
+              )
+            : sel(
+                row.op,
+                [
+                  ['>', '>'],
+                  ['<', '<'],
+                ],
+                (v) => patch(i, { ...row, op: v as '>' | '<' }),
+                'operator',
+              )}
+          {row.kind !== 'price_vs_ema' ? numInput(row.value, (v) => patch(i, { ...row, value: v }), 'w-14', 'threshold') : null}
+          <button
+            onClick={() => setRows(rows.filter((_, j) => j !== i))}
+            disabled={rows.length === 1}
+            aria-label="Remove condition"
+            className="rounded p-0.5 text-muted-foreground hover:text-bear disabled:opacity-30"
+          >
+            <X className="h-3 w-3" aria-hidden="true" />
+          </button>
+        </div>
+      ))}
+
+      <div className="flex items-center gap-1.5 pt-0.5">
+        <Button size="xs" variant="outline" className="h-6 gap-1 px-1.5 text-[10px]" onClick={() => setRows([...rows, { ...DEFAULT_ROW }])} disabled={rows.length >= 10}>
+          <Plus className="h-3 w-3" aria-hidden="true" /> Condition
+        </Button>
+        <button
+          onClick={() => setLogic(logic === 'all' ? 'any' : 'all')}
+          aria-label="Toggle match logic"
+          title={logic === 'all' ? 'Every condition must match' : 'Any condition may match'}
+          className="rounded bg-surface-raised px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground hover:text-foreground"
+        >
+          {logic}
+        </button>
+        <Button size="xs" variant="primary" className="ml-auto h-6 gap-1 px-2 text-[10px]" onClick={onRun} disabled={running}>
+          <Play className="h-3 w-3" aria-hidden="true" /> {running ? 'Running…' : 'Run'}
+        </Button>
+        <Button size="xs" variant="outline" className="h-6 gap-1 px-1.5 text-[10px]" onClick={onSave} title="Save this screen">
+          <Save className="h-3 w-3" aria-hidden="true" /> Save
+        </Button>
+      </div>
+    </div>
   );
 }
 
