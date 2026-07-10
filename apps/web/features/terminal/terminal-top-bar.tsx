@@ -43,6 +43,7 @@ import { BroadcastDialog } from './broadcast-dialog';
 import type { ChartType } from '@supercharts/types';
 import { useTerminalStore } from './terminal-store';
 import { PANE_LAYOUTS } from './layouts';
+import { symbolResultLabel, symbolResultTone, type RemoteSymbolResult } from './symbol-search-util';
 
 const CHART_TYPES: Array<{ value: ChartType; label: string; group: string }> = [
   // OHLC
@@ -611,7 +612,7 @@ export function TerminalTopBar() {
 function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: string) => void }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const [remote, setRemote] = useState<Array<{ id: string; kind: 'crypto' | 'forex' }>>([]);
+  const [remote, setRemote] = useState<RemoteSymbolResult[]>([]);
 
   // Debounced remote search: query the API once the user types ≥2 chars, otherwise show curated.
   useEffect(() => {
@@ -622,11 +623,11 @@ function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: strin
     }
     const handle = setTimeout(async () => {
       try {
-        const res = await api<{ items: Array<{ id: string; assetClass: 'crypto' | 'forex' }> }>(
+        const res = await api<{ items: RemoteSymbolResult[] }>(
           '/symbols/search',
           { searchParams: { q: trimmed, limit: 30 } },
         );
-        setRemote(res.items.map((s) => ({ id: s.id, kind: s.assetClass })));
+        setRemote(res.items);
       } catch {
         setRemote([]);
       }
@@ -687,7 +688,7 @@ function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: strin
           // @ts-ignore -- non-standard Chrome attr that disables aggressive autofill heuristics
           data-form-type="other"
           data-lpignore="true"
-          placeholder="Search symbol — BTC, EUR, SOL…"
+          placeholder="Search symbol — BTC, INFY, NIFTY…"
           leftAdornment={<Search className="h-4 w-4" />}
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -709,9 +710,9 @@ function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: strin
               >
                 <div className="flex flex-col">
                   <span className="text-foreground">{s.id}</span>
-                  <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{s.kind}</span>
+                  <span className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{symbolResultLabel(s)}</span>
                 </div>
-                <Badge tone={s.kind === 'crypto' ? 'accent' : 'warn'}>{s.kind}</Badge>
+                <Badge tone={symbolResultTone(s)}>{s.assetClass}</Badge>
               </button>
             ))
           )}
@@ -721,29 +722,7 @@ function SymbolSearch({ value, onPick }: { value: string; onPick: (symbol: strin
   );
 }
 
-const CURATED_SYMBOLS: Array<{ id: string; kind: 'crypto' | 'forex' }> = [
-  { id: 'BINANCE:BTCUSDT', kind: 'crypto' },
-  { id: 'BINANCE:ETHUSDT', kind: 'crypto' },
-  { id: 'BINANCE:SOLUSDT', kind: 'crypto' },
-  { id: 'BINANCE:BNBUSDT', kind: 'crypto' },
-  { id: 'BINANCE:XRPUSDT', kind: 'crypto' },
-  { id: 'BINANCE:DOGEUSDT', kind: 'crypto' },
-  { id: 'BINANCE:AVAXUSDT', kind: 'crypto' },
-  { id: 'BINANCE:ADAUSDT', kind: 'crypto' },
-  { id: 'BINANCE:LINKUSDT', kind: 'crypto' },
-  { id: 'BINANCE:DOTUSDT', kind: 'crypto' },
-  { id: 'BINANCE:LTCUSDT', kind: 'crypto' },
-  { id: 'BINANCE:MATICUSDT', kind: 'crypto' },
-  { id: 'BINANCE:ARBUSDT', kind: 'crypto' },
-  { id: 'BINANCE:OPUSDT', kind: 'crypto' },
-  { id: 'BINANCE:NEARUSDT', kind: 'crypto' },
-  { id: 'OANDA:EUR_USD', kind: 'forex' },
-  { id: 'OANDA:GBP_USD', kind: 'forex' },
-  { id: 'OANDA:USD_JPY', kind: 'forex' },
-  { id: 'OANDA:USD_CHF', kind: 'forex' },
-  { id: 'OANDA:AUD_USD', kind: 'forex' },
-  { id: 'OANDA:NZD_USD', kind: 'forex' },
-  { id: 'OANDA:USD_CAD', kind: 'forex' },
-  { id: 'OANDA:XAU_USD', kind: 'forex' },
-  { id: 'OANDA:XAG_USD', kind: 'forex' },
+const CURATED_SYMBOLS: RemoteSymbolResult[] = [
+  ...['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT', 'AVAXUSDT', 'ADAUSDT', 'LINKUSDT', 'DOTUSDT', 'LTCUSDT', 'MATICUSDT', 'ARBUSDT', 'OPUSDT', 'NEARUSDT'].map((rawSymbol) => ({ id: `BINANCE:${rawSymbol}`, rawSymbol, assetClass: 'crypto', venue: 'BINANCE' })),
+  ...['EUR_USD', 'GBP_USD', 'USD_JPY', 'USD_CHF', 'AUD_USD', 'NZD_USD', 'USD_CAD', 'XAU_USD', 'XAG_USD'].map((rawSymbol) => ({ id: `OANDA:${rawSymbol}`, rawSymbol, assetClass: 'forex', venue: 'OANDA' })),
 ];
