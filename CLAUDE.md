@@ -6,6 +6,11 @@
 > Stripe-ready billing. Pricing: $400 / 6mo, $600 / 12mo.
 
 Repo: `/Volumes/PortableSSD/new start/supercharts` (pnpm monorepo).
+
+> **🤝 Multi-agent handoff:** live progress track = **`docs/STATUS.md`** — read it FIRST before
+> touching code (what's done with commit hashes, what's in progress, hard rules, landmines).
+> Master goal + ordered backlog = `docs/LAUNCH-PLAN.md`. Update BOTH in the same commit as work.
+
 Codebase map: `docs/architecture.md` · Full build history: `docs/changelog.md` · Per-task session prompts: `docs/sessions/`.
 
 ## Stack
