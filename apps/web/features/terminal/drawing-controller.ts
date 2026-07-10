@@ -69,6 +69,10 @@ export class DrawingController {
   private core: ChartCore;
   private handlers: DrawingDraftHandler;
   private removeListener: (() => void) | null = null;
+  private getMagnet?: () => boolean;
+  private getLocked?: () => boolean;
+  private getHidden?: () => boolean;
+  private snapPoint?: (time: number, price: number) => { time: number; price: number };
 
   constructor(args: {
     core: ChartCore;
@@ -78,6 +82,13 @@ export class DrawingController {
     clearTool: () => void;
     handlers: DrawingDraftHandler;
     initial: DrawingObject[];
+    /** Magnet toggle — when true, captured points snap through `snapPoint`. */
+    getMagnet?: () => boolean;
+    /** Lock-all toggle — existing drawings can't be selected/dragged; creating stays allowed. */
+    getLocked?: () => boolean;
+    /** Hide-all toggle — layer renders nothing and every drawing interaction is inert. */
+    getHidden?: () => boolean;
+    snapPoint?: (time: number, price: number) => { time: number; price: number };
   }) {
     this.core = args.core;
     this.symbol = args.symbol;
@@ -85,8 +96,12 @@ export class DrawingController {
     this.getTool = args.getTool;
     this.clearTool = args.clearTool;
     this.handlers = args.handlers;
+    this.getMagnet = args.getMagnet;
+    this.getLocked = args.getLocked;
+    this.getHidden = args.getHidden;
+    this.snapPoint = args.snapPoint;
     this.drawings = args.initial.slice();
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
     this.attach();
   }
 
@@ -98,7 +113,36 @@ export class DrawingController {
   /** Replace the drawing set, e.g. after a fresh server fetch. */
   setDrawings(drawings: DrawingObject[]): void {
     this.drawings = drawings.slice();
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
+  }
+
+  /** Re-push the set to the layer honoring the hide-all flag (call when the flag flips). */
+  refreshVisibility(): void {
+    this.pushDrawings();
+  }
+
+  /** Delete every drawing on this pane (caller confirms first — destructive bulk action). */
+  clearAll(): void {
+    const ids = this.drawings.map((d) => d.id);
+    this.drawings = [];
+    this.selectedId = null;
+    this.dragging = null;
+    this.draft = null;
+    this.pushDrawings();
+    for (const id of ids) void this.handlers.onDelete(id);
+  }
+
+  private pushDrawings(extra?: DrawingObject): void {
+    if (this.getHidden?.()) {
+      this.core.setDrawings([]);
+      return;
+    }
+    this.core.setDrawings(extra ? [...this.drawings, extra] : this.drawings);
+  }
+
+  private capture(e: ChartPointerEvent): { time: number; price: number } {
+    if (this.getMagnet?.() && this.snapPoint) return this.snapPoint(e.time, e.price);
+    return { time: e.time, price: e.price };
   }
 
   private attach(): void {
@@ -116,11 +160,13 @@ export class DrawingController {
   }
 
   private handle(e: ChartPointerEvent): void {
+    if (this.getHidden?.()) return; // hidden = inert: nothing to see, nothing to hit or draw on
     const tool = this.getTool();
     if (tool && tool !== 'cursor' && tool !== 'crosshair') {
       this.handleCreate(tool as DrawingType, e);
       return;
     }
+    if (this.getLocked?.()) return; // locked = existing drawings can't be selected or dragged
     if (e.type === 'pointerdown') {
       const hit = this.hitTest(e);
       if (hit) {
@@ -134,13 +180,15 @@ export class DrawingController {
       if (!d) return;
       const dt = e.time - this.dragging.startTime;
       const dp = e.price - this.dragging.startPrice;
+      // Endpoint drags snap through the magnet; whole-shape translation stays 1:1 with the pointer.
+      const end = this.capture(e);
       const updated: DrawingObject = {
         ...d,
         points:
           this.dragging.pointIdx === 'all'
             ? d.points.map((pt) => ({ time: pt.time + dt, price: pt.price + dp }))
             : d.points.map((pt, i) =>
-                i === this.dragging!.pointIdx ? { time: e.time, price: e.price } : pt,
+                i === this.dragging!.pointIdx ? { time: end.time, price: end.price } : pt,
               ),
         updatedAt: Date.now(),
       };
@@ -187,7 +235,7 @@ export class DrawingController {
         userId: this.userId,
         symbol: this.symbol,
         type,
-        points: [{ time: e.time, price: e.price }],
+        points: [this.capture(e)],
         style: defaultStyle(type),
         text,
         emoji,
@@ -199,7 +247,7 @@ export class DrawingController {
         updatedAt: Date.now(),
       };
       this.drawings.push(drawing);
-      this.core.setDrawings(this.drawings);
+      this.pushDrawings();
       void this.handlers.onCreate(drawing);
       this.clearTool();
       return;
@@ -216,22 +264,23 @@ export class DrawingController {
       if (e.type === 'pointerdown') {
         if (this.draft?.armed) {
           // Second click — drop point B and finalize.
-          this.draft.points[1] = { time: e.time, price: e.price };
+          this.draft.points[1] = this.capture(e);
           this.finalizeDraft();
           return;
         }
+        const start = this.capture(e);
         this.draft = {
           type,
-          points: [{ time: e.time, price: e.price }, { time: e.time, price: e.price }],
+          points: [start, { ...start }],
           style: defaultStyle(type),
           startX: e.x,
           startY: e.y,
           armed: false,
         };
       } else if (this.draft && e.type === 'pointermove') {
-        this.draft.points[1] = { time: e.time, price: e.price };
+        this.draft.points[1] = this.capture(e);
         const provisional: DrawingObject = this.draftToDrawing(this.draft);
-        this.core.setDrawings([...this.drawings, provisional]);
+        this.pushDrawings(provisional);
       } else if (this.draft && e.type === 'pointerup') {
         const travel = Math.hypot(e.x - this.draft.startX, e.y - this.draft.startY);
         if (travel < CLICK_TOLERANCE_PX) {
@@ -240,7 +289,7 @@ export class DrawingController {
           return;
         }
         // It was a drag — finalize at the release point.
-        this.draft.points[1] = { time: e.time, price: e.price };
+        this.draft.points[1] = this.capture(e);
         this.finalizeDraft();
       }
     }
@@ -250,7 +299,7 @@ export class DrawingController {
     if (!this.draft) return;
     const drawing = this.draftToDrawing(this.draft);
     this.drawings.push(drawing);
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
     void this.handlers.onCreate(drawing);
     this.draft = null;
     this.clearTool();
@@ -260,7 +309,7 @@ export class DrawingController {
   cancelDraft(): void {
     if (!this.draft) return;
     this.draft = null;
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
   }
 
   private draftToDrawing(d: DraftState): DrawingObject {
@@ -286,7 +335,7 @@ export class DrawingController {
     const idx = this.drawings.findIndex((x) => x.id === d.id);
     if (idx < 0) return;
     this.drawings[idx] = d;
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
   }
 
   private hitTest(e: ChartPointerEvent): { id: string; pointIdx: number | 'all' } | null {
@@ -320,7 +369,7 @@ export class DrawingController {
     if (!this.selectedId) return;
     const id = this.selectedId;
     this.drawings = this.drawings.filter((d) => d.id !== id);
-    this.core.setDrawings(this.drawings);
+    this.pushDrawings();
     this.selectedId = null;
     void this.handlers.onDelete(id);
   }
