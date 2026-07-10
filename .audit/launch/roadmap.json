@@ -1,0 +1,201 @@
+{
+ "launchDefinition": "Public beta is launched when a stranger on the public internet can: (1) reach the product on its own domain over HTTPS (not the founder's laptop), (2) create an account and sign in, (3) pay via live-mode Stripe checkout ($400/6mo or $600/12mo) and be entitlement-gated on it, (4) use /terminal with live market data in a fully isolated workspace \u2014 own alerts, drawings, scripts, layouts, watchlists, and MT5 WS events with verified zero cross-user leakage, (5) refresh and get the exact same workspace back via versioned autosave, (6) run a real screener (indicator/price/volume conditions across the symbol catalog, saved screens) and choose from \u226545 tested classic indicators, and (7) read public PulseScript documentation whose examples all run in the editor \u2014 while the founder's 48 live 1d EMA(5)\u00d7EMA(10) alerts keep firing and nightly tested backups + uptime monitoring run in production.",
+ "phases": [
+  {
+   "name": "Phase 1 \u2014 Multi-user foundation",
+   "goal": "Kill the single-user stub: real accounts, per-user data + WS scoping, workspace that survives refresh \u2014 without ever disturbing the founder's 48 live alerts. Folds in rebuild slices S2, S3, and S5 (they ARE launch blockers); defers S6/S7.",
+   "items": [
+    "S2-ASYNC",
+    "AUTH-1",
+    "AUTH-2",
+    "WS-AUTH",
+    "API-HARDEN",
+    "WORKSPACE"
+   ],
+   "exitCriteria": "Two real accounts operate fully isolated (scripted cross-user REST requests all 403/404; two-browser WS test shows zero cross-user MT5/alert frames); workspace auto-restores identically after hard refresh; founder's 48 alerts verified firing under the migrated founder account; full test suite + typecheck green."
+  },
+  {
+   "name": "Phase 2 \u2014 Revenue",
+   "goal": "Turn the fail-closed billing scaffold (apps/api/src/routes/billing.ts already 503s without STRIPE_SECRET_KEY) into working test-mode Stripe checkout, webhooks, and entitlement gating on the terminal.",
+   "items": [
+    "STRIPE-1",
+    "STRIPE-2"
+   ],
+   "exitCriteria": "Test-card purchase \u2192 webhook \u2192 /api/billing/status active with correct period end \u2192 terminal unlocked; unpaid account is blocked server-side and redirected to /pricing; cancel via Stripe billing portal reflects in status."
+  },
+  {
+   "name": "Phase 3 \u2014 Hosted & reliable",
+   "goal": "Off the sleep-killed portable SSD onto monitored, backed-up production infrastructure that survives real networks. Folds in rebuild slice S4 (reconnect correctness matters once users aren't on localhost) and a load smoke that decides whether S6 (rAF tick batching, finding F1) must be pulled pre-launch.",
+   "items": [
+    "DEPLOY-1",
+    "DEPLOY-2",
+    "DEPLOY-3",
+    "S4-WS",
+    "LOAD-SMOKE"
+   ],
+   "exitCriteria": "Signup \u2192 live chart \u2192 create alert completed from an external network (phone LTE) on the domain over HTTPS/WSS; backup restore drill passed on staging; uptime alert fires when the API is killed; load smoke metrics within budget (or S6 explicitly scheduled before beta)."
+  },
+  {
+   "name": "Phase 4 \u2014 Launch surface (the user's three asks)",
+   "goal": "Ship exactly what was asked for beyond parity: more indicators (starting with the already-planned INC-10 batch), a real screener replacing the top-movers-only Scanner tab, and public user-facing PulseScript documentation.",
+   "items": [
+    "IND-1",
+    "IND-2",
+    "SCAN-1",
+    "SCAN-2",
+    "DOCS-PULSE"
+   ],
+   "exitCriteria": "Screener runs saved multi-condition indicator scans whose results are hand-verified against chart values; indicator registry \u226545 with fixture tests, all browsable/configurable; /docs/pulsescript live and linked from the editor, every code example runs clean."
+  },
+  {
+   "name": "Phase 5 \u2014 Beta launch",
+   "goal": "Reduce sign-in friction (OAuth), prove the whole system on 10\u201320 real YouTube-audience users, then flip Stripe to live mode and announce publicly. Rebuild slices S6\u2013S8 and punchlist INC-2/4/5/9/16/17/18 stay post-launch unless the load smoke said otherwise.",
+   "items": [
+    "AUTH-OAUTH",
+    "BETA-CLOSED",
+    "LAUNCH-PUBLIC"
+   ],
+   "exitCriteria": "Every clause of the launch definition satisfied with pasted evidence; \u226510 external accounts used the product with zero isolation incidents in logs; top-3 beta-reported issues fixed and confirmed; first live-mode payment processed end-to-end; monitoring green for 48h after the announcement."
+  }
+ ],
+ "sessionBacklog": [
+  {
+   "id": "S2-ASYNC",
+   "title": "Rebuild S2 \u2014 async-state consistency (the repo's declared next slice)",
+   "deliverable": "Shared PanelState primitives (loading/empty/error+retry) adopted by the Alerts Active list, Strategy ActiveList, Watchlists manager, Scanner, and Watchlist quotes; in-flight guards on PulseScript Save and MT5 token regen; error surfacing on PulseScript delete and the webhooks forward toggle (fixes audit P5\u2013P9).",
+   "verify": "Kill the API mid-session \u2192 every listed panel shows an inline error with a working Retry (screenshots); double-click PulseScript Save \u2192 exactly one POST in the network log; suite + typecheck green."
+  },
+  {
+   "id": "AUTH-1",
+   "title": "Real auth core \u2014 Auth.js credentials (roadmap #20, session file 12)",
+   "deliverable": "Signup/login/logout with hashed passwords and a real session cookie; apps/api/src/auth.ts getUser() resolves the session instead of returning the hardcoded 'demo' row (audit S3); 401 on unauthenticated API access; login/signup pages.",
+   "verify": "curl /api/alerts without a cookie \u2192 401; create two accounts in the browser \u2192 each sees only its own (empty) alert/drawing/layout lists; suite + typecheck green."
+  },
+  {
+   "id": "AUTH-2",
+   "title": "Per-user isolation sweep + founder migration off 'demo'",
+   "deliverable": "Two-account IDOR exercise across all resource routes (alerts, drawings, layouts, scripts, watchlists, signals, mt5, oanda, webhooks, share, custom-data, indicators, preferences, billing \u2014 the audit notes guards 'exist in shape but unexercised'); all demo-owned rows migrated to the founder's real account; demo-guard retired.",
+   "verify": "Scripted cross-user GET/PUT/DELETE on every resource type \u2192 all 403/404 (output pasted); alert-engine log shows the 48 live alerts evaluating under the founder account post-migration; a real Telegram delivery observed unchanged."
+  },
+  {
+   "id": "WS-AUTH",
+   "title": "Rebuild S5a \u2014 authenticated WebSocket + MT5 event scoping",
+   "deliverable": "WS upgrade authenticates the session cookie (ws-gateway.ts:68/:73 no longer hardcodes userId:'demo' \u2014 audit S2); subscribe_mt5 filters mt5Store emitter events by the socket's userId (fixes the critical cross-user leak, audit S1, ws-gateway.ts:112-122); alert-event scoping re-verified with real distinct users.",
+   "verify": "Two browsers on two accounts: MT5 activity on account A produces zero MT5 frames on B's socket (network-inspector evidence pasted); unauthenticated WS upgrade is rejected; existing WS tests green."
+  },
+  {
+   "id": "API-HARDEN",
+   "title": "Rebuild S5b \u2014 API production hardening",
+   "deliverable": "@fastify/helmet secure headers; /livez + /readyz split; correlation IDs in request logs; zod validation on PATCH /mt5/positions/:id (audit S5 \u2014 unvalidated SL/TP reaches the EA); calendar.ts safeParse \u2192 400 not 500; signals.ts conditions schema replaces z.unknown() (audit S4\u2013S6).",
+   "verify": "curl output pasted for headers, /readyz, and a malformed PATCH \u2192 400 with no EA-bound message in the bridge log; suite + typecheck green."
+  },
+  {
+   "id": "WORKSPACE",
+   "title": "Rebuild S3 \u2014 versioned per-user workspace autosave/restore",
+   "deliverable": "Debounced server-side autosave of a versioned workspace snapshot (panes/symbols/intervals/grid, indicator instances, overlay flags, pulse state, rail/dock chrome) per user, restored on load with migrations (fixes F3); named-layout Apply restores pane symbols/intervals too (P3); save/offline indicator in the top bar.",
+   "verify": "Configure a 4-pane workspace with indicators + a running script \u2192 hard refresh \u2192 pixel-comparable screenshot pair shows identical state; second account is unaffected; a version-bump migration unit test passes."
+  },
+  {
+   "id": "STRIPE-1",
+   "title": "Stripe checkout + webhooks, test mode (roadmap #21, session file 13)",
+   "deliverable": "POST /api/billing/checkout creates real Stripe Checkout Sessions for pro_6m/pro_12m; signature-verified webhook endpoint handling checkout.session.completed and customer.subscription.updated/deleted writes the subscriptions table (replacing the current fail-closed 503 scaffold).",
+   "verify": "Full test-mode purchase with a Stripe test card \u2192 /api/billing/status returns the plan active with the correct currentPeriodEnd (response pasted); webhook replay with a bad signature \u2192 400."
+  },
+  {
+   "id": "STRIPE-2",
+   "title": "Entitlement gating + billing/account UI",
+   "deliverable": "Server-side entitlement check (active/trialing subscription \u2014 trial-vs-none decided by founder before this session) gating terminal APIs, with client redirect to /pricing; pricing-page buttons wired to checkout; account page showing plan/renewal/cancel via the Stripe billing portal.",
+   "verify": "Unpaid account \u2192 API-blocked and redirected; paid test account \u2192 full terminal; cancel in the portal reflects in /api/billing/status and the account page (screenshots)."
+  },
+  {
+   "id": "DEPLOY-1",
+   "title": "Production build + deploy runbook",
+   "deliverable": "Env-driven web/API URLs and CORS origins (replacing the 127.0.0.1 pins), Next production build, Fastify prod mode, process supervision (docker-compose or PM2), SQLite WAL + data-directory convention (Node 26 for node:sqlite pinned), and a written deploy runbook.",
+   "verify": "The full production stack boots locally from a clean clone with only env vars \u2192 /terminal streams live candles with 0 console errors (screenshot); runbook committed."
+  },
+  {
+   "id": "DEPLOY-2",
+   "title": "VPS go-live \u2014 domain, TLS, WS proxy, MT5 bridge exposure",
+   "deliverable": "App running on a VPS in a region pre-validated for Binance WS/REST access; domain + TLS reverse proxy fronting web, API, and WSS; firewall; MT5 bridge :7878 exposed only with per-user token auth; all secrets (Telegram token, OANDA, Stripe) in server env.",
+   "verify": "Signup \u2192 live chart \u2192 create-alert flow completed from an external network (phone LTE) on the domain; WSS frames observed; an MT5 EA connects to the hosted bridge with a fresh token (or the EA test is explicitly deferred in writing)."
+  },
+  {
+   "id": "DEPLOY-3",
+   "title": "Backups + monitoring + restore drill",
+   "deliverable": "Nightly offsite SQLite backup with a scripted restore; uptime monitoring on /readyz with alerting; disk/memory alerts; log retention using the correlation IDs from API-HARDEN.",
+   "verify": "A real backup restored into a staging instance boots and serves the founder's data; killing the API triggers the uptime alert (notification screenshot)."
+  },
+  {
+   "id": "S4-WS",
+   "title": "Rebuild S4 \u2014 client network hardening",
+   "deliverable": "Typed ApiError in lib/api.ts, AbortController adoption on panel fetches, WS sequence/gap guard with refetch-on-gap, and overlay-set-preserving resubscribe so footprint/tape/DOM survive reconnect (fixes F4/F5).",
+   "verify": "Forced WS disconnect with footprint on \u2192 overlay resumes without reload (screenshot); injected sequence gap \u2192 refetch observed in the network log; new unit tests green."
+  },
+  {
+   "id": "LOAD-SMOKE",
+   "title": "Concurrent-user load smoke + perf gate",
+   "deliverable": "A script driving ~25 concurrent authenticated WS clients plus REST traffic across symbols against the deployed stack; recorded p95 API latency, WS frame delivery, server memory; a written go/no-go on whether F1 (per-tick full ChartPane re-render \u2014 rebuild S6) must be pulled pre-launch.",
+   "verify": "Metrics pasted from the actual run vs a stated budget (e.g. p95 < 300ms, no OOM, no dropped subscriptions); if over budget, an S6 session is inserted into the backlog before BETA-CLOSED."
+  },
+  {
+   "id": "IND-1",
+   "title": "Indicator coverage batch 1 \u2014 DEMA/TEMA/VWMA (punchlist INC-10, session file 06)",
+   "deliverable": "Three new registry entries in @supercharts/indicators with fixture unit tests; browser/legend/Data-Window wiring via the existing registry-driven pipeline.",
+   "verify": "Vitest values match hand-computed fixtures (output pasted); each indicator added, configured, and screenshotted on live BTCUSDT."
+  },
+  {
+   "id": "IND-2",
+   "title": "Indicator coverage batch 2 \u2014 remaining classics from the TV-parity audit gap list",
+   "deliverable": "The next set of missing classic indicators from the parity audit (.audit/tv-parity/PUNCHLIST.md gap list) added to the registry with tests, bringing the registry to \u226545 entries; no rebuild of existing ones.",
+   "verify": "Per-indicator fixture tests green; registry count pasted from a command; each new indicator added and configured in the browser."
+  },
+  {
+   "id": "SCAN-1",
+   "title": "Screener query engine (server)",
+   "deliverable": "POST /api/scanner/query: declarative filter conditions (price, change%, volume, and indicator values computed via @supercharts/indicators over cached candles) evaluated across the 48-symbol catalog on a chosen timeframe, with result caching; the existing /scanner/top-movers endpoint kept.",
+   "verify": "Unit tests over synthetic candles; a live curl query (e.g. RSI(14) < 30 on 1h) whose results are hand-verified against the chart's Data Window values for 2 symbols (both pasted)."
+  },
+  {
+   "id": "SCAN-2",
+   "title": "Screener UI + saved screens (replaces the top-movers-only Scanner tab)",
+   "deliverable": "Scanner tab upgrade in right-rail.tsx: condition-builder rows (metric/operator/value/timeframe), sortable result columns, click-to-load symbol on the active pane, per-user server-persisted saved screens, honest venue-limitation states for non-Binance data.",
+   "verify": "Build and run a screen in the browser \u2192 results match the SCAN-1 curl for the same query; a saved screen survives refresh and re-login (screenshots)."
+  },
+  {
+   "id": "DOCS-PULSE",
+   "title": "Public PulseScript documentation",
+   "deliverable": "User-facing docs under the web app (/docs/pulsescript): getting started, full language reference sourced from docs/pulsescript-language.md (pulse 1 header, no-let assignment, colon bodies, persist/when/draw/mark), ta./math. stdlib reference, inputs/drawing/alerts/onTf pages, runnable examples; linked from the editor and the landing page.",
+   "verify": "Browser navigation through every page; every code example pasted into the live editor runs clean (run-summary console output pasted for each)."
+  },
+  {
+   "id": "AUTH-OAUTH",
+   "title": "Google OAuth + account polish (completes roadmap #20)",
+   "deliverable": "Google sign-in via Auth.js alongside credentials; account page (email, display name, linked provider); a decided password-reset story (minimal SMTP reset or a documented manual process for beta).",
+   "verify": "Fresh Google sign-up produces an isolated workspace; an existing credentials account is untouched; both login paths screenshotted on the deployed domain."
+  },
+  {
+   "id": "BETA-CLOSED",
+   "title": "Closed beta with 10\u201320 YouTube-audience users",
+   "deliverable": "Invited cohort on live infrastructure (comped or test-coupon subscriptions), a feedback channel, and the top reported issues fixed as micro-sessions under the one-increment protocol.",
+   "verify": "\u226510 real external accounts in the users table (count pasted); zero cross-user isolation errors in production logs over the beta window; top-3 reported issues fixed and confirmed by their reporters."
+  },
+  {
+   "id": "LAUNCH-PUBLIC",
+   "title": "Public beta launch",
+   "deliverable": "Stripe switched to live mode (live keys + live webhook endpoint), launch announcement video published on the channel, landing CTA live, support email + public status/uptime page linked from the footer.",
+   "verify": "One real live-mode purchase completes end-to-end (checkout \u2192 webhook \u2192 entitled terminal access); monitoring green for 48h post-announcement; the launch video is live."
+  }
+ ],
+ "risks": [
+  "Live-alert regression during the demo\u2192founder auth migration: the 48 production 1d EMA(5)\u00d7EMA(10) alerts are the founder's own trading signals \u2014 AUTH-2 must migrate and re-verify Telegram delivery, never drop or resubscribe-dirty them.",
+  "MT5 TCP bridge on the public internet: :7878 is a raw TCP protocol with only per-user token auth planned and no EA-side TLS story \u2014 if hardening slips, restrict hosted MT5 automation to the founder/invited users for beta rather than delaying launch.",
+  "Binance geo-blocking: Binance's public API blocks several regions (including US IPs) \u2014 the VPS region must be validated for both WS and REST before committing (explicit DEPLOY-2 gate), or the order-flow feature set silently dies in production.",
+  "node:sqlite single-writer + Node 26 host requirement: fine at beta scale with WAL, but there is no defined migration path to Postgres/litestream if writes contend \u2014 nightly tested backups (DEPLOY-3) are the safety net, and the scaling decision is deliberately deferred.",
+  "F1 per-tick full ChartPane re-render (2289 lines \u00d7 N panes, no rAF batching) is unmeasured under real load \u2014 LOAD-SMOKE is the explicit gate; if it fails, rebuild slice S6 must be inserted before BETA-CLOSED, adding ~1-2 sessions.",
+  "React 19 RC + Next 15 in a paid production product: pin exact versions at DEPLOY-1 and treat any RC upgrade as its own verified session, not a drive-by.",
+  "Pricing friction: $400/6mo with no trial may kill beta conversion \u2014 the trial/coupon decision is a founder call required before STRIPE-2, not a build task.",
+  "Credentials-only auth until AUTH-OAUTH and no email infrastructure means no self-serve password reset early on \u2014 acceptable for closed beta, must be resolved (OAuth + reset story) before public launch.",
+  "Solo-founder capacity: beta support and incident response compete with the one-verified-increment-per-session protocol \u2014 cap the closed beta at ~20 users and keep the fabrication-tripwire/session-hygiene rules in force.",
+  "Scope creep: rebuild slices S6\u2013S8, punchlist INC-2/4/5/9/16/17/18, iframe embeds (#18), multi-user shared workspaces (#19), and mobile/PWA/WASM (#23\u201325) are consciously post-launch \u2014 none of them block the launch definition and none should absorb a pre-launch session."
+ ]
+}

@@ -1,0 +1,78 @@
+{
+ "wedge": "SuperCharts closes the loop TradingView deliberately leaves open: chart \u2192 script \u2192 backtest \u2192 alert \u2192 Telegram \u2192 live MT5 execution in one owned stack \u2014 collapsing the ~$1,000\u20131,500/yr TradingView + PineConnector + VPS pile that every algo crypto/forex trader currently duct-tapes together into a single $600/yr terminal.",
+ "positioning": "For algo-leaning crypto and forex traders who execute through MT5, SuperCharts is the charting terminal that actually trades: unlike TradingView \u2014 which stops at a webhook and makes you rent a $39/mo bridge plus your own VPS \u2014 SuperCharts ships native MT5 automation with a built-in risk stack (position sizing, portfolio heat, max-drawdown breaker), Telegram-first alerts with chart snapshots, ungated order-flow/SMC tooling, and a scriptable full-history screener, at one flat price with no per-feature tier ladder.",
+ "gapMatrix": [
+  {
+   "area": "Charting workbench",
+   "tradingview": "Gold standard; Premium ($59.95/mo) gives 8 charts/tab, bar replay, 20K historical bars; volume footprint now on all paid tiers; everything autosaves silently (tradingview.com/pricing).",
+   "supercharts": "Genuine near-parity, verified by the 2026-07-10 audit: custom Canvas engine, 22 chart types, multi-pane grids, replay, log/percent scales, server-persisted drawings, footprint/DOM/tape/heatmap included, 0 console errors, 406 tests. BUT workspace is lost on refresh \u2014 manual named layouts only (rebuild slice S3 planned in docs/terminal-rebuild-plan.md).",
+   "verdict": "must-close-for-launch"
+  },
+  {
+   "area": "Indicators",
+   "tradingview": "~150 built-ins + 100K+ community scripts; hard per-chart caps by tier (2/5/10/25/50 indicators on Free\u2192Ultimate).",
+   "supercharts": "38 classic + 11 SMC + full order-flow suite (footprint w/ imbalance & absorption, DOM ladder, tape, liquidity heatmap, volume/market profile, OI) with NO per-chart caps and no tier gates; known holes vs TV's classic set (DEMA/TEMA/VWMA \u2014 punchlist INC-10). Order flow honestly Binance-only.",
+   "verdict": "must-close-for-launch"
+  },
+  {
+   "area": "Scripting language + docs",
+   "tradingview": "Pine v6: huge official docs, 100K published scripts, every AI assistant knows it; but sandboxed with its own caps (Pine Screener ignores it beyond 500 bars, 40 security-call limit for chart screeners).",
+   "supercharts": "PulseScript is real and audited (~120 tests; CodeMirror editor with highlighting, backtester, optimizer, walk-forward, saved scripts, onTf no-repaint MTF; honest gaps in docs/pulsescript-parity.md: no match/UDT/maps, script alert() captured but delivery not wired). Docs exist ONLY as repo markdown \u2014 zero user-facing documentation. An undocumented original language is a liability, not a moat.",
+   "verdict": "must-close-for-launch"
+  },
+  {
+   "area": "Screener / scanner",
+   "tradingview": "Free stock/crypto/forex screeners plus Pine Screener (scan a watchlist with your own script) \u2014 but Pine Screener computes on only the last 500 bars, one indicator per scan, favorites-only, fixed timeframe list, one scan at a time (tradingview.com/support/solutions/43000742436).",
+   "supercharts": "The right-rail 'Scanner' tab is only a Binance 24h top-movers list \u2014 not a screener at all (PHASE0-BASELINE.md). This is the user's explicit ask AND the best offensive move: a PulseScript-powered screener over an expanded crypto+FX catalog with full-history compute and multi-condition filters beats Pine Screener's caps precisely because the universe is small.",
+   "verdict": "must-close-for-launch"
+  },
+  {
+   "area": "Alerts",
+   "tradingview": "400 active alerts on Premium; pricing page now lists alert durations of 1\u20132 months (expiry); delivery = app/email/webhook, no native Telegram; webhooks require Plus ($29.95/mo) or above.",
+   "supercharts": "Production-proven engine \u2014 48 live 1d EMA(5)\u00d7EMA(10) alerts running today; dual-MA + indicator-condition alerts, no count caps, Telegram-native with chart-snapshot PNGs and chat auto-detect, web delivery, anti-flood watermark, plus an inbound webhook receiver that can ingest TradingView's own alerts.",
+   "verdict": "wedge-advantage"
+  },
+  {
+   "area": "Broker / automation (MT5)",
+   "tradingview": "No native MT5 execution \u2014 the accepted path is TV alert \u2192 webhook (Plus+) \u2192 PineConnector at $39/mo Starter / $79/mo for 3 accounts (pineconnector.com) + a self-run VPS ($15\u201330/mo); third-party reviews put a realistic bridge setup at $470\u2013750/yr before the TV subscription.",
+   "supercharts": "Native MT5 TCP bridge (:7878) + intent router + signal runner + bulk automation across watchlists, plus a risk stack TV doesn't offer at any tier: position sizer, portfolio heat, P&L attribution, max-DD breaker that halts the runner, paper trading. One must-fix inside the wedge: MT5 WS events broadcast unscoped to all sockets (ws-gateway.ts:112-122, hardcoded 'demo' user) \u2014 slice S5 before any multi-user exposure.",
+   "verdict": "wedge-advantage"
+  },
+  {
+   "area": "Community",
+   "tradingview": "~100M users, ideas feed, 100K+ published scripts, social graph, script marketplace \u2014 unassailable for a solo founder.",
+   "supercharts": "None. Strategy share links (/s/<token>) exist; the founder's algo-trading YouTube channel (MT5/forex audience) is the real distribution asset and the honest community substitute.",
+   "verdict": "ignore-for-v1"
+  },
+  {
+   "area": "Mobile",
+   "tradingview": "First-class native iOS/Android apps with full charting and alerts.",
+   "supercharts": "Desktop web only; mobile-responsive is roadmap Phase 5 #23. The honest mobile story for this ICP: Telegram delivery \u2014 alert + chart snapshot lands on the phone; the automation keeps running server-side.",
+   "verdict": "ignore-for-v1"
+  },
+  {
+   "area": "Pricing / billing",
+   "tradingview": "Essential $14.95 / Plus $29.95 / Premium $59.95 per month after the April-2026 rises; annual \u2248 $155/$359/$719 per year; Ultimate ~$200/mo (tradingview.com/pricing, supa.is, financialtechwiz.com). Algo users additionally pay PineConnector + VPS.",
+   "supercharts": "$400/6mo ($66.67/mo) and $600/12mo ($50/mo) \u2014 but Stripe is scaffolded, not live; auth is a single-user demo stub; no hosting. The product literally cannot take money or serve a second user today.",
+   "verdict": "must-close-for-launch"
+  },
+  {
+   "area": "Data coverage",
+   "tradingview": "Thousands of markets \u2014 stocks, options, futures, indices, every major crypto exchange, licensed official feeds.",
+   "supercharts": "48-symbol catalog: Binance WS (crypto, keyless), OANDA forex (user's own token via onboarding wizard), Yahoo fallback for FX/metals/indices, CSV import for anything else; order flow Binance-only and honestly labeled, never faked. Adequate providers for the ICP, but 48 symbols is too thin for a screener to mean anything \u2014 expand to the full Binance spot/perp list + all FX majors/crosses (both free with existing providers). Never chase stocks/options.",
+   "verdict": "must-close-for-launch"
+  }
+ ],
+ "notDoing": [
+  "Stock/options/futures data breadth \u2014 crypto + FX only; order flow stays Binance-only and honestly labeled rather than faked for other venues",
+  "Community platform (ideas feed, script marketplace, comments, social graph) \u2014 the YouTube channel plus existing /s/<token> strategy-share links ARE the community for v1",
+  "Native mobile apps or a mobile-responsive terminal \u2014 Telegram alerts with chart snapshots are the mobile surface; Phase 5 #23 stays deferred",
+  "Multi-user workspaces and embedded iframe charts (roadmap Phase 4 #18\u201319 stay deferred)",
+  "Matching Pine's 100K-script library \u2014 ship public docs + ~20 first-party PulseScript examples and the Pine\u2192PulseScript migration table instead of a marketplace",
+  "Non-MT5 broker integrations (cTrader, IBKR, DXtrade, TV-style broker panel) \u2014 MT5 IS the wedge; don't dilute it",
+  "Seconds-based intervals / tick-chart parity chase (TV Essential+ has it; irrelevant to swing/algo ICP)",
+  "Fundamentals-based stock screener \u2014 screener v1 is technical/PulseScript-driven over the crypto+FX catalog only",
+  "Remaining cosmetic TV-parity tail (INC-16/17/18 pane resize, legend drag, magnet feel) beyond what rebuild slices S1\u2013S8 already schedule \u2014 none of it blocks the wedge"
+ ],
+ "pricingRead": "TV Premium is $59.95/mo month-to-month and ~$599\u2013719/yr billed annually after the April-2026 price rises (sources: tradingview.com/pricing \u2014 INR page shows Premium \u20b94,195/mo \u2248 $50 annual-equivalent and Ultimate \u20b917,333 \u2248 $200/mo; supa.is/article/tradingview-essential-vs-plus-vs-premium-which-plan-2026; financialtechwiz.com/post/how-much-is-tradingview). Read on the intended tiers: $400/6mo = $66.67/mo \u2014 priced ABOVE TV Premium's monthly sticker while lacking TV's data breadth, mobile apps, community, and brand trust; that anchor loses every head-to-head and should not ship. $600/12mo = $50.00/mo \u2014 exactly TV Premium annual money, defensible ONLY when sold against the ICP's real stack: TV Plus/Premium ($360\u2013719/yr; webhooks need Plus+) + PineConnector ($39/mo Starter \u2248 $312\u2013468/yr, pineconnector.com) + VPS ($15\u201330/mo \u2248 $180\u2013360/yr) = roughly $1,000\u20131,500/yr for chart\u2192MT5 automation (signalforge-ai.com pegs a realistic bridge-only setup at $470\u2013750/yr before the TV sub). Recommendations: (1) keep $600/12mo as the flagship and market it exclusively as 'replace the whole stack \u2014 one vendor, roughly half price, execution included'; (2) cut the 6-mo tier to ~$330\u2013350 or kill it so the ladder pushes annual \u2014 never let a $66.67/mo number appear next to TV's $59.95; (3) launch as founding-member pricing with a 14\u201330 day trial (TV gives 30 days; PineConnector gives 14) because a solo product at TV-Premium money must buy trust with a trial and an uptime story for alerts + MT5; (4) caveat everything: Stripe isn't live, auth is a demo stub, and the product runs on the founder's laptop \u2014 until slices S3/S5 + billing + hosting land, this pricing is aspiration, not a plan."
+}

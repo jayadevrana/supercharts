@@ -1,5 +1,11 @@
 # SuperCharts — Session prompts (one file = one Claude Code session)
 
+> **⚠️ 2026-07-10 — the LAUNCH MISSION supersedes this table's ordering.**
+> The master backlog (25 ordered sessions to public launch) is in **`docs/LAUNCH-PLAN.md`** —
+> work THAT list top to bottom. The files here remain valid kickoff prompts where referenced
+> (06 = IND-1, 12 = AUTH-1, 13 = STRIPE-1, 14 = WORKSPACE input); items not in the launch
+> backlog (01-05, 07-11, 15-18) are POST-LAUNCH.
+
 Every remaining work item has its own prompt file here. **Workflow:**
 
 1. Open the next file in the table below.

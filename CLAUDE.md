@@ -116,7 +116,16 @@ the run (verified: each `compute` runs 1× over 400 bars), with a per-bar fallba
 - [x] **INC-12** price-scale modes — log decade ticks + ratio-space pan/zoom, percent axis re-baselined to the first visible close, shared `priceTickValues`, ChartCore scale API + `onScaleState`, per-pane `scaleMode`, price-axis context menu + footer `% log auto` toggles. **Chart-area extras the same pass:** volume-band collapse bug fix, thousands separators + adaptive gutter + denser ticks, dated crosshair tag, live bar-close countdown, range-preset footer (1D…All) + UTC clock, venue tag, watermark.
 - [ ] Remaining (recommended order): INC-4 Data Window per-plot colour/names · INC-5 surface Pulse/SMC/STS in Data Window · INC-2 browser fast-path · INC-10 coverage (DEMA/TEMA/VWMA) · INC-9 per-plot toggles · INC-16 pane resize · INC-17 drag-reorder/legend-drag · INC-18 interaction feel (magnet crosshair, multi-pane Data Window remain)
 
-**Phase 6 done**; **Phase 3 COMPLETE**; Phase 4 · #16–#17 done. **Active focus: the indicator-system MISSION above** (roadmap Phase 4 · #18 is deferred).
+**Phase 6 done**; **Phase 3 COMPLETE**; Phase 4 · #16–#17 done.
+
+### 🚀 LAUNCH MISSION (ACTIVE — supersedes all other ordering)
+**Goal: launch SuperCharts publicly as the TradingView alternative for algo crypto/forex traders.**
+The master plan — north star, positioning, pricing decision, launch definition, 25-session ordered
+backlog (Phase A launch surface: scanner → PulseScript public docs → indicators; B multi-user
+foundation; C revenue; D hosting; E beta → launch), GTM, kill list, risks — lives in
+**`docs/LAUNCH-PLAN.md`**. Work the backlog top to bottom, one item per session, tick the box
+there. Design specs: `.audit/launch/*.json`. The indicator-system mission above and rebuild
+slices are FOLDED INTO that backlog — don't work them out of order.
 
 ## Working agreement (for Claude loop)
 
