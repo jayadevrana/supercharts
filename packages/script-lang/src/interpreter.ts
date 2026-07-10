@@ -175,6 +175,20 @@ const STABLE_PRICE_NAMES = new Set<string>([...PRICE_SOURCES, ...CONTEXT_NAMES, 
 const NAMESPACE_NAMES = new Set(['math', 'ta', 'input']);
 /** The date-time field names (subset of CONTEXT_NAMES that need a Date). */
 const DT_NAMES = new Set(['year', 'month', 'day', 'weekday', 'hour', 'minute', 'second']);
+/**
+ * Every name a bare assignment may NOT implicitly declare: price series, bar context,
+ * namespaces, and the bare-callable stdlib. Guards casual `ema = 5` typos from silently
+ * shadowing a built-in (an explicit `let` can still shadow deliberately). Exported so the
+ * editor can highlight the same set.
+ */
+export const BUILTIN_NAMES: ReadonlySet<string> = new Set<string>([
+  ...STABLE_PRICE_NAMES,
+  ...NAMESPACE_NAMES,
+  ...Object.keys(TA),
+  'nz',
+  'na',
+  'onTf',
+]);
 const slug = (s: string): string => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 /** Coerce an input default/override to a bool consistently (true / 1 / "true" / "1"). */
 const toBoolInput = (v: Value): boolean => v === true || v === 1 || v === 'true' || v === '1';
@@ -450,12 +464,23 @@ class Interpreter {
         return;
       }
       case 'assign': {
-        if (locals && locals.has(s.name)) {
-          locals.set(s.name, this.evalExpr(s.value, this.i, locals));
-          return;
+        if (locals) {
+          // Inside a fn/loop scope a bare assignment reads like every scripting language:
+          // update the local if it exists, otherwise declare a new local.
+          if (locals.has(s.name) || !this.globals.has(s.name)) {
+            if (!locals.has(s.name)) this.guardBuiltinName(s.name, s.pos);
+            locals.set(s.name, this.evalExpr(s.value, this.i, locals));
+            return;
+          }
         }
-        const b = this.globals.get(s.name);
-        if (!b) throw new RuntimeError(`assignment to undeclared '${s.name}'`, s.pos.line, s.pos.col);
+        let b = this.globals.get(s.name);
+        if (!b) {
+          // Implicit declaration — `fast = ema(close, 12)` without `let`. Behaves exactly
+          // like `mut` (per-bar series; use `persist` to carry state across bars).
+          this.guardBuiltinName(s.name, s.pos);
+          b = { kind: 'mut', history: [] };
+          this.globals.set(s.name, b);
+        }
         if (b.kind === 'let') throw new RuntimeError(`cannot reassign 'let ${s.name}' (use mut/persist)`, s.pos.line, s.pos.col);
         b.history[this.i] = this.evalExpr(s.value, this.i, locals);
         b.lastSet = this.i;
@@ -945,7 +970,7 @@ class Interpreter {
     if (agg.length > 0) {
       // Child interpreter over the aggregated candles — shares fns + input defs/overrides,
       // its own globals/caches. No interval → nested onTf inside it fails loud.
-      const child = new Interpreter({ meta: null, body: [] }, agg, {
+      const child = new Interpreter({ version: null, meta: null, body: [] }, agg, {
         inputs: this.inputOverrides,
         maxLoopSteps: this.maxLoopSteps,
         timeoutMs: this.timeoutMs,
@@ -1354,12 +1379,24 @@ class Interpreter {
     return v === null || (typeof v === 'number' && !Number.isFinite(v));
   }
 
+  /** Implicit declarations may not silently shadow a built-in (`ema = 5` is almost always a mistake). */
+  private guardBuiltinName(name: string, pos: { line: number; col: number }): void {
+    if (BUILTIN_NAMES.has(name)) {
+      throw new RuntimeError(
+        `'${name}' is a built-in — pick another name (or shadow it deliberately with 'let ${name} = …')`,
+        pos.line,
+        pos.col,
+      );
+    }
+  }
+
   /** Pre-pass: record every name the script binds, so the ta cache can tell a candle read from script state. */
   private collectDeclaredNames(): void {
     const walk = (stmts: Stmt[]): void => {
       for (const s of stmts) {
         switch (s.type) {
           case 'decl':
+          case 'assign': // a bare assignment implicitly declares (mut semantics)
             this.declaredNames.add(s.name);
             break;
           case 'fn':
@@ -1618,6 +1655,9 @@ class Interpreter {
 
 /** Run a parsed PulseScript program over candles. */
 export function interpret(program: Program, candles: readonly Candle[], opts?: RunOptions): RunResult {
+  if (program.version !== null && program.version !== 1) {
+    throw new RuntimeError(`unknown language version 'pulse ${program.version}' — this build understands pulse 1`, 1, 1);
+  }
   return new Interpreter(program, candles, opts).run();
 }
 

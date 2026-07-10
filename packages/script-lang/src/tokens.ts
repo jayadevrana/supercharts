@@ -31,6 +31,7 @@ export interface Token {
 
 /** PulseScript's reserved words. Declaration/structure words are deliberately our own. */
 export const KEYWORDS: ReadonlySet<string> = new Set([
+  'pulse',
   'meta',
   'let',
   'mut',

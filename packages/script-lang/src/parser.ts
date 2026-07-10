@@ -55,6 +55,14 @@ class Parser {
 
   parseProgram(): Program {
     this.skipNewlines();
+    // Optional version header: `pulse 1` on its own line at the very top.
+    let version: number | null = null;
+    if (this.atKeyword('pulse')) {
+      this.advance();
+      const v = this.expect('num');
+      version = Number(v.value);
+      this.skipNewlines();
+    }
     let meta: MetaNode | null = null;
     if (this.atKeyword('meta')) meta = this.parseMeta();
     const body: Stmt[] = [];
@@ -63,7 +71,7 @@ class Parser {
       body.push(this.parseStatement());
       this.skipNewlines();
     }
-    return { meta, body };
+    return { version, meta, body };
   }
 
   private parseMeta(): MetaNode {
@@ -84,6 +92,18 @@ class Parser {
     }
     this.expect('rbrace');
     return body;
+  }
+
+  /**
+   * A statement body: either a `{ … }` block or the low-indent colon form —
+   * `when cond: mark buy` — which takes exactly one statement on the same line.
+   */
+  private parseBody(): Stmt[] {
+    if (this.at('colon')) {
+      this.advance();
+      return [this.parseStatement()];
+    }
+    return this.parseBlock();
   }
 
   private parseStatement(): Stmt {
@@ -148,7 +168,7 @@ class Parser {
     if (this.atKeyword('else')) {
       this.advance();
       if (this.atKeyword('if')) return [this.parseIf()];
-      return this.parseBlock();
+      return this.parseBody();
     }
     this.i = save;
     return null;
@@ -157,7 +177,7 @@ class Parser {
   private parseIf(): Stmt {
     const kw = this.advance();
     const cond = this.parseExpr();
-    const then = this.parseBlock();
+    const then = this.parseBody();
     const elseBody = this.maybeElse();
     return { type: 'if', cond, then, else: elseBody, pos: this.posOf(kw) };
   }
@@ -165,7 +185,7 @@ class Parser {
   private parseWhen(): Stmt {
     const kw = this.advance();
     const cond = this.parseExpr();
-    const body = this.parseBlock();
+    const body = this.parseBody();
     return { type: 'when', cond, body, pos: this.posOf(kw) };
   }
 
@@ -175,21 +195,21 @@ class Parser {
     if (this.atKeyword('in')) {
       this.advance();
       const iter = this.parseExpr();
-      const body = this.parseBlock();
+      const body = this.parseBody();
       return { type: 'forIn', varName, iter, body, pos: this.posOf(kw) };
     }
     this.expect('op', '=');
     const from = this.parseExpr();
     this.expect('keyword', 'to');
     const to = this.parseExpr();
-    const body = this.parseBlock();
+    const body = this.parseBody();
     return { type: 'forRange', varName, from, to, body, pos: this.posOf(kw) };
   }
 
   private parseWhile(): Stmt {
     const kw = this.advance();
     const cond = this.parseExpr();
-    const body = this.parseBlock();
+    const body = this.parseBody();
     return { type: 'while', cond, body, pos: this.posOf(kw) };
   }
 

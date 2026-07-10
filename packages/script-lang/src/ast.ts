@@ -63,6 +63,8 @@ export interface MetaNode {
 }
 
 export interface Program {
+  /** Declared language version from a leading `pulse N` line; null when omitted. */
+  version: number | null;
   meta: MetaNode | null;
   body: Stmt[];
 }
