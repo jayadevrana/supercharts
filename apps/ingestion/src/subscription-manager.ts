@@ -48,6 +48,7 @@ export class SubscriptionManager {
     const map: Record<string, string> = {
       binance: 'binance',
       oanda: 'oanda',
+      kite: 'kite',
       mock: 'mock',
     };
     const id = map[venue];

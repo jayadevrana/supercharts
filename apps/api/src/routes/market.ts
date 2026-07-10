@@ -302,6 +302,8 @@ function resolveProvider(symbol: string, ctx: IngestionContext) {
       return ctx.providers.binance;
     case 'oanda':
       return ctx.providers.oanda;
+    case 'kite':
+      return ctx.providers.kite;
     case 'mock':
       return ctx.providers.mock;
     default:

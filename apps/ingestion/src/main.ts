@@ -7,6 +7,7 @@
  */
 import {
   BinanceProvider,
+  KiteProvider,
   MockProvider,
   OandaProvider,
   YahooProvider,
@@ -39,6 +40,8 @@ export interface IngestionContext {
      * concrete type doesn't matter to callers.
      */
     oanda: MarketDataProvider;
+    /** Indian-market data; reads only Kite's instrument, historical, quote, and WebSocket feeds. */
+    kite: KiteProvider;
     mock: MockProvider;
   };
 }
@@ -58,10 +61,16 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
       })
     : new YahooProvider();
   const mock = new MockProvider();
+  // Kite credentials are intentionally limited to the public API key plus a short-lived,
+  // operator-provided access token. Login/password/TOTP automation and every trading API are out of scope.
+  const kite = new KiteProvider({
+    apiKey: env.KITE_API_KEY ?? '',
+    accessToken: env.KITE_ACCESS_TOKEN ?? '',
+  });
 
   // Registered under the `oanda` key so the venue resolver (`OANDA:` → providers.oanda)
   // and every route keep working unchanged regardless of which feed is active.
-  const subscriptions = new SubscriptionManager({ binance, oanda: forex, mock });
+  const subscriptions = new SubscriptionManager({ binance, oanda: forex, kite, mock });
 
   if (binanceEnabled) {
     try {
@@ -79,6 +88,11 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
   } catch (err) {
      
     console.warn('[ingestion] forex provider connect failed:', err);
+  }
+  try {
+    await kite.connect();
+  } catch (err) {
+    console.warn('[ingestion] Kite catalog unavailable:', err);
   }
 
   // Backfill ~1 year of medium-frequency history for the default watchlist symbols.
@@ -109,7 +123,7 @@ export async function bootstrapIngestion(env: NodeJS.ProcessEnv = process.env): 
     heatmapAggregator,
     footprintAggregator,
     bus,
-    providers: { binance, oanda: forex, mock },
+    providers: { binance, oanda: forex, kite, mock },
   };
 }
 
