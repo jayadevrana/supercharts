@@ -29,7 +29,7 @@ SuperCharts gives you a full-stack alternative you can run, inspect, extend, and
 - **PulseScript**: original Pine-like scripting language with inputs, plots, markers, levels, background/candle painting, multi-timeframe `onTf`, sandboxing, persistence, and in-app editor.
 - **Strategy research**: MA-cross backtester, strategy tester for script marks, optimizer, walk-forward testing, robustness flags, paper-trading, P&L attribution, and portfolio heat.
 - **Automation bridge**: MT5 TCP bridge, order intents, account status, bulk automation hooks, Telegram delivery, Telegram broadcast channels, and inbound webhooks.
-- **Data integrations**: Binance public streams, OANDA onboarding, Yahoo FX/metals/index fallback, GDELT news, Forex Factory calendar mirror, custom CSV OHLC imports, and optional paid-provider keys.
+- **Data integrations**: Binance public streams, read-only Zerodha Kite Indian-market catalog/history/live quotes, OANDA onboarding, Yahoo FX/metals/index fallback, GDELT news, Forex Factory calendar mirror, custom CSV OHLC imports, and optional paid-provider keys.
 
 ## Screenshots
 
@@ -94,6 +94,12 @@ Open [http://localhost:3000](http://localhost:3000), then launch the terminal.
 
 The default crypto path works with Binance public data and does not require an API key. Optional providers such as OANDA, CryptoPanic, Finnhub, Twelve Data, Polygon, and Stripe require your own keys.
 
+### Indian-market data via Zerodha Kite
+
+SuperCharts can search every active instrument from Kite's daily NSE, BSE, NFO, MCX, CDS, and index catalog, then load a real chart for the selected `KITE:<exchange>:<symbol>` instrument. Configure `KITE_API_KEY` and a fresh `KITE_ACCESS_TOKEN` in your ignored local `.env`. Obtain the access token through Kite's official interactive login flow; SuperCharts does not collect or automate broker usernames, passwords, TOTP values, API secrets, orders, GTTs, portfolio calls, or any other trading operation.
+
+Kite history is capped to one year per request. The terminal fetches only the selected symbol/interval, and live updates are demand-driven for open charts. Supported Kite resolutions are 1m, 3m, 5m, 15m, 30m, 1h, and 1D. Expired derivatives may not be discoverable because they are absent from Kite's active instrument dump.
+
 ## Environment
 
 Use [.env.example](.env.example) as the canonical reference. The important defaults:
@@ -125,12 +131,14 @@ SuperCharts does not fabricate market data.
 - Binance spot/futures features use Binance public streams and REST endpoints.
 - Forex order books and centralized volume are not invented when a provider does not supply them.
 - Optional providers report `not_configured` instead of silently faking responses.
+- Kite live subscriptions are limited by provider capacity; symbols above that capacity remain searchable and historical-only rather than showing fabricated live data.
 - Backtests and optimizer results should be treated as research outputs, not financial advice.
 
 ## Security Notes
 
 - The current local demo uses a simplified development auth model.
 - Do not expose your local API publicly unless `DEMO_MODE=1` is enabled and you understand the read-only guard.
+- The Kite provider has an explicit market-data-only endpoint allowlist. It does not expose a trade-placement or account-management path.
 - Keep `.env`, `.env.local`, SQLite databases, and screenshots with private account details out of git.
 - Review [SECURITY.md](SECURITY.md) before deploying or accepting outside contributions.
 

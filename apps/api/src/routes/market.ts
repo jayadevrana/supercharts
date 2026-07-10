@@ -64,6 +64,14 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
     }
     const { symbol, interval, from, to, limit } = parsed.data;
     const interval_ = interval as Interval;
+    const now = Date.now();
+    const requestedFrom = from ?? now - 7 * 24 * 60 * 60_000;
+    const toMs = to ?? now;
+    // Kite's configured history policy is exactly one year. Keep this clamp server-side so
+    // every caller (chart, scan, curl, or a future UI) observes the same storage budget.
+    const fromMs = symbol.startsWith('KITE:')
+      ? Math.max(requestedFrom, now - 365 * 24 * 60 * 60_000)
+      : requestedFrom;
 
     // Custom CSV-imported datasets (Phase 3 #14) live only in the cache under a CUSTOM: venue.
     // Serve every stored row regardless of the requested window so historical uploads chart even
@@ -76,15 +84,14 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
     const provider = resolveProvider(symbol, ctx);
 
     // 1) Hit hot in-memory store first.
-    const cached = ctx.candleStore.query(symbol, interval_, from, to, limit ?? 10000);
+    const cached = ctx.candleStore.query(symbol, interval_, fromMs, toMs, limit ?? 10000);
 
     // Decide whether the cache already covers the request. The cache is sufficient if
     // it spans the requested window OR if we have at least `limit` rows.
     const expected = (() => {
-      if (from == null || to == null) return 0;
       const stepMs = INTERVAL_TO_MS[interval_];
       if (!stepMs) return 0;
-      return Math.floor((to - from) / stepMs);
+      return Math.floor((toMs - fromMs) / stepMs);
     })();
     const enough =
       cached.length > 0 &&
@@ -96,8 +103,6 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
       return { candles: cached, source: 'cache' };
     }
 
-    const fromMs = from ?? Date.now() - 7 * 24 * 60 * 60_000;
-    const toMs = to ?? Date.now();
     try {
       const candles = await provider.fetchHistoricalCandles(
         symbol,

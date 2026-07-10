@@ -18,15 +18,17 @@ const candle: Candle = {
 describe('Kite market routes', () => {
   it('returns Kite catalog records through normal symbol search and candles routes', async () => {
     const app = Fastify();
-    const provider = { searchSymbols: async () => [symbol], getSymbol: async () => symbol, fetchHistoricalCandles: async () => [candle], capabilities: { historicalCandles: true, volumeKind: 'real' } };
+    let requestedFrom = 0;
+    const provider = { searchSymbols: async () => [symbol], getSymbol: async () => symbol, fetchHistoricalCandles: async (_symbol: string, _interval: string, from: number) => { requestedFrom = from; return [candle]; }, capabilities: { historicalCandles: true, volumeKind: 'real' } };
     const ctx = { providers: { kite: provider }, candleStore: { query: () => [], upsert: () => {} }, subscriptions: { acquire: () => {}, health: () => [] }, heatmapAggregator: { history: () => [] }, deepTradeDetector: { history: () => [] } };
     marketRoutes(app, ctx as never);
     const search = await app.inject('/api/symbols/search?q=infy');
     expect(search.statusCode).toBe(200);
     expect(search.json().items[0]).toMatchObject({ id: symbol.id, provider: 'kite' });
-    const chart = await app.inject(`/api/candles?symbol=${symbol.id}&interval=1d`);
+    const chart = await app.inject(`/api/candles?symbol=${symbol.id}&interval=1d&from=0&to=${Date.now()}`);
     expect(chart.statusCode).toBe(200);
     expect(chart.json().candles).toHaveLength(1);
+    expect(requestedFrom).toBeGreaterThan(Date.now() - 366 * 24 * 60 * 60_000);
     await app.close();
   });
 });

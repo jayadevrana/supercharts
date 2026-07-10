@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, Star } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { Interval } from '@supercharts/types';
+import { supportsInterval } from './interval-support';
 
 export interface IntervalMeta {
   value: Interval;
@@ -39,20 +40,6 @@ const GROUP_LABEL: Record<IntervalMeta['group'], string> = {
   days: 'Days',
   longer: 'Months',
 };
-
-/** Which resolutions a venue actually serves — Binance/OANDA differ; everything else allows all. */
-export function supportsInterval(symbol: string, interval: Interval): boolean {
-  const venue = symbol.split(':')[0]?.toUpperCase();
-  if (venue === 'BINANCE') {
-    const ok = new Set<Interval>(['1s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w', '1mo']);
-    return ok.has(interval);
-  }
-  if (venue === 'OANDA') {
-    const ok = new Set<Interval>(['5s', '15s', '30s', '1m', '5m', '15m', '30m', '1h', '2h', '4h', '12h', '1d', '1w', '1mo']);
-    return ok.has(interval);
-  }
-  return true;
-}
 
 const FAVORITES_KEY = 'sc-interval-favorites';
 const DEFAULT_FAVORITES: Interval[] = ['1m', '5m', '15m', '1h', '4h', '1d'];
