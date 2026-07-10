@@ -6,6 +6,7 @@ import rateLimit from '@fastify/rate-limit';
 import { bootstrapIngestion } from '@supercharts/ingestion';
 import { openDB } from './db';
 import { marketRoutes } from './routes/market';
+import { scannerRoutes } from './routes/scanner';
 import { drawingRoutes } from './routes/drawings';
 import { layoutRoutes } from './routes/layouts';
 import { scriptRoutes } from './routes/scripts';
@@ -215,6 +216,7 @@ async function start(): Promise<void> {
   }));
 
   marketRoutes(app, ingestion);
+  scannerRoutes(app, ingestion);
   drawingRoutes(app, db);
   layoutRoutes(app, db);
   scriptRoutes(app, db);
