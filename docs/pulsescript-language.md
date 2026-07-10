@@ -23,16 +23,19 @@ There is no look-ahead anywhere: every built-in is causal, and multi-timeframe r
 
 ## 2. Syntax
 
+- `pulse 1` — optional version header on the first line (unknown versions fail loud).
 - `#` starts a line comment (no block comments).
 - Newlines separate statements; expressions inside `(…)` / `[…]` may wrap freely.
-- Blocks use `{ }`.
+- Blocks use `{ }`, or the **low-indent colon form**: `when cond: mark buy` — a colon takes
+  exactly one statement on the same line (works for `when`/`if`/`else`/`for`/`while`).
 - Strings use double quotes with `\n`, `\t`, `\"` escapes.
-- `meta(name: "My Study", overlay: true)` — optional, first statement, declares the script.
+- `meta(name: "My Study", overlay: true)` — optional, first statement after the version line.
 
 ## 3. Declarations
 
 | form | meaning |
 |---|---|
+| `x = expr` | **the everyday form** — first assignment declares (same semantics as `mut`); assigning to a built-in name (`close`, `ema`, …) errors with guidance |
 | `let x = expr` | per-bar binding, recomputed every bar, **not** reassignable |
 | `mut x = expr` | per-bar binding, reassignable within the bar (`x = …`) |
 | `persist x = expr` | initialised **once** on the first bar its statement runs, carries its value across bars; reassign with `x = …`. The accumulator/state primitive. |

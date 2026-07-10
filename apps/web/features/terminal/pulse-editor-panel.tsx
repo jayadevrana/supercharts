@@ -14,6 +14,7 @@ import { toast } from '@/components/use-toast';
 import { formatSymbolLabel } from '@/lib/format';
 import { useTerminalStore, SAMPLE_PULSE, type PulseResult } from './terminal-store';
 import type { InputDef } from '@supercharts/script-lang';
+import type { Extension } from '@codemirror/state';
 
 interface SavedScript {
   id: string;
@@ -87,6 +88,21 @@ const CodeMirror = dynamic(() => import('@uiw/react-codemirror').then((m) => m.d
   loading: () => <div className="flex h-full items-center justify-center text-xs text-muted-foreground">Loading editor…</div>,
 });
 
+/** PulseScript syntax highlighting — lazy-loaded so it rides the editor chunk, not the page. */
+function usePulseExtensions(): Extension[] {
+  const [ext, setExt] = useState<Extension[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void import('./pulse-language').then((m) => {
+      if (alive) setExt(m.pulseExtensions());
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return ext;
+}
+
 const MIN_H = 180;
 const DEFAULT_H = 340;
 const HEADER_H = 42;
@@ -108,6 +124,7 @@ export function PulseEditorPanel() {
 
   const [draft, setDraft] = useState(pane.pulse.source);
   const [height, setHeight] = useState(DEFAULT_H);
+  const pulseExt = usePulseExtensions();
   // Right column: Console (run output + inputs) | Strategy Tester | input Optimizer.
   const [rightTab, setRightTab] = useState<'console' | 'tester' | 'optimizer'>('console');
   const [btRunning, setBtRunning] = useState(false);
@@ -435,6 +452,7 @@ export function PulseEditorPanel() {
             onChange={(v: string) => setDraft(v)}
             theme="dark"
             height={`${bodyH}px`}
+            extensions={pulseExt}
             basicSetup={{ lineNumbers: true, foldGutter: false, highlightActiveLine: true }}
             style={{ fontSize: 13 }}
           />

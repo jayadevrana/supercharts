@@ -8,24 +8,21 @@ import type { DataWindowSnapshot } from './data-window-util';
 import { reorderInstances } from './indicator-manager-util';
 
 /** Default PulseScript shown in a fresh code terminal — exercises inputs, ta.*, draw, and marks. */
-export const SAMPLE_PULSE = `# EMA cross study — PulseScript
+export const SAMPLE_PULSE = `pulse 1
 meta(name: "EMA Cross", overlay: true)
 
-let fastLen = input.num(12, "Fast EMA", 2, 100)
-let slowLen = input.num(26, "Slow EMA", 2, 200)
+# Two EMAs — tweak the lengths from the Inputs panel.
+fastLen = input.num(12, "Fast EMA", 2, 100)
+slowLen = input.num(26, "Slow EMA", 2, 200)
 
-let fast = ema(close, fastLen)
-let slow = ema(close, slowLen)
+fast = ema(close, fastLen)
+slow = ema(close, slowLen)
 
 draw line(fast, color: "#38bdf8", title: "Fast EMA")
 draw line(slow, color: "#f59e0b", title: "Slow EMA")
 
-when crossOver(fast, slow) {
-  mark buy at low "Long"
-}
-when crossUnder(fast, slow) {
-  mark sell at high "Short"
-}
+when crossOver(fast, slow): mark buy at low "Long"
+when crossUnder(fast, slow): mark sell at high "Short"
 `;
 
 /** Per-pane PulseScript editor + render state. */
