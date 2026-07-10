@@ -196,6 +196,18 @@ interface TerminalStore {
   /** Move an indicator one slot up/down within a pane's list (legend + manager + render order). */
   reorderIndicator: (id: string, indicatorId: string, dir: 'up' | 'down') => void;
   setDrawTool: (tool: string | null) => void;
+  /** Magnet: drawing points snap to the nearest candle's O/H/L/C. */
+  magnetSnap: boolean;
+  toggleMagnetSnap: () => void;
+  /** Lock all drawings — existing drawings can't be selected or dragged (new ones still allowed). */
+  drawingsLocked: boolean;
+  toggleDrawingsLocked: () => void;
+  /** Hide all drawings — the layer renders nothing and drawings are inert until shown again. */
+  drawingsHidden: boolean;
+  toggleDrawingsHidden: () => void;
+  /** One-shot request (same token pattern as dialogRequest): active pane clears all its drawings. */
+  clearDrawingsRequest: { token: number } | null;
+  requestClearDrawings: () => void;
   setShowLeftRail: (v: boolean) => void;
   setShowRightRail: (v: boolean) => void;
   setShowBottomPanel: (v: boolean) => void;
@@ -458,6 +470,15 @@ export const useTerminalStore = create<TerminalStore>((set) => ({
     })),
 
   setDrawTool: (tool) => set({ drawTool: tool }),
+  magnetSnap: false,
+  toggleMagnetSnap: () => set((s) => ({ magnetSnap: !s.magnetSnap })),
+  drawingsLocked: false,
+  toggleDrawingsLocked: () => set((s) => ({ drawingsLocked: !s.drawingsLocked })),
+  drawingsHidden: false,
+  toggleDrawingsHidden: () => set((s) => ({ drawingsHidden: !s.drawingsHidden })),
+  clearDrawingsRequest: null,
+  requestClearDrawings: () =>
+    set((s) => ({ clearDrawingsRequest: { token: (s.clearDrawingsRequest?.token ?? 0) + 1 } })),
   setShowLeftRail: (v) => set({ showLeftRail: v }),
   setShowRightRail: (v) => set({ showRightRail: v }),
   setShowBottomPanel: (v) => set({ showBottomPanel: v }),
