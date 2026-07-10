@@ -58,7 +58,7 @@ verification specs per item live in `.audit/launch/` design files (scanner/docs)
 ### Phase A — Launch surface (the owner's three explicit asks; no auth dependency)
 | # | ID | Session | Done |
 |---|----|---------|------|
-| 1 | SCAN-1 | Screener query engine: pure `runScan` + `POST /api/scanner/scan` + presets (oversold/overbought/breakout/volume-surge/MA-cross), reusing signal-eval + computeAll; per-symbol honest status | [ ] |
+| 1 | SCAN-1 | Screener query engine: pure `runScan` + `POST /api/scanner/scan` + presets (oversold/overbought/breakout/volume-surge/MA-cross), reusing signal-eval + computeAll; per-symbol honest status | [x] `3868ebb` |
 | 2 | SCAN-2 | Scanner tab → real screener UI: preset chips, timeframe pills, sortable metric columns, click-to-open, refresh cadence, honest states (extract `scanner-tab.tsx` from right-rail) | [ ] |
 | 3 | SCAN-3 | Custom screen builder (SignalCondition rows) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [ ] |
 | 4 | SCAN-4 | PulseScript-powered scan: run a saved script across the universe, matched = last-closed-bar alert()/mark; per-symbol script errors isolated | [ ] |
