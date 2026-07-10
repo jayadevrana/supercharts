@@ -34,6 +34,7 @@ increment per session, tick the box there AND log here.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-11 | **M3/DOCS-1** — public /docs (Overview + Getting started + Language tour), server-side highlighting from the language's own keyword sets, copy + `?pulse=` run-in-terminal deep link, header Docs link; all 9 samples interpreter-executed in tests | feat(docs): public PulseScript docs | 10 tests → 450/450; browser: pages render w/ colors, deep link loaded a docs sample into the live dock, URL stripped; 0 console errors |
 | 2026-07-11 | **M2/SCAN-4** — PulseScript scans: `runScriptScan` (parse once → 400 w/ line/col; 500ms/symbol sandbox; matched = mark/alert() on LAST closed bar; per-symbol `script_error` rows) + `scriptId` on POST /api/scanner/scan + Script mode in the tab (saved-script dropdown + Run) | see `git log` (feat(scanner): PulseScript-powered scans) | 6 tests → 440/440; script matches agreed 16/16 + 26/26 with the independent emaDistPct metric; UI run 15 matched; 404/400 paths; 0 console errors |
 | 2026-07-10 | **M1/SCAN-3** — Custom screen builder (RSI/Close-vs-EMA/RVOL rows → SignalCondition via pure `scanner-screen-util.ts`, ALL/ANY, explicit Run) + per-user saved screens (`scanner_screens` table + CRUD `/api/scanner/screens`, chips w/ load+delete) | `dad7d64` | 5 tests → 434/434; UI screen RSI>55∧RVOL>1.5 = exactly API matches (DOT/ETH); save→load→delete round-trip server-verified; 0 console errors |
 | 2026-07-10 | **SCAN-2** — Scanner tab is a real screener: mode chips (Movers + All + 6 presets), timeframe pills, sortable columns (pure `scanner-tab-util.ts`), click-to-open, refresh, error+Retry, honest footer. New `scanner-tab.tsx` extracted from right-rail | `dac7efe` | 5 util tests → suite 429/429; browser: Volume-surge preset = exactly the API's 7 matches (RVOL>2), sort asc/desc verified, row click loaded BTCUSDT, honest 0-match state, 0 console errors |
@@ -45,7 +46,7 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- (nothing — pick up **M3/DOCS-1** next: public /docs shell, design in .audit/launch/docs-design.json)
+- (nothing — pick up **M4/DOCS-2** next: exhaustive ta./math./input./outputs reference, typed Record<keyof typeof TA, DocEntry>, every example interpreter-tested)
 
 ## Next
 
@@ -54,6 +55,12 @@ a runnable example per function, Pine-reference style + “Coming from Pine” s
 linked from the home page) → M6-M10/PULSE (sub-pane plots, script drawing objects, alert()
 bridge to Telegram, interpreter optimization w/ benchmark, editor autocomplete/hover/squiggles)
 → IND-1..2 → Phase B (auth).
+
+## Perf findings queued for M9 (interpreter optimization)
+
+- A `ta.*` call INSIDE a user `fn` body defeats the run-cache (locals present) → O(n²):
+  6000 bars × ta.stdev hit the 2s sandbox timeout. Fix candidates: memoize ta calls whose
+  args are fn-params bound to stable series, or hoist-detect. Found by tests/docs-samples.test.ts.
 
 ## Known landmines for newcomers
 
