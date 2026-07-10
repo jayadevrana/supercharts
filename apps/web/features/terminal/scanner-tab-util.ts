@@ -2,7 +2,8 @@
 
 export interface UiScanRow {
   symbol: string;
-  status: 'ok' | 'insufficient_data' | 'unavailable';
+  status: 'ok' | 'insufficient_data' | 'unavailable' | 'script_error';
+  error?: string;
   bars: number;
   metrics: Record<string, number | null>;
   matched: boolean;
@@ -26,17 +27,20 @@ export function sortScanRows(rows: readonly UiScanRow[], key: ScanSortKey, dir: 
 }
 
 /** Honest scan summary for the footer: how many really scanned, matched, and lacked data. */
-export function summarizeScan(rows: readonly UiScanRow[]): { scanned: number; matched: number; noData: number } {
+export function summarizeScan(rows: readonly UiScanRow[]): { scanned: number; matched: number; noData: number; scriptErrors: number } {
   let scanned = 0;
   let matched = 0;
   let noData = 0;
+  let scriptErrors = 0;
   for (const r of rows) {
     if (r.status === 'ok') {
       scanned += 1;
       if (r.matched) matched += 1;
+    } else if (r.status === 'script_error') {
+      scriptErrors += 1;
     } else {
       noData += 1;
     }
   }
-  return { scanned, matched, noData };
+  return { scanned, matched, noData, scriptErrors };
 }

@@ -85,6 +85,12 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
   const logicRef = useRef(logic);
   logicRef.current = logic;
 
+  // Script scan (M2/SCAN-4): pick a saved PulseScript and run it across the universe.
+  const [scripts, setScripts] = useState<Array<{ id: string; name: string }>>([]);
+  const [scriptId, setScriptId] = useState<string>('');
+  const scriptIdRef = useRef(scriptId);
+  scriptIdRef.current = scriptId;
+
   const loadSaved = useCallback(() => {
     void api<{ items: SavedScreen[] }>('/scanner/screens')
       .then((r) => setSaved(r.items))
@@ -95,6 +101,9 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
     void api<{ presets: ScanPresetMeta[] }>('/scanner/presets')
       .then((r) => setPresets(r.presets))
       .catch(() => setPresets([]));
+    void api<{ items: Array<{ id: string; name: string }> }>('/scripts')
+      .then((r) => setScripts(r.items.map((s) => ({ id: s.id, name: s.name }))))
+      .catch(() => setScripts([]));
     loadSaved();
   }, [loadSaved]);
 
@@ -124,7 +133,14 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
     try {
       const body: Record<string, unknown> = { interval };
       if (mode === 'custom') body.screen = buildCustomScreen(rowsRef.current, logicRef.current);
-      else if (mode !== 'all') body.preset = mode;
+      else if (mode === 'script') {
+        if (!scriptIdRef.current) {
+          setScanError('pick a saved script first');
+          setScanLoading(false);
+          return;
+        }
+        body.scriptId = scriptIdRef.current;
+      } else if (mode !== 'all') body.preset = mode;
       const r = await api<ScanResponse>('/scanner/scan', { method: 'POST', body: JSON.stringify(body) });
       if (seq === scanSeq.current) {
         setScan(r);
@@ -138,9 +154,9 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
   }, [mode, interval]);
 
   // Scan modes — fetch on mode/interval change + slow refresh (server caches 20s anyway).
-  // Custom mode runs only on the explicit Run button (rows change on every keystroke).
+  // Custom + Script modes run only on the explicit Run button.
   useEffect(() => {
-    if (mode === 'movers' || mode === 'custom') return;
+    if (mode === 'movers' || mode === 'custom' || mode === 'script') return;
     setScan(null);
     setScanError(null);
     void runScanNow();
@@ -175,12 +191,13 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
           { id: 'all', name: 'All', description: 'Metrics table across the whole catalog' },
           ...presets,
           { id: 'custom', name: 'Custom', description: 'Build your own screen — conditions evaluated on real closed bars' },
+          { id: 'script', name: 'Script', description: 'Run a saved PulseScript across every symbol — a match is a signal on the last closed bar' },
         ].map((p) => (
           <button
             key={p.id}
             onClick={() => {
               setMode(p.id);
-              if (p.id === 'custom') {
+              if (p.id === 'custom' || p.id === 'script') {
                 setScan(null);
                 setScanError(null);
               }
@@ -234,6 +251,35 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
               }}
             />
           ) : null}
+          {mode === 'script' ? (
+            <div className="flex items-center gap-1.5 border-b border-border/60 px-2 py-2">
+              <select
+                aria-label="Saved script"
+                value={scriptId}
+                onChange={(e) => setScriptId(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-border bg-surface-sunken px-1.5 py-1 text-[11px]"
+              >
+                <option value="">
+                  {scripts.length === 0 ? 'No saved scripts yet — save one in the Script dock' : 'Pick a saved script…'}
+                </option>
+                {scripts.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="xs"
+                variant="primary"
+                className="h-6 gap-1 px-2 text-[10px]"
+                onClick={() => void runScanNow()}
+                disabled={scanLoading || !scriptId}
+                title="Run the script across every symbol — a match is a mark or alert() on the last closed bar"
+              >
+                <Play className="h-3 w-3" aria-hidden="true" /> {scanLoading ? 'Running…' : 'Run'}
+              </Button>
+            </div>
+          ) : null}
           {/* Timeframe pills + refresh */}
           <div className="flex items-center gap-1 border-b border-border/60 px-2 py-1.5">
             {SCAN_INTERVALS.map((tf) => (
@@ -271,10 +317,13 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
                 Retry
               </Button>
             </div>
-          ) : !scan && mode === 'custom' && !scanLoading ? (
+          ) : !scan && (mode === 'custom' || mode === 'script') && !scanLoading ? (
             <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              Build conditions above, then press <span className="font-semibold text-foreground">Run</span> — the screen
-              evaluates on real closed bars across the whole catalog.
+              {mode === 'custom' ? (
+                <>Build conditions above, then press <span className="font-semibold text-foreground">Run</span> — the screen evaluates on real closed bars across the whole catalog.</>
+              ) : (
+                <>Pick a saved PulseScript and press <span className="font-semibold text-foreground">Run</span> — a symbol matches when the script marks or alerts on its last closed bar.</>
+              )}
             </div>
           ) : !scan ? (
             <div className="space-y-2 p-3">
@@ -336,7 +385,8 @@ export function ScannerTab({ onPick }: { onPick: (s: string) => void }) {
               {summary ? (
                 <div className="border-t border-border/60 px-3 py-1.5 text-[10px] text-muted-foreground">
                   {summary.scanned} scanned · {mode === 'all' ? `${summary.scanned} shown` : `${summary.matched} matched`}
-                  {summary.noData > 0 ? ` · ${summary.noData} without enough data` : ''} · {interval}
+                  {summary.noData > 0 ? ` · ${summary.noData} without enough data` : ''}
+                  {summary.scriptErrors > 0 ? ` · ${summary.scriptErrors} script errors` : ''} · {interval}
                 </div>
               ) : null}
             </>

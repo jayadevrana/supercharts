@@ -36,10 +36,11 @@ describe('sortScanRows', () => {
 
 describe('summarizeScan', () => {
   it('counts scanned / matched / no-data honestly', () => {
-    expect(summarizeScan(ROWS)).toEqual({ scanned: 3, matched: 3, noData: 2 });
+    expect(summarizeScan(ROWS)).toEqual({ scanned: 3, matched: 3, noData: 2, scriptErrors: 0 });
   });
 
   it('empty input → zeros', () => {
-    expect(summarizeScan([])).toEqual({ scanned: 0, matched: 0, noData: 0 });
+    expect(summarizeScan([])).toEqual({ scanned: 0, matched: 0, noData: 0, scriptErrors: 0 });
+    expect(summarizeScan([row('X', 'script_error')])).toEqual({ scanned: 0, matched: 0, noData: 0, scriptErrors: 1 });
   });
 });

@@ -12,7 +12,8 @@ import { getUser } from '../auth';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { Interval, SignalCondition } from '@supercharts/types';
 import { INTERVALS, SYMBOL_CATALOG } from '@supercharts/types';
-import { runScan, type ScanResult, type ScanScreen } from '../scanner';
+import { runScan, runScriptScan, type ScanResult, type ScanScreen } from '../scanner';
+import { parse } from '@supercharts/script-lang';
 import { SCAN_PRESETS, presetScreen } from '../scan-presets';
 import { ensureBarsMany } from '../candle-window';
 
@@ -36,6 +37,8 @@ const conditionSchema = z.object({ type: z.string().min(1) }).passthrough();
 const scanSchema = z.object({
   interval: z.string().refine((v) => INTERVAL_SET.has(v as Interval), 'unknown interval'),
   preset: z.string().optional(),
+  /** Run a saved PulseScript across the universe instead of conditions (M2/SCAN-4). */
+  scriptId: z.string().optional(),
   screen: z
     .object({
       conditions: z.array(conditionSchema).max(10),
@@ -131,7 +134,27 @@ export function scannerRoutes(fastify: FastifyInstance, ctx: IngestionContext, d
       reply.code(400);
       return { error: 'invalid_payload', details: parsed.error.flatten() };
     }
-    const { interval, preset, screen, symbols } = parsed.data;
+    const { interval, preset, screen, symbols, scriptId } = parsed.data;
+
+    // Script scan path — load the saved script, parse errors → 400 with line/col.
+    let script: { id: string; source: string; updatedAt: number } | null = null;
+    if (scriptId) {
+      const user = getUser(req, db);
+      const row = db.raw
+        .prepare('SELECT id, source, updated_at as updatedAt FROM user_scripts WHERE id = ? AND user_id = ?')
+        .get(scriptId, user.id) as { id: string; source: string; updatedAt: number } | undefined;
+      if (!row) {
+        reply.code(404);
+        return { error: 'script_not_found' };
+      }
+      script = row;
+      try {
+        parse(script.source); // syntax errors are the caller's problem — honest 400, not a 500
+      } catch (err) {
+        reply.code(400);
+        return { error: 'script_parse_error', message: err instanceof Error ? err.message : String(err) };
+      }
+    }
 
     let scanScreen: ScanScreen;
     if (preset) {
@@ -148,7 +171,11 @@ export function scannerRoutes(fastify: FastifyInstance, ctx: IngestionContext, d
     }
 
     const universe = symbols && symbols.length > 0 ? symbols : SYMBOL_CATALOG.map((s) => s.id);
-    const key = JSON.stringify([interval, preset ?? screen ?? null, universe]);
+    const key = JSON.stringify([
+      interval,
+      script ? ['script', script.id, script.updatedAt] : preset ?? screen ?? null,
+      universe,
+    ]);
 
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.result;
@@ -158,7 +185,9 @@ export function scannerRoutes(fastify: FastifyInstance, ctx: IngestionContext, d
     const job = (async (): Promise<ScanResult> => {
       try {
         const bySymbol = await ensureBarsMany(ctx, universe, interval as Interval, SCAN_BARS);
-        const result = runScan(bySymbol, { interval: interval as Interval, screen: scanScreen, now: Date.now() });
+        const result = script
+          ? runScriptScan(bySymbol, script.source, { interval: interval as Interval, now: Date.now() })
+          : runScan(bySymbol, { interval: interval as Interval, screen: scanScreen, now: Date.now() });
         cache.set(key, { at: Date.now(), result });
         // Bounded cache — screens are user-generated keys.
         if (cache.size > 100) {
