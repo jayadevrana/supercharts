@@ -34,6 +34,9 @@ import { MT5Store, startMT5Bridge, createIntentRouter } from './mt5';
 import { createSignalRunner } from './mt5/signal-runner';
 import type { SignalRecipe, Interval } from '@supercharts/types';
 import { AlertEngine } from './alert-engine';
+import { loadEnvFile } from './env';
+
+loadEnvFile();
 
 const PORT = Number(process.env.PORT ?? 4000);
 const HOST = process.env.HOST ?? '127.0.0.1';
