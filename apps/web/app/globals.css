@@ -192,3 +192,20 @@ input[type='number'] {
 canvas:focus {
   outline: none;
 }
+
+/* PulseScript docs code blocks — same palette as the editor tokenizer (pulse-language.ts). */
+.pulse-code .tok-comment { color: #66737f; font-style: italic; }
+.pulse-code .tok-string { color: #7ee787; }
+.pulse-code .tok-number { color: #f0b429; }
+.pulse-code .tok-atom { color: #f78c6c; }
+.pulse-code .tok-control { color: #c792ea; font-weight: 600; }
+.pulse-code .tok-decl { color: #82aaff; font-weight: 600; }
+.pulse-code .tok-output { color: #38bdf8; font-weight: 600; }
+.pulse-code .tok-namespace { color: #38bdf8; }
+.pulse-code .tok-price { color: #4ec9b0; }
+.pulse-code .tok-builtin { color: #61afef; }
+.pulse-code .tok-fn { color: #ffd866; }
+.pulse-code .tok-prop { color: #e5c07b; }
+.pulse-code .tok-op { color: #9aa7b8; }
+.pulse-code .tok-buy { color: #22c55e; font-weight: 700; }
+.pulse-code .tok-sell { color: #ef4444; font-weight: 700; }

@@ -17,6 +17,23 @@ export default function TerminalPage() {
   const refreshAccounts = useMT5Store((s) => s.refreshAccounts);
   const refreshPositions = useMT5Store((s) => s.refreshPositions);
 
+  // Docs deep link: /terminal?pulse=<base64url(code)> loads the snippet into the Script dock
+  // (one-shot, then stripped from the URL so refresh doesn't re-apply it).
+  useEffect(() => {
+    const encoded = new URLSearchParams(window.location.search).get('pulse');
+    if (!encoded) return;
+    try {
+      const bytes = Uint8Array.from(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      const code = new TextDecoder().decode(bytes);
+      const s = useTerminalStore.getState();
+      s.setPulseSource(s.activePaneId, code);
+      s.setShowBottomPanel(true);
+    } catch {
+      /* malformed param — ignore, never crash the terminal */
+    }
+    window.history.replaceState(null, '', '/terminal');
+  }, []);
+
   useEffect(() => {
     const ws = getWSClient();
     void refreshAccounts();

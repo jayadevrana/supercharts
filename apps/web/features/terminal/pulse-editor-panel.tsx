@@ -148,11 +148,12 @@ export function PulseEditorPanel() {
   const [listPop, setListPop] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
 
-  // Re-seed the editor when the active pane changes (each pane keeps its own script).
+  // Re-seed the editor when the active pane changes (each pane keeps its own script) or when
+  // the pane's stored source is replaced externally (docs "Run in terminal" deep link, Open).
   useEffect(() => {
     setDraft(pane.pulse.source);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.id]);
+  }, [pane.id, pane.pulse.source]);
 
   const loadList = useCallback(async (): Promise<void> => {
     try {

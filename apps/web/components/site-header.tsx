@@ -19,6 +19,9 @@ export function SiteHeader() {
           <Link href="/#orderflow" className="rounded-md px-3 py-1.5 hover:text-foreground">
             Order flow
           </Link>
+          <Link href="/docs" className="rounded-md px-3 py-1.5 hover:text-foreground">
+            Docs
+          </Link>
           <Link href="/pricing" className="rounded-md px-3 py-1.5 hover:text-foreground">
             Pricing
           </Link>
