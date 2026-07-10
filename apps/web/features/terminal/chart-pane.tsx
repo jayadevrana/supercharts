@@ -312,7 +312,9 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
       handlers: {
         onCreate: async (d) => {
           drawingsRef.current = [...drawingsRef.current, d];
-          await api('/drawings', {
+          // The server assigns its own id — return it so the controller adopts it and
+          // later drags/deletes hit the persisted row (they 404'd silently before).
+          const res = await api<{ drawing?: DrawingObject }>('/drawings', {
             method: 'POST',
             body: JSON.stringify({
               symbol: d.symbol,
@@ -330,7 +332,13 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
             }),
           }).catch(() => {
             /* offline — ok */
+            return undefined;
           });
+          const serverId = res?.drawing?.id;
+          if (serverId && serverId !== d.id) {
+            drawingsRef.current = drawingsRef.current.map((x) => (x.id === d.id ? { ...x, id: serverId } : x));
+          }
+          return serverId;
         },
         onUpdate: async (d) => {
           await api(`/drawings/${d.id}`, {

@@ -5,8 +5,12 @@ import type { ChartCore, ChartPointerEvent } from '@supercharts/chart-core';
 import { nanoid } from './nanoid';
 
 export interface DrawingDraftHandler {
-  /** Called when a new drawing is created and should be persisted. */
-  onCreate(d: DrawingObject): void | Promise<void>;
+  /**
+   * Called when a new drawing is created and should be persisted. May return the
+   * PERSISTED id (the server assigns its own) — the controller adopts it so later
+   * updates/deletes hit the stored row instead of silently 404ing until a reload.
+   */
+  onCreate(d: DrawingObject): void | string | Promise<void | string>;
   /** Called when the user updates an existing drawing (drag, edit). */
   onUpdate(d: DrawingObject): void | Promise<void>;
   /** Called when the user deletes a drawing. */
@@ -145,6 +149,18 @@ export class DrawingController {
     return { time: e.time, price: e.price };
   }
 
+  /** Persist a creation and adopt the server-assigned id once it resolves. */
+  private persistCreate(drawing: DrawingObject): void {
+    const localId = drawing.id;
+    void Promise.resolve(this.handlers.onCreate(drawing)).then((serverId) => {
+      if (!serverId || serverId === localId) return;
+      const d = this.drawings.find((x) => x.id === localId);
+      if (d) d.id = serverId;
+      if (this.selectedId === localId) this.selectedId = serverId;
+      if (this.dragging?.id === localId) this.dragging.id = serverId;
+    });
+  }
+
   private attach(): void {
     // Hook into pointer events from ChartCore via options.
     // We re-wrap the core's onPointerEvent by replacing the option in place — ChartCore reads
@@ -248,7 +264,7 @@ export class DrawingController {
       };
       this.drawings.push(drawing);
       this.pushDrawings();
-      void this.handlers.onCreate(drawing);
+      this.persistCreate(drawing);
       this.clearTool();
       return;
     }
@@ -300,7 +316,7 @@ export class DrawingController {
     const drawing = this.draftToDrawing(this.draft);
     this.drawings.push(drawing);
     this.pushDrawings();
-    void this.handlers.onCreate(drawing);
+    this.persistCreate(drawing);
     this.draft = null;
     this.clearTool();
   }

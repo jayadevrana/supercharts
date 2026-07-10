@@ -15,14 +15,15 @@ export async function api<T = unknown>(
       url.searchParams.set(k, String(v));
     }
   }
-  // Fastify rejects `application/json` POST/PUT/PATCH requests with no body
-  // (FST_ERR_CTP_EMPTY_JSON_BODY). Default to an empty JSON object so callers don't
-  // have to remember `body: '{}'` for every body-less request.
+  // Fastify rejects `application/json` requests with no body (FST_ERR_CTP_EMPTY_JSON_BODY).
+  // POST/PUT/PATCH default to an empty JSON object; everything else (GET/DELETE) must NOT
+  // send the JSON content-type without a body — a body-less DELETE with that header 400s,
+  // which silently broke every drawing delete behind `.catch(() => {})`.
   const method = (rest.method ?? 'GET').toUpperCase();
   const bodyDefault =
     rest.body == null && (method === 'POST' || method === 'PUT' || method === 'PATCH') ? '{}' : rest.body;
   const res = await fetch(url.pathname + url.search, {
-    headers: { 'content-type': 'application/json' },
+    headers: bodyDefault != null ? { 'content-type': 'application/json' } : {},
     credentials: 'include',
     ...rest,
     body: bodyDefault,
