@@ -34,6 +34,7 @@ increment per session, tick the box there AND log here.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-11 | **M4/DOCS-2** — exhaustive API reference: /docs/reference/{ta,math,inputs,outputs}. 61 ta.* (grouped) + 24 math.* + 6 input.* + outputs, each signature+params+return+runnable example. Typed content modules; TA/MATH re-exported from the package. | `c515dd9` | 109 tests → 559/559; drift guard = runtime coverage test, PROVEN by injecting ta.__driftTest → test failed; browser: 61 entries/5 groups/61 run links; alerts intact 144 |
 | 2026-07-11 | **M3/DOCS-1** — public /docs (Overview + Getting started + Language tour), server-side highlighting from the language's own keyword sets, copy + `?pulse=` run-in-terminal deep link, header Docs link; all 9 samples interpreter-executed in tests | feat(docs): public PulseScript docs | 10 tests → 450/450; browser: pages render w/ colors, deep link loaded a docs sample into the live dock, URL stripped; 0 console errors |
 | 2026-07-11 | **M2/SCAN-4** — PulseScript scans: `runScriptScan` (parse once → 400 w/ line/col; 500ms/symbol sandbox; matched = mark/alert() on LAST closed bar; per-symbol `script_error` rows) + `scriptId` on POST /api/scanner/scan + Script mode in the tab (saved-script dropdown + Run) | see `git log` (feat(scanner): PulseScript-powered scans) | 6 tests → 440/440; script matches agreed 16/16 + 26/26 with the independent emaDistPct metric; UI run 15 matched; 404/400 paths; 0 console errors |
 | 2026-07-10 | **M1/SCAN-3** — Custom screen builder (RSI/Close-vs-EMA/RVOL rows → SignalCondition via pure `scanner-screen-util.ts`, ALL/ANY, explicit Run) + per-user saved screens (`scanner_screens` table + CRUD `/api/scanner/screens`, chips w/ load+delete) | `dad7d64` | 5 tests → 434/434; UI screen RSI>55∧RVOL>1.5 = exactly API matches (DOT/ETH); save→load→delete round-trip server-verified; 0 console errors |
@@ -46,7 +47,7 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- (nothing — pick up **M4/DOCS-2** next: exhaustive ta./math./input./outputs reference, typed Record<keyof typeof TA, DocEntry>, every example interpreter-tested)
+- (nothing — pick up **M5/DOCS-3** next: cookbook (10 interpreter-verified strategies) + Backtesting/Optimizer pages + **“Coming from Pine” side-by-side page** + sitemap/SEO)
 
 ## Next
 
@@ -61,6 +62,13 @@ bridge to Telegram, interpreter optimization w/ benchmark, editor autocomplete/h
 - A `ta.*` call INSIDE a user `fn` body defeats the run-cache (locals present) → O(n²):
   6000 bars × ta.stdev hit the 2s sandbox timeout. Fix candidates: memoize ta calls whose
   args are fn-params bound to stable series, or hoist-detect. Found by tests/docs-samples.test.ts.
+
+## Docs drift-guard note (M4)
+
+- The API-reference completeness guard is the RUNTIME test `tests/docs-reference.test.ts`
+  (`Object.keys(TA/MATH)` ⊆ doc keys + every example runs), NOT typecheck — `TA`/`MATH` are
+  annotated `Record<string, …>` for the interpreter's dynamic `TA[name]` lookups, so
+  `keyof typeof TA` is `string`. Add a `ta.*` fn ⇒ add a doc entry or `pnpm test` fails.
 
 ## Known landmines for newcomers
 

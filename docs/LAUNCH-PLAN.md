@@ -63,7 +63,7 @@ verification specs per item live in `.audit/launch/` design files (scanner/docs)
 | 3 | M1/SCAN-3 | Custom screen builder (metric·operator·value rows → indicator_compare conditions, all/any) + per-user saved screens (`scanner_screens` table, scripts-CRUD pattern) | [x] `dad7d64` |
 | 4 | M2/SCAN-4 | PulseScript-powered scan: run a saved script across the universe; matched = alert()/mark on the last closed bar; per-symbol script errors isolated | [x] `SCAN-4` |
 | 5 | M3/DOCS-1 | Public `/docs` shell + home-page & header links + Getting started + Language tour + `?pulse=` run-in-terminal deep link; code blocks share the editor tokenizer | [x] `DOCS-1` |
-| 6 | M4/DOCS-2 | Pine-reference-style API docs: EVERY `ta.*`/`math.*`/`input.*`/output with signature + a runnable example per function (typed `Record<keyof typeof TA, DocEntry>` — typecheck fails on drift; every example interpreter-tested) | [ ] |
+| 6 | M4/DOCS-2 | Pine-reference-style API docs: EVERY `ta.*`(61)/`math.*`(24)/`input.*`(6)/output with signature + a runnable example per function; drift guard = runtime coverage test (not typecheck — TA is `Record<string,TaFn>`); every example interpreter-tested | [x] `c515dd9` |
 | 7 | M5/DOCS-3 | Cookbook (10 interpreter-verified strategies) + Backtesting/Optimizer pages + **“Coming from Pine” page with side-by-side Pine-concept → PulseScript examples** + sitemap/SEO | [ ] |
 | 8 | M6/PULSE-1 | Sub-pane script plots: `meta(overlay: false)` renders plots in a real oscillator sub-pane (INC-11 pipeline), like RSI/MACD | [ ] |
 | 9 | M7/PULSE-2 | Script drawing objects: levels/zones/labels/rays from scripts (Pine line/box/label CAPABILITY, original API) rendered via the drawings/indicators layers | [ ] |
