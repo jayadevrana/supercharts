@@ -1,0 +1,29 @@
+# SuperCharts reverse proxy (Caddy) — the SECURE production topology, once you have a domain.
+#
+# Copy to /etc/caddy/Caddyfile on the VM, replace app.example.com with your domain (its DNS A
+# record must point at 35.200.208.191), then:  sudo systemctl reload caddy
+#
+# Caddy gets a free auto-renewing Let's Encrypt TLS cert for the domain and routes:
+#   /api/*  and  /ws   → the API on :4000
+#   everything else     → Next.js on :3000
+# So the browser only ever talks to ONE https origin. With this in place you can set the API to
+# bind 127.0.0.1 (HOST=127.0.0.1 in .env) and CLOSE the :4000 (and :3000) firewall rules — only
+# Caddy on 443 stays public.
+#
+# NOTE: Caddy cannot issue a TLS cert for a bare IP. Until you have a domain, skip Caddy and reach
+# the app at http://35.200.208.191:3000 directly (see docs/deploy-runbook.md, bare-IP mode).
+
+app.example.com {
+	encode zstd gzip
+
+	# WebSocket + API to the backend.
+	@api path /api/* /ws
+	handle @api {
+		reverse_proxy 127.0.0.1:4000
+	}
+
+	# Everything else to Next.js.
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

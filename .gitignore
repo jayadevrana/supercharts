@@ -50,3 +50,4 @@ apps/tv-recorder/output/screens/
 ._*
 .DS_Store
 reserch/
+.env.production
