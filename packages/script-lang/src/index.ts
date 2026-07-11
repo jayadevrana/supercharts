@@ -10,3 +10,7 @@ export * from './lexer';
 export * from './ast';
 export * from './parser';
 export * from './interpreter';
+// Standard-library tables (TA / MATH / constants) — the reference docs key their entries
+// against these so a language change without a matching doc entry fails typecheck.
+export { TA, MATH, MATH_CONSTS } from './stdlib';
+export type { TaFn, TaOut, TaResult } from './stdlib';

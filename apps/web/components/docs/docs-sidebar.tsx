@@ -13,6 +13,15 @@ const SECTIONS: Array<{ title: string; items: Array<{ href: string; label: strin
       { href: '/docs/language', label: 'Language tour' },
     ],
   },
+  {
+    title: 'Reference',
+    items: [
+      { href: '/docs/reference/ta', label: 'ta.* functions' },
+      { href: '/docs/reference/math', label: 'math.* functions' },
+      { href: '/docs/reference/inputs', label: 'input.*' },
+      { href: '/docs/reference/outputs', label: 'Outputs' },
+    ],
+  },
 ];
 
 export function DocsSidebar() {
