@@ -34,6 +34,7 @@ increment per session, tick the box there AND log here.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-11 | **DEPLOY infra** — GCP VM provisioned (e2-medium, Ubuntu 22, **asia-south1** Mumbai, static IP **35.200.208.191**, Node 22/pnpm/git/Caddy, firewall 22/80/443/3000/4000/7878) + **DEPLOY-1 artifacts**: pm2 ecosystem (2 procs — API embeds ingestion), `.env.production.example`, Caddyfile, `docs/deploy-runbook.md` | `7fb549c` | prod `next build` OK (20 routes static); pm2 paths validated; suite 559/559. On-VM boot pending user running the runbook (secrets pasted on VM, never chat) |
 | 2026-07-11 | **M4/DOCS-2** — exhaustive API reference: /docs/reference/{ta,math,inputs,outputs}. 61 ta.* (grouped) + 24 math.* + 6 input.* + outputs, each signature+params+return+runnable example. Typed content modules; TA/MATH re-exported from the package. | `c515dd9` | 109 tests → 559/559; drift guard = runtime coverage test, PROVEN by injecting ta.__driftTest → test failed; browser: 61 entries/5 groups/61 run links; alerts intact 144 |
 | 2026-07-11 | **M3/DOCS-1** — public /docs (Overview + Getting started + Language tour), server-side highlighting from the language's own keyword sets, copy + `?pulse=` run-in-terminal deep link, header Docs link; all 9 samples interpreter-executed in tests | feat(docs): public PulseScript docs | 10 tests → 450/450; browser: pages render w/ colors, deep link loaded a docs sample into the live dock, URL stripped; 0 console errors |
 | 2026-07-11 | **M2/SCAN-4** — PulseScript scans: `runScriptScan` (parse once → 400 w/ line/col; 500ms/symbol sandbox; matched = mark/alert() on LAST closed bar; per-symbol `script_error` rows) + `scriptId` on POST /api/scanner/scan + Script mode in the tab (saved-script dropdown + Run) | see `git log` (feat(scanner): PulseScript-powered scans) | 6 tests → 440/440; script matches agreed 16/16 + 26/26 with the independent emaDistPct metric; UI run 15 matched; 404/400 paths; 0 console errors |
@@ -47,7 +48,7 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- (nothing — pick up **M5/DOCS-3** next: cookbook (10 interpreter-verified strategies) + Backtesting/Optimizer pages + **“Coming from Pine” side-by-side page** + sitemap/SEO)
+- DEPLOY: VM live at 35.200.208.191; user runs docs/deploy-runbook.md to boot the app (bare-IP HTTP first, then domain+Caddy TLS). App-code milestone continues: **M5/DOCS-3** next (cookbook + Backtesting/Optimizer + “Coming from Pine” page + SEO).
 
 ## Next
 

@@ -97,8 +97,8 @@ post-launch — the backtester already covers marks-as-strategy).
 ### Phase D — Hosted & reliable (folds rebuild S4)
 | # | ID | Session | Done |
 |---|----|---------|------|
-| 18 | DEPLOY-1 | Production build/env/process supervision + deploy runbook (env-driven URLs, SQLite WAL, Node 26 pin) | [ ] |
-| 19 | DEPLOY-2 | VPS go-live: domain, TLS, WSS proxy, firewall, MT5 bridge token-gated; region pre-validated for Binance access | [ ] |
+| 18 | DEPLOY-1 | Production build/env/process supervision + deploy runbook (env-driven URLs, SQLite WAL, Node 22 pin) | [x] `7fb549c` artifacts+prod-build verified; on-VM boot = user runs the runbook |
+| 19 | DEPLOY-2 | VPS go-live: domain, TLS, WSS proxy, firewall, MT5 bridge token-gated; region pre-validated for Binance access | ~ VM LIVE (asia-south1, 35.200.208.191, Binance-region ✓, firewall set); Caddyfile+runbook ready; PENDING a domain for TLS |
 | 20 | DEPLOY-3 | Nightly offsite backups + restore drill + uptime monitoring on /readyz | [ ] |
 | 21 | S4-WS | Client network hardening: typed ApiError, AbortController, WS gap guard, overlay-preserving resubscribe (F4/F5) | [ ] |
 | 22 | LOAD-SMOKE | ~25 concurrent authenticated WS clients; p95/memory budgets; go/no-go on pulling rebuild S6 (per-tick re-render, F1) pre-launch | [ ] |
