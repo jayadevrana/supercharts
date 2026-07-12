@@ -85,8 +85,9 @@ export default function LanguageTour() {
         Price series: <code>open high low close volume hl2 hlc3 ohlc4 hlcc4</code>. Bar context: <code>time barIndex barCount
         lastBarIndex isFirstBar isLastBar</code>, plus UTC clock fields <code>year month day weekday hour minute second</code>.
         The TA library (<code>sma ema rsi atr vwap …</code> and 60+ <code>ta.*</code> functions, many returning multi-field
-        records like <code>ta.bands(20, 2).upper</code>) reuses the exact implementations the chart indicators use. The full
-        per-function reference with runnable examples ships with the next docs update.
+        records like <code>ta.bands(20, 2).upper</code>) reuses the exact implementations the chart indicators use. See the{' '}
+        <a href="/docs/reference/ta" className="text-accent hover:underline">ta.* reference</a> for every function with a runnable
+        example, and the <a href="/docs/cookbook" className="text-accent hover:underline">cookbook</a> for full strategies.
       </p>
 
       <H2 id="outputs">Outputs</H2>

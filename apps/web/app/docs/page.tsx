@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, BookOpen, Rocket, Zap } from 'lucide-react';
+import { ArrowRight, BookOpen, ChefHat, Rocket, Zap } from 'lucide-react';
 import { PulseCodeBlock } from '@/components/docs/pulse-code-block';
 import { HERO } from '@/features/docs/samples';
 
@@ -23,6 +23,12 @@ const CARDS = [
     body: 'The whole language: series, history, declarations, control flow, functions, inputs, outputs, multi-timeframe.',
   },
   {
+    href: '/docs/cookbook',
+    icon: ChefHat,
+    title: 'Cookbook',
+    body: 'Copy-paste recipes for real strategies — MA-cross filters, SuperTrend, breakouts, momentum, volume-spike alerts, HTF gates.',
+  },
+  {
     href: '/terminal',
     icon: Zap,
     title: 'Open the terminal',
@@ -43,7 +49,7 @@ export default function DocsOverview() {
 
       <PulseCodeBlock code={HERO} />
 
-      <div className="mt-8 grid gap-3 sm:grid-cols-3">
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
         {CARDS.map((c) => (
           <Link
             key={c.href}

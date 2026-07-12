@@ -4,13 +4,43 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/toaster';
 import { SessionProvider } from '@/lib/auth';
 
+const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL ?? 'https://supercharting.com').replace(/\/$/, '');
+const TITLE = 'SuperCharts — Institutional charting for crypto & forex';
+const DESCRIPTION =
+  'Live tick data, volume profile, footprint candles, deep-trade bubbles, and liquidity heatmap in one premium browser-based terminal — plus PulseScript, its own chart-scripting language, backtesting, a market scanner, and Telegram alerts.';
+
 export const metadata: Metadata = {
-  title: 'SuperCharts — Institutional charting for crypto & forex',
-  description:
-    'Live tick data, volume profile, footprint candles, deep-trade bubbles, and liquidity heatmap in one premium browser-based terminal.',
+  title: { default: TITLE, template: '%s · SuperCharts' },
+  description: DESCRIPTION,
   applicationName: 'SuperCharts',
   authors: [{ name: 'SuperCharts' }],
-  metadataBase: new URL('http://localhost:3000'),
+  metadataBase: new URL(SITE_URL),
+  alternates: { canonical: '/' },
+  keywords: [
+    'TradingView alternative',
+    'crypto charting',
+    'forex charting',
+    'order flow',
+    'footprint charts',
+    'volume profile',
+    'liquidity heatmap',
+    'PulseScript',
+    'Pine Script alternative',
+    'trading terminal',
+    'MT5 automation',
+  ],
+  openGraph: {
+    type: 'website',
+    siteName: 'SuperCharts',
+    title: TITLE,
+    description: DESCRIPTION,
+    url: SITE_URL,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: TITLE,
+    description: DESCRIPTION,
+  },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: '32x32' },

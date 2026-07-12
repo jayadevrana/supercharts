@@ -14,6 +14,14 @@ const SECTIONS: Array<{ title: string; items: Array<{ href: string; label: strin
     ],
   },
   {
+    title: 'Guides',
+    items: [
+      { href: '/docs/cookbook', label: 'Cookbook' },
+      { href: '/docs/backtesting', label: 'Backtesting & optimization' },
+      { href: '/docs/from-pine', label: 'Coming from Pine' },
+    ],
+  },
+  {
     title: 'Reference',
     items: [
       { href: '/docs/reference/ta', label: 'ta.* functions' },
