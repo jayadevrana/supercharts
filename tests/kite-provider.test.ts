@@ -11,6 +11,11 @@ const CSV = [
   '408065,1594,INFY,INFOSYS,0,,,0.05,1,EQ,NSE,NSE',
   '256265,1001,NIFTY 50,NIFTY 50,0,,,0.05,1,EQ,INDICES,NSE',
   '123,456,NIFTY26JULFUT,,0,2026-07-30,,0.05,75,FUT,NFO-FUT,NFO',
+  // Non-NSE rows below — must be dropped by the NSE-only scope.
+  '500325,2885,RELIANCE,RELIANCE INDUSTRIES,0,,,0.05,1,EQ,BSE,BSE', // BSE stock
+  '1,9,SENSEX,SENSEX,0,,,0.01,1,EQ,INDICES,BSE',                    // BSE index
+  '2,8,GOLD26AUGFUT,GOLD,0,2026-08-05,,1,100,FUT,FUT,MCX',          // MCX commodity
+  '3,7,USDINR26JULFUT,USDINR,0,2026-07-28,,0.0025,1,FUT,FUT,CDS',   // NSE currency (out per scope)
 ].join('\n');
 
 describe('KiteProvider', () => {
@@ -18,6 +23,15 @@ describe('KiteProvider', () => {
     const catalog = parseKiteInstrumentsCsv(CSV);
     expect(catalog.map((x) => x.id)).toEqual(['KITE:NSE:INFY', 'KITE:NSE:NIFTY_50', 'KITE:NFO:NIFTY26JULFUT']);
     expect(catalog[2]).toMatchObject({ assetClass: 'futures', expiry: '2026-07-30', lotSize: 75 });
+  });
+
+  it('NSE-only scope drops BSE stocks/indices, MCX, and currency', () => {
+    const ids = parseKiteInstrumentsCsv(CSV).map((x) => x.id);
+    expect(ids.some((id) => id.startsWith('KITE:BSE:'))).toBe(false);
+    expect(ids.some((id) => id.startsWith('KITE:MCX:'))).toBe(false);
+    expect(ids.some((id) => id.startsWith('KITE:CDS:'))).toBe(false);
+    // Only NSE-family (NSE + NFO) survives.
+    expect(ids.every((id) => id.startsWith('KITE:NSE:') || id.startsWith('KITE:NFO:'))).toBe(true);
   });
 
   it('allows only read-only market data paths before issuing a request', () => {

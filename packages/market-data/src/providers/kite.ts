@@ -16,6 +16,13 @@ import { TinyEmitter, type MarketDataProvider, type SubscriptionHandle, type Uns
 const KITE_REST = 'https://api.kite.trade';
 const KITE_WS = 'wss://ws.kite.trade';
 const VENUE = 'KITE';
+/**
+ * Only these Kite exchanges are surfaced (owner scope 2026-07-13): NSE cash + NSE indices + NSE
+ * F&O (NFO). Everything else — BSE/BFO (BSE stocks & indices & F&O), CDS/BCD (currency), MCX
+ * (commodities) — is filtered out at instrument-parse time, so it never reaches search, charts,
+ * or subscriptions. Change this set to re-scope; no other code needs to know.
+ */
+export const ALLOWED_KITE_EXCHANGES = new Set(['NSE', 'NFO']);
 const MAX_SUBSCRIPTIONS_PER_CONNECTION = 3000;
 
 /** The provider can only call these market-data endpoints. */
@@ -277,6 +284,7 @@ export function parseKiteInstrumentsCsv(csv: string): KiteInstrument[] {
   return lines.flatMap((line) => {
     const row = parseCsvLine(line); const token = Number(row[index('instrument_token')]); const exchange = row[index('exchange')]; const raw = row[index('tradingsymbol')];
     if (!Number.isFinite(token) || !exchange || !raw) return [];
+    if (!ALLOWED_KITE_EXCHANGES.has(exchange)) return []; // NSE-only scope (drops BSE/CDS/MCX)
     const type = row[index('instrument_type')] ?? ''; const segment = row[index('segment')] ?? '';
     const assetClass: AssetClass = segment === 'INDICES' ? 'index' : type === 'FUT' ? 'futures' : type === 'CE' || type === 'PE' ? 'options' : exchange === 'MCX' ? 'commodity' : 'stock';
     const id = `KITE:${exchange}:${canonicalPart(raw)}`;
