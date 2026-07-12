@@ -109,6 +109,18 @@ export class KiteProvider implements MarketDataProvider {
     this.updateHealth({ status: 'disconnected' });
   }
 
+  /**
+   * Hot-swap credentials (BYOB daily reconnect — Kite tokens expire every trading day).
+   * Re-establishes the catalog/health without a server restart; live sockets reopen lazily
+   * on the next subscription.
+   */
+  async setCredentials(apiKey: string, accessToken: string): Promise<void> {
+    this.opts.apiKey = apiKey;
+    this.opts.accessToken = accessToken;
+    await this.disconnect();
+    await this.connect();
+  }
+
   health(): ProviderHealthStatus { return { ...this.healthState }; }
   onHealth(cb: (h: ProviderHealthStatus) => void): Unsubscribe { return this.health$.on(cb); }
 

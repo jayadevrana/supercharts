@@ -28,6 +28,7 @@ import { futuresRoutes } from './routes/futures';
 import { registerWebSocketGateway } from './ws-gateway';
 import { authRoutes } from './routes/auth';
 import { brokerRoutes } from './routes/broker';
+import { newestActiveCredentials } from './broker/store';
 import { registerDemoGuard } from './demo-guard';
 import { createDrawdownBreaker } from './dd-breaker';
 import { breakerRoutes } from './routes/breaker';
@@ -95,9 +96,16 @@ async function start(): Promise<void> {
   const oandaRow = db.raw
     .prepare('SELECT api_token, account_id, oanda_env FROM oanda_credentials ORDER BY verified_at DESC LIMIT 1')
     .get() as { api_token: string; account_id: string; oanda_env: string } | undefined;
-  const ingestionEnv = oandaRow
-    ? { ...process.env, OANDA_API_TOKEN: oandaRow.api_token, OANDA_ACCOUNT_ID: oandaRow.account_id, OANDA_ENV: oandaRow.oanda_env }
-    : process.env;
+  // Same pattern for the Kite feed (GW-6): the newest active BYOB connection's daily token
+  // drives the Indian-market data provider at boot; the reconnect route hot-swaps it intraday.
+  const kiteCreds = newestActiveCredentials(db, 'kite');
+  const ingestionEnv = {
+    ...process.env,
+    ...(oandaRow
+      ? { OANDA_API_TOKEN: oandaRow.api_token, OANDA_ACCOUNT_ID: oandaRow.account_id, OANDA_ENV: oandaRow.oanda_env }
+      : {}),
+    ...(kiteCreds ? { KITE_API_KEY: kiteCreds.apiKey, KITE_ACCESS_TOKEN: kiteCreds.accessToken } : {}),
+  };
   const ingestion = await bootstrapIngestion(ingestionEnv);
 
   // Re-seed any user-imported CSV datasets (Phase 3 #14) into the live candle store so the
@@ -221,8 +229,8 @@ async function start(): Promise<void> {
   }));
 
   authRoutes(app, db);
-  brokerRoutes(app, db);
-  marketRoutes(app, ingestion);
+  brokerRoutes(app, db, ingestion);
+  marketRoutes(app, ingestion, db);
   scannerRoutes(app, ingestion, db);
   drawingRoutes(app, db);
   layoutRoutes(app, db);

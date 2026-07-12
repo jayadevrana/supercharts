@@ -10,6 +10,10 @@ import {
 } from '@supercharts/types';
 import type { MarketDataProvider } from '@supercharts/market-data';
 import { buildVisibleRangeProfile } from '@supercharts/chart-core/pure';
+import type { FastifyRequest } from 'fastify';
+import type { AppDB } from '../db';
+import { getOptionalUser } from '../auth';
+import { hasActiveConnection } from '../broker/store';
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
@@ -22,16 +26,29 @@ const candleSchema = z.object({
   limit: z.coerce.number().min(1).max(20000).optional(),
 });
 
-export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): void {
+export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext, db?: AppDB): void {
+  // Compliance (BYOB spec §3.7-2): KITE data is the connected user's OWN broker feed — it is
+  // never served to anyone without their own active connection. Without a db (unit contexts)
+  // the gate fails closed.
+  const canSeeKite = (req: FastifyRequest): boolean => {
+    if (!db) return false;
+    const user = getOptionalUser(req, db);
+    return hasActiveConnection(db, user?.id, 'kite');
+  };
+
   fastify.get('/api/symbols/search', async (req) => {
     const { q = '', limit = 50 } = req.query as { q?: string; limit?: number };
     const lim = Number(limit) || 50;
+    const kiteOk = canSeeKite(req);
     // Fan out to every provider in parallel — serial awaits added one network RTT per
     // provider to every keystroke in the symbol picker.
     const results = await Promise.all(
       Object.values(ctx.providers).map((p) => p.searchSymbols(q, lim).catch(() => [])),
     );
-    const items = results.flat().sort((a, b) => {
+    const items = results
+      .flat()
+      .filter((s) => kiteOk || !s.id.startsWith('KITE:'))
+      .sort((a, b) => {
       const ac = getCatalogSymbol(a.id);
       const bc = getCatalogSymbol(b.id);
       if (ac && !bc) return -1;
@@ -48,6 +65,10 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
 
   fastify.get('/api/symbols/:symbolId', async (req, reply) => {
     const symbolId = (req.params as { symbolId: string }).symbolId;
+    if (symbolId.startsWith('KITE:') && !canSeeKite(req)) {
+      reply.code(403);
+      return { error: 'broker_connection_required', message: 'Connect your own Zerodha account to view Indian market data.' };
+    }
     for (const provider of Object.values(ctx.providers)) {
       const s = await provider.getSymbol(symbolId);
       if (s) return s;
@@ -63,6 +84,10 @@ export function marketRoutes(fastify: FastifyInstance, ctx: IngestionContext): v
       return { error: 'invalid_query', details: parsed.error.flatten() };
     }
     const { symbol, interval, from, to, limit } = parsed.data;
+    if (symbol.startsWith('KITE:') && !canSeeKite(req)) {
+      reply.code(403);
+      return { error: 'broker_connection_required', message: 'Connect your own Zerodha account to view Indian market data.' };
+    }
     const interval_ = interval as Interval;
     const now = Date.now();
     const requestedFrom = from ?? now - 7 * 24 * 60 * 60_000;

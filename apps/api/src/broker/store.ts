@@ -59,6 +59,32 @@ export function listConnections(db: AppDB, userId: string): BrokerConnectionSumm
   }));
 }
 
+/**
+ * Compliance gate (spec §3.7-2): broker market data is served ONLY to users with their own
+ * active connection for that broker — never fanned out to anyone else.
+ */
+export function hasActiveConnection(db: AppDB, userId: string | null | undefined, broker: BrokerId): boolean {
+  if (!userId) return false;
+  const row = db.raw
+    .prepare("SELECT 1 as ok FROM broker_connections WHERE user_id = ? AND broker = ? AND status = 'active'")
+    .get(userId, broker) as { ok: number } | undefined;
+  return Boolean(row);
+}
+
+/** Newest ACTIVE connection's decrypted creds for a broker, any user — drives the boot-time feed. */
+export function newestActiveCredentials(db: AppDB, broker: BrokerId):
+  { apiKey: string; accessToken: string } | null {
+  const row = db.raw
+    .prepare(
+      `SELECT api_key as apiKey, access_token as accessToken FROM broker_connections
+        WHERE broker = ? AND status = 'active' AND access_token IS NOT NULL
+        ORDER BY last_login_at DESC LIMIT 1`,
+    )
+    .get(broker) as { apiKey: string; accessToken: string } | undefined;
+  if (!row?.accessToken) return null;
+  return { apiKey: row.apiKey, accessToken: decryptSecret(row.accessToken) };
+}
+
 /** Decrypted credentials for building a gateway — SERVER-SIDE ONLY, never returned by a route. */
 export function getGatewayCredentials(db: AppDB, userId: string, broker: BrokerId):
   { apiKey: string; apiSecret: string; accessToken: string | null } | null {

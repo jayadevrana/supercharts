@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openDB } from '../apps/api/src/db';
 import {
   saveConnection, listConnections, getGatewayCredentials, updateAccessToken, deleteConnection,
-  recordOrderAudit, completeOrderAudit,
+  recordOrderAudit, completeOrderAudit, hasActiveConnection, newestActiveCredentials,
 } from '../apps/api/src/broker/store';
 
 const dir = mkdtempSync(join(tmpdir(), 'sc-broker-'));
@@ -53,5 +53,25 @@ describe('broker store', () => {
   it('deletes a connection', () => {
     expect(deleteConnection(db, 'demo', 'kite')).toBe(true);
     expect(getGatewayCredentials(db, 'demo', 'kite')).toBeNull();
+  });
+});
+
+describe('KITE data compliance gate (GW-6)', () => {
+  it('hasActiveConnection is true only for the owning user with an ACTIVE row', () => {
+    expect(hasActiveConnection(db, 'demo', 'kite')).toBe(false); // deleted above
+    saveConnection(db, { userId: 'demo', broker: 'kite', apiKey: 'k123456', apiSecret: 's', accessToken: null, accountMeta: null });
+    expect(hasActiveConnection(db, 'demo', 'kite')).toBe(false); // pending ≠ active
+    updateAccessToken(db, 'demo', 'kite', 'day_token');
+    expect(hasActiveConnection(db, 'demo', 'kite')).toBe(true);
+    expect(hasActiveConnection(db, 'someone_else', 'kite')).toBe(false);
+    expect(hasActiveConnection(db, null, 'kite')).toBe(false);
+    expect(hasActiveConnection(db, undefined, 'kite')).toBe(false);
+  });
+
+  it('newestActiveCredentials returns decrypted creds for the boot-time feed', () => {
+    const creds = newestActiveCredentials(db, 'kite');
+    expect(creds).toEqual({ apiKey: 'k123456', accessToken: 'day_token' });
+    deleteConnection(db, 'demo', 'kite');
+    expect(newestActiveCredentials(db, 'kite')).toBeNull();
   });
 });

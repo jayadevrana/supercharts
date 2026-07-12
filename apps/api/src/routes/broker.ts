@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import type { IngestionContext } from '@supercharts/ingestion';
 import type { AppDB } from '../db';
 import { requireAdmin } from '../auth';
 import { KiteGateway } from '../broker/kite-gateway';
@@ -32,7 +33,13 @@ const reconnectSchema = z.object({
   requestToken: z.string().min(4).max(128),
 });
 
-export function brokerRoutes(fastify: FastifyInstance, db: AppDB): void {
+export function brokerRoutes(fastify: FastifyInstance, db: AppDB, ingestion?: IngestionContext): void {
+  /** Revive the live Kite data feed with a fresh daily token — no server restart needed. */
+  const hotSwapKiteFeed = (apiKey: string, accessToken: string): void => {
+    void ingestion?.providers.kite.setCredentials(apiKey, accessToken).catch((err) => {
+      fastify.log.warn({ err }, '[broker] kite feed hot-swap failed (data feed stays down until restart)');
+    });
+  };
   fastify.get('/api/broker/connections', async (req) => {
     const user = requireAdmin(req, db);
     const items = listConnections(db, user.id).map((c) => ({
@@ -57,6 +64,7 @@ export function brokerRoutes(fastify: FastifyInstance, db: AppDB): void {
     try {
       const { accessToken, meta } = await KiteGateway.exchangeRequestToken(apiKey, apiSecret, requestToken);
       saveConnection(db, { userId: user.id, broker: 'kite', apiKey, apiSecret, accessToken, accountMeta: meta });
+      hotSwapKiteFeed(apiKey, accessToken);
       return { status: 'active', account: meta, apiKeyLast4: apiKey.slice(-4) };
     } catch (err) {
       reply.code(400);
@@ -79,6 +87,7 @@ export function brokerRoutes(fastify: FastifyInstance, db: AppDB): void {
     try {
       const { accessToken, meta } = await KiteGateway.exchangeRequestToken(creds.apiKey, creds.apiSecret, parsed.data.requestToken);
       updateAccessToken(db, user.id, 'kite', accessToken);
+      hotSwapKiteFeed(creds.apiKey, accessToken);
       return { status: 'active', account: meta };
     } catch (err) {
       reply.code(400);

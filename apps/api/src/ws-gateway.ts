@@ -17,6 +17,7 @@ import { buildVisibleRangeProfile } from '@supercharts/chart-core/pure';
 import type { MT5Store, MT5Event } from './mt5/state';
 import type { AppDB } from './db';
 import { getOptionalUser } from './auth';
+import { hasActiveConnection } from './broker/store';
 
 const PROTOCOL_VERSION = 1;
 const MAX_SUBS_PER_CONN = 32;
@@ -109,6 +110,20 @@ export function registerWebSocketGateway(
           type: 'subscription_error',
           code: 'internal',
           message: 'malformed_json',
+        });
+        return;
+      }
+      // Compliance (BYOB spec §3.7-2): KITE market data is a user's own broker feed. Reject any
+      // KITE: subscription on sockets whose user has no active kite connection (incl. anonymous).
+      if (
+        parsed && typeof parsed === 'object' && 'symbol' in parsed &&
+        String((parsed as { symbol?: unknown }).symbol ?? '').startsWith('KITE:') &&
+        !(db && hasActiveConnection(db, conn.userId, 'kite'))
+      ) {
+        send(socket, {
+          type: 'subscription_error',
+          code: 'internal',
+          message: 'broker_connection_required',
         });
         return;
       }
