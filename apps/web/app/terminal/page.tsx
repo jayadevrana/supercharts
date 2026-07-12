@@ -20,9 +20,12 @@ export default function TerminalPage() {
   const refreshPositions = useMT5Store((s) => s.refreshPositions);
 
   // Belt-and-braces gate: middleware bounces visitors with no session cookie, but a present-yet-
-  // expired cookie reaches here — once /api/auth/me confirms no user, send them to sign in.
+  // expired cookie reaches here — once /api/auth/me confirms no user, send them to sign in. Signed-
+  // in but unverified users go to /verify to enter their email code.
   useEffect(() => {
-    if (!sessionLoading && !user) window.location.href = '/login';
+    if (sessionLoading) return;
+    if (!user) window.location.href = '/login';
+    else if (!user.emailVerified) window.location.href = '/verify';
   }, [sessionLoading, user]);
 
   // Docs deep link: /terminal?pulse=<base64url(code)> loads the snippet into the Script dock

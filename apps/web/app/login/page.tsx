@@ -90,6 +90,22 @@ export default function LoginPage() {
                 {error}
               </p>
             )}
+            {(googleEnabled || loading) && (
+              <div className="mt-7 space-y-4">
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={() => {
+                    window.location.href = '/api/auth/google/start';
+                  }}
+                >
+                  Continue with Google
+                </Button>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" /> or sign in with email <span className="h-px flex-1 bg-border" />
+                </div>
+              </div>
+            )}
             <form className="mt-7 space-y-4" onSubmit={onSubmit}>
               <label className="block">
                 <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Email</span>
@@ -119,26 +135,10 @@ export default function LoginPage() {
                   className="mt-2"
                 />
               </label>
-              <Button type="submit" className="w-full" size="lg" disabled={submitting}>
+              <Button type="submit" variant="outline" className="w-full" size="lg" disabled={submitting}>
                 {submitting ? 'Signing in…' : 'Sign in'}
               </Button>
             </form>
-            {(googleEnabled || loading) && (
-              <>
-                <div className="my-6 flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="h-px flex-1 bg-border" /> or <span className="h-px flex-1 bg-border" />
-                </div>
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => {
-                    window.location.href = '/api/auth/google/start';
-                  }}
-                >
-                  Continue with Google
-                </Button>
-              </>
-            )}
             <p className="mt-6 text-center text-xs text-muted-foreground">
               New here?{' '}
               <Link href="/signup" className="text-accent hover:underline">

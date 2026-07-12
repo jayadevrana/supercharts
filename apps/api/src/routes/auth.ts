@@ -16,6 +16,33 @@ import {
   verifyPassword,
   type SessionUser,
 } from '../auth';
+import { emailVerificationRequired, generateCode, sendVerificationEmail } from '../email';
+
+const CODE_TTL_MS = 15 * 60 * 1000;
+const MAX_VERIFY_ATTEMPTS = 6;
+const RESEND_COOLDOWN_MS = 45 * 1000;
+
+/** Whether this user's email is verified (0/1 column; absent row treated as unverified). */
+function isEmailVerified(db: AppDB, userId: string): boolean {
+  const row = db.raw.prepare('SELECT email_verified as v FROM users WHERE id = ?').get(userId) as
+    | { v: number }
+    | undefined;
+  return Boolean(row?.v);
+}
+
+/** Generate, store, and send a fresh verification code for a user. */
+async function issueVerificationCode(db: AppDB, userId: string, email: string): Promise<void> {
+  const code = generateCode();
+  const now = Date.now();
+  db.raw
+    .prepare(
+      `INSERT INTO email_verifications (user_id, code, expires_at, attempts, sent_at)
+       VALUES (?, ?, ?, 0, ?)
+       ON CONFLICT(user_id) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at, attempts = 0, sent_at = excluded.sent_at`,
+    )
+    .run(userId, code, now + CODE_TTL_MS, now);
+  await sendVerificationEmail(email, code);
+}
 
 const OAUTH_STATE_COOKIE = 'sc_oauth_state';
 /** Set (with the current user id) when the Google flow is a "link to my account" request. */
@@ -65,7 +92,7 @@ function upsertGoogleUser(db: AppDB, profile: GoogleProfile): string {
   if (!userId) {
     userId = `u_${nanoid(16)}`;
     db.raw
-      .prepare('INSERT INTO users (id, email, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .prepare('INSERT INTO users (id, email, display_name, role, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, 1, ?, ?)')
       .run(userId, email ?? `${userId}@google.local`, profile.name ?? email ?? 'Trader', 'user', now, now);
     seedUserWorkspace(db.raw, userId, now);
   }
@@ -91,14 +118,21 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
   // providers are configured so the UI can show/hide the Google button honestly.
   fastify.get('/api/auth/me', async (req) => {
     const user = getOptionalUser(req, db);
-    if (!user) return { user: null, googleEnabled: googleEnabled(), hasPassword: false, providers: [] as string[] };
-    const row = db.raw.prepare('SELECT password_hash as passwordHash FROM users WHERE id = ?').get(user.id) as
-      | { passwordHash: string | null }
-      | undefined;
+    if (!user) {
+      return { user: null, googleEnabled: googleEnabled(), hasPassword: false, providers: [] as string[] };
+    }
+    const row = db.raw
+      .prepare('SELECT password_hash as passwordHash, email_verified as emailVerified FROM users WHERE id = ?')
+      .get(user.id) as { passwordHash: string | null; emailVerified: number } | undefined;
     const providers = (
       db.raw.prepare('SELECT provider FROM accounts WHERE user_id = ?').all(user.id) as { provider: string }[]
     ).map((p) => p.provider);
-    return { user: toPublic(user), googleEnabled: googleEnabled(), hasPassword: Boolean(row?.passwordHash), providers };
+    return {
+      user: { ...toPublic(user), emailVerified: Boolean(row?.emailVerified) },
+      googleEnabled: googleEnabled(),
+      hasPassword: Boolean(row?.passwordHash),
+      providers,
+    };
   });
 
   // Update profile (display name today).
@@ -161,14 +195,16 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
     }
     const now = Date.now();
     const userId = `u_${nanoid(16)}`;
+    const needsVerification = emailVerificationRequired();
     db.raw
       .prepare(
-        'INSERT INTO users (id, email, password_hash, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (id, email, password_hash, display_name, role, email_verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(userId, email, hashPassword(parsed.data.password), parsed.data.displayName ?? null, 'user', now, now);
+      .run(userId, email, hashPassword(parsed.data.password), parsed.data.displayName ?? null, 'user', needsVerification ? 0 : 1, now, now);
     seedUserWorkspace(db.raw, userId, now);
+    if (needsVerification) await issueVerificationCode(db, userId, email);
     login(db, reply, userId);
-    return { user: { id: userId, email, displayName: parsed.data.displayName ?? null } };
+    return { user: { id: userId, email, displayName: parsed.data.displayName ?? null }, needsVerification };
   });
 
   fastify.post('/api/auth/login', async (req, reply) => {
@@ -196,6 +232,55 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
     const sessionId = req.cookies?.[SESSION_COOKIE];
     if (sessionId) deleteSession(db, sessionId);
     clearSessionCookie(reply);
+    return { ok: true };
+  });
+
+  // Confirm the 6-digit code emailed at signup. Rate-limited by attempts + expiry.
+  fastify.post('/api/auth/verify-email', async (req, reply) => {
+    const user = getUser(req, db);
+    if (isEmailVerified(db, user.id)) return { ok: true, alreadyVerified: true };
+    const parsed = z.object({ code: z.string().trim().regex(/^\d{6}$/) }).safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_code' };
+    }
+    const rec = db.raw
+      .prepare('SELECT code, expires_at as expiresAt, attempts FROM email_verifications WHERE user_id = ?')
+      .get(user.id) as { code: string; expiresAt: number; attempts: number } | undefined;
+    if (!rec || rec.expiresAt < Date.now()) {
+      reply.code(400);
+      return { error: 'code_expired' };
+    }
+    if (rec.attempts >= MAX_VERIFY_ATTEMPTS) {
+      reply.code(429);
+      return { error: 'too_many_attempts' };
+    }
+    if (rec.code !== parsed.data.code) {
+      db.raw.prepare('UPDATE email_verifications SET attempts = attempts + 1 WHERE user_id = ?').run(user.id);
+      reply.code(400);
+      return { error: 'wrong_code' };
+    }
+    db.raw.prepare('UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?').run(Date.now(), user.id);
+    db.raw.prepare('DELETE FROM email_verifications WHERE user_id = ?').run(user.id);
+    return { ok: true };
+  });
+
+  // Re-send a fresh code (cooldown-limited).
+  fastify.post('/api/auth/resend-verification', async (req, reply) => {
+    const user = getUser(req, db);
+    if (isEmailVerified(db, user.id)) return { ok: true, alreadyVerified: true };
+    if (!emailVerificationRequired()) {
+      reply.code(400);
+      return { error: 'email_not_configured' };
+    }
+    const rec = db.raw.prepare('SELECT sent_at as sentAt FROM email_verifications WHERE user_id = ?').get(user.id) as
+      | { sentAt: number }
+      | undefined;
+    if (rec && Date.now() - rec.sentAt < RESEND_COOLDOWN_MS) {
+      reply.code(429);
+      return { error: 'cooldown' };
+    }
+    await issueVerificationCode(db, user.id, user.email);
     return { ok: true };
   });
 

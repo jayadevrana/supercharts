@@ -83,8 +83,19 @@ function migrate(db: DatabaseSync): void {
       password_hash TEXT,
       display_name TEXT,
       role         TEXT NOT NULL DEFAULT 'user',
+      email_verified INTEGER NOT NULL DEFAULT 0,
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL
+    );
+
+    -- One pending email-verification code per user (replaced on resend).
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      user_id    TEXT PRIMARY KEY,
+      code       TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts   INTEGER NOT NULL DEFAULT 0,
+      sent_at    INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -461,11 +472,22 @@ function migrate(db: DatabaseSync): void {
     }
   }
 
+  // Email verification (added after email/password auth shipped). When the column is newly
+  // added, grandfather every EXISTING user as verified — they predate verification and must not
+  // be locked out. New signups get 0 and go through the code flow (when email is configured).
+  try {
+    db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0');
+    db.exec('UPDATE users SET email_verified = 1');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!/duplicate column name/i.test(msg)) throw err;
+  }
+
   const exists = db.prepare("SELECT id FROM users WHERE id = 'demo'").get();
   if (!exists) {
     const now = Date.now();
     db.prepare(
-      "INSERT INTO users (id, email, display_name, role, created_at, updated_at) VALUES ('demo', 'demo@supercharts.local', 'Demo trader', 'user', ?, ?)",
+      "INSERT INTO users (id, email, display_name, role, email_verified, created_at, updated_at) VALUES ('demo', 'demo@supercharts.local', 'Demo trader', 'user', 1, ?, ?)",
     ).run(now, now);
     seedUserWorkspace(db, 'demo', now);
   }
