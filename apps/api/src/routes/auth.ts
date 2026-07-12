@@ -104,7 +104,7 @@ function upsertGoogleUser(db: AppDB, profile: GoogleProfile): string {
 }
 
 function toPublic(user: SessionUser): SessionUser {
-  return { id: user.id, email: user.email, displayName: user.displayName };
+  return { id: user.id, email: user.email, displayName: user.displayName, role: user.role };
 }
 
 /** Start a fresh session for `userId` and set the cookie on the reply. */

@@ -6,6 +6,7 @@ export interface SessionUser {
   id: string;
   email: string;
   displayName: string | null;
+  role: string;
 }
 
 /** Cookie name the browser carries; read by both HTTP routes and the WS upgrade. */
@@ -33,7 +34,7 @@ export function getOptionalUser(req: { cookies?: Record<string, string | undefin
   }
   if (process.env.AUTH_ENABLED === '0') {
     return db.raw
-      .prepare('SELECT id, email, display_name as displayName FROM users WHERE id = ?')
+      .prepare('SELECT id, email, display_name as displayName, role FROM users WHERE id = ?')
       .get('demo') as SessionUser | undefined ?? null;
   }
   return null;
@@ -46,13 +47,25 @@ export function getUser(req: FastifyRequest, db: AppDB): SessionUser {
   return user;
 }
 
+/**
+ * Resolve the signed-in user and require the admin role (403 otherwise). Interim gate for
+ * ALL broker/trading endpoints until GW-4 ships the $15/mo plan gate (BYOB spec §4).
+ */
+export function requireAdmin(req: FastifyRequest, db: AppDB): SessionUser {
+  const user = getUser(req, db);
+  if (user.role !== 'admin') {
+    throw Object.assign(new Error('admin_required'), { statusCode: 403 });
+  }
+  return user;
+}
+
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 /** Look up a live (non-expired) session and return its user, deleting it if expired. */
 export function readSessionUser(db: AppDB, sessionId: string): SessionUser | null {
   const row = db.raw
     .prepare(
-      `SELECT u.id as id, u.email as email, u.display_name as displayName, s.expires_at as expiresAt
+      `SELECT u.id as id, u.email as email, u.display_name as displayName, u.role as role, s.expires_at as expiresAt
          FROM sessions s JOIN users u ON u.id = s.user_id
         WHERE s.id = ?`,
     )
@@ -62,7 +75,7 @@ export function readSessionUser(db: AppDB, sessionId: string): SessionUser | nul
     db.raw.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
     return null;
   }
-  return { id: row.id, email: row.email, displayName: row.displayName };
+  return { id: row.id, email: row.email, displayName: row.displayName, role: row.role };
 }
 
 /** Create a session row and return its opaque id (the value stored in the cookie). */
