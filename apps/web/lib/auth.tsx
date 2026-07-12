@@ -8,6 +8,8 @@ export interface AuthUser {
   email: string;
   displayName: string | null;
   emailVerified: boolean;
+  /** 'admin' unlocks owner-only surfaces (broker connect until GW-4, /admin panel). */
+  role?: string;
 }
 
 interface MeResponse {

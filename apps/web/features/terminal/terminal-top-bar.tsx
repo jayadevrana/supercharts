@@ -36,6 +36,8 @@ import { Badge } from '@/components/ui/badge';
 import { useWSStatus } from '@/lib/ws-client';
 import { IndicatorsDialog } from './indicators-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
+import { BrokerConnectDialog } from './broker-connect-dialog';
+import { useSession } from '@/lib/auth';
 import { ImportCsvDialog } from './import-csv-dialog';
 import { BacktestDialog } from './backtest-dialog';
 import { WebhooksDialog } from './webhooks-dialog';
@@ -175,6 +177,7 @@ function downloadBlob(blob: Blob, filename: string): void {
 }
 
 export function TerminalTopBar() {
+  const { user: sessionUser } = useSession();
   const {
     panes,
     activePaneId,
@@ -431,6 +434,7 @@ export function TerminalTopBar() {
         <BroadcastDialog />
         <WebhooksDialog />
         <OandaConnectDialog />
+        {sessionUser?.role === 'admin' ? <BrokerConnectDialog /> : null}
         <Divider />
         <MT5Chip />
         <StrategyBuilderDialog
