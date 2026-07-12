@@ -51,3 +51,7 @@ apps/tv-recorder/output/screens/
 .DS_Store
 reserch/
 .env.production
+
+# local broker credentials (never commit)
+kitecredential.env.txt
+*.env.txt
