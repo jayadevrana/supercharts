@@ -76,3 +76,48 @@ describe('KiteGateway reads', () => {
     expect(headers['content-type']).toContain('application/x-www-form-urlencoded');
   });
 });
+
+describe('KiteGateway writes', () => {
+  it('placeOrder posts form-encoded fields to /orders/regular', async () => {
+    const { fn, calls } = stubFetch({ '/orders/regular': { body: { status: 'success', data: { order_id: 'OID1' } } } });
+    const gw = new KiteGateway({ apiKey: 'k', accessToken: 't', fetchFn: fn });
+    const ref = await gw.placeOrder({ symbol: 'SBIN', exchange: 'NSE', side: 'buy', quantity: 1, orderType: 'limit', product: 'mis', price: 700 });
+    expect(ref.brokerOrderId).toBe('OID1');
+    const body = String(calls[0]!.init!.body);
+    expect(body).toContain('tradingsymbol=SBIN');
+    expect(body).toContain('transaction_type=BUY');
+    expect(body).toContain('order_type=LIMIT');
+    expect(body).toContain('product=MIS');
+    expect(body).toContain('price=700');
+    expect(calls[0]!.init!.method).toBe('POST');
+  });
+
+  it('placeOrder routes AMO variety to /orders/amo', async () => {
+    const { fn, calls } = stubFetch({ '/orders/amo': { body: { status: 'success', data: { order_id: 'OID2' } } } });
+    const gw = new KiteGateway({ apiKey: 'k', accessToken: 't', fetchFn: fn });
+    await gw.placeOrder({ symbol: 'SBIN', exchange: 'NSE', side: 'buy', quantity: 1, orderType: 'limit', product: 'cnc', price: 500, variety: 'amo' });
+    expect(calls[0]!.url).toContain('/orders/amo');
+  });
+
+  it('modifyOrder PUTs only the changed fields; cancelOrder DELETEs', async () => {
+    const { fn, calls } = stubFetch({ '/orders/regular/OID1': { body: { status: 'success', data: { order_id: 'OID1' } } } });
+    const gw = new KiteGateway({ apiKey: 'k', accessToken: 't', fetchFn: fn });
+    await gw.modifyOrder('OID1', { price: 710 });
+    expect(calls[0]!.init!.method).toBe('PUT');
+    expect(String(calls[0]!.init!.body)).toBe('price=710');
+    await gw.cancelOrder('OID1');
+    expect(calls[1]!.init!.method).toBe('DELETE');
+  });
+
+  it('exitPosition flips side and uses market order; rejects flat positions', async () => {
+    const { fn, calls } = stubFetch({ '/orders/regular': { body: { status: 'success', data: { order_id: 'OID3' } } } });
+    const gw = new KiteGateway({ apiKey: 'k', accessToken: 't', fetchFn: fn });
+    await gw.exitPosition({ symbol: 'INFY', exchange: 'NSE', product: 'MIS', quantity: -10, averagePrice: 0, lastPrice: 0, pnl: 0 });
+    const body = String(calls[0]!.init!.body);
+    expect(body).toContain('transaction_type=BUY');
+    expect(body).toContain('quantity=10');
+    expect(body).toContain('order_type=MARKET');
+    await expect(gw.exitPosition({ symbol: 'X', exchange: 'NSE', product: 'MIS', quantity: 0, averagePrice: 0, lastPrice: 0, pnl: 0 }))
+      .rejects.toThrow('position_already_flat');
+  });
+});
