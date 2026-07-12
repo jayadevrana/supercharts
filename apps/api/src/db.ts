@@ -117,6 +117,39 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- BYOB broker connections (GW-1). One per (user, broker); secrets encrypted at rest.
+    CREATE TABLE IF NOT EXISTS broker_connections (
+      id            TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL,
+      broker        TEXT NOT NULL,
+      api_key       TEXT NOT NULL,
+      api_secret    TEXT NOT NULL,
+      access_token  TEXT,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      account_meta  TEXT,
+      last_login_at INTEGER,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL,
+      UNIQUE (user_id, broker),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- Immutable order audit: a row lands BEFORE any request hits a broker (spec hard rule 5).
+    CREATE TABLE IF NOT EXISTS broker_orders (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL,
+      broker          TEXT NOT NULL,
+      intent          TEXT NOT NULL,
+      broker_order_id TEXT,
+      status          TEXT NOT NULL DEFAULT 'submitted',
+      error           TEXT,
+      placed_via      TEXT NOT NULL DEFAULT 'manual',
+      egress_ip       TEXT,
+      created_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS subscriptions (
       id            TEXT PRIMARY KEY,
       user_id       TEXT NOT NULL,
