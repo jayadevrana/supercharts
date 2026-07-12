@@ -53,7 +53,8 @@ increment per session, tick the box there AND log here.
 
 ## In progress
 
-- **DEPLOYED + AUTH LIVE**: https://supercharting.com (Google OAuth structurally done, needs the OAuth client; email/password + email verification via Resend LIVE; account settings live). **DOCS TRACK COMPLETE (DOCS-1..3).** Next app-code milestone: **M6/PULSE-1** (sub-pane plots — let a script draw its own oscillator pane instead of only overlay/existing sub-panes).
+- **DEPLOYED + AUTH LIVE**: https://supercharting.com (Google OAuth structurally done, needs the OAuth client; email/password + email verification via Resend LIVE; account settings live). **DOCS TRACK COMPLETE (DOCS-1..3).**
+- **NEW GOAL (owner, 2026-07-13): Forex + Indian market charts** → `docs/markets-expansion.md`. Providers ALREADY BUILT (`oanda.ts`/`kite.ts`/`yahoo.ts`) — this is credentials+catalog+UX+compliance. **Decision:** Forex=**OANDA free** (public); India=**owner's own Kite key, personal use, gated to owner only** (live NSE/BSE redistribution to other users = exchange-license breach ~₹20L; BYOK deferred as MKT-5). Milestones MKT-1..5 in the doc. **This is now the active work** (ahead of M6/PULSE-1).
 
 ## Next
 
