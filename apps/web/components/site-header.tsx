@@ -38,12 +38,13 @@ export function SiteHeader() {
           <ThemeToggle />
           {loading ? null : user ? (
             <>
-              <span
-                className="hidden max-w-[160px] truncate text-sm text-muted-foreground sm:block"
-                title={user.email}
+              <Link
+                href="/account"
+                className="hidden max-w-[160px] truncate text-sm text-muted-foreground hover:text-foreground sm:block"
+                title="Account settings"
               >
                 {user.displayName || user.email}
-              </span>
+              </Link>
               <Button variant="ghost" size="sm" onClick={() => void signOut()}>
                 Sign out
               </Button>

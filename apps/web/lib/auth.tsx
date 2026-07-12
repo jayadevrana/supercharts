@@ -12,11 +12,15 @@ export interface AuthUser {
 interface MeResponse {
   user: AuthUser | null;
   googleEnabled: boolean;
+  hasPassword: boolean;
+  providers: string[];
 }
 
 interface SessionValue {
   user: AuthUser | null;
   googleEnabled: boolean;
+  hasPassword: boolean;
+  providers: string[];
   loading: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -27,6 +31,8 @@ const SessionContext = createContext<SessionValue | null>(null);
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [googleEnabled, setGoogleEnabled] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [providers, setProviders] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -34,6 +40,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       const me = await api<MeResponse>('/auth/me');
       setUser(me.user);
       setGoogleEnabled(me.googleEnabled);
+      setHasPassword(me.hasPassword);
+      setProviders(me.providers ?? []);
     } catch {
       setUser(null);
     } finally {
@@ -56,8 +64,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo<SessionValue>(
-    () => ({ user, googleEnabled, loading, refresh, signOut }),
-    [user, googleEnabled, loading, refresh, signOut],
+    () => ({ user, googleEnabled, hasPassword, providers, loading, refresh, signOut }),
+    [user, googleEnabled, hasPassword, providers, loading, refresh, signOut],
   );
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

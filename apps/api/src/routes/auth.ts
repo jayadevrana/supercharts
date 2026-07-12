@@ -9,6 +9,7 @@ import {
   createSession,
   deleteSession,
   getOptionalUser,
+  getUser,
   hashPassword,
   setSessionCookie,
   SESSION_COOKIE,
@@ -17,6 +18,8 @@ import {
 } from '../auth';
 
 const OAUTH_STATE_COOKIE = 'sc_oauth_state';
+/** Set (with the current user id) when the Google flow is a "link to my account" request. */
+const OAUTH_LINK_COOKIE = 'sc_oauth_link';
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
@@ -88,7 +91,54 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
   // providers are configured so the UI can show/hide the Google button honestly.
   fastify.get('/api/auth/me', async (req) => {
     const user = getOptionalUser(req, db);
-    return { user: user ? toPublic(user) : null, googleEnabled: googleEnabled() };
+    if (!user) return { user: null, googleEnabled: googleEnabled(), hasPassword: false, providers: [] as string[] };
+    const row = db.raw.prepare('SELECT password_hash as passwordHash FROM users WHERE id = ?').get(user.id) as
+      | { passwordHash: string | null }
+      | undefined;
+    const providers = (
+      db.raw.prepare('SELECT provider FROM accounts WHERE user_id = ?').all(user.id) as { provider: string }[]
+    ).map((p) => p.provider);
+    return { user: toPublic(user), googleEnabled: googleEnabled(), hasPassword: Boolean(row?.passwordHash), providers };
+  });
+
+  // Update profile (display name today).
+  fastify.patch('/api/auth/profile', async (req, reply) => {
+    const user = getUser(req, db);
+    const parsed = z.object({ displayName: z.string().trim().min(1).max(80) }).safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload' };
+    }
+    db.raw
+      .prepare('UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?')
+      .run(parsed.data.displayName, Date.now(), user.id);
+    return { user: { id: user.id, email: user.email, displayName: parsed.data.displayName } };
+  });
+
+  // Change password (email/password users) or SET a first password (Google-only users). The
+  // session already proves identity; a current password is required only when one exists.
+  fastify.post('/api/auth/change-password', async (req, reply) => {
+    const user = getUser(req, db);
+    const parsed = z
+      .object({ currentPassword: z.string().max(200).optional(), newPassword: z.string().min(8).max(200) })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload' };
+    }
+    const row = db.raw.prepare('SELECT password_hash as passwordHash FROM users WHERE id = ?').get(user.id) as
+      | { passwordHash: string | null }
+      | undefined;
+    if (row?.passwordHash) {
+      if (!parsed.data.currentPassword || !verifyPassword(parsed.data.currentPassword, row.passwordHash)) {
+        reply.code(400);
+        return { error: 'wrong_current_password' };
+      }
+    }
+    db.raw
+      .prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+      .run(hashPassword(parsed.data.newPassword), Date.now(), user.id);
+    return { ok: true, hadPassword: Boolean(row?.passwordHash) };
   });
 
   fastify.post('/api/auth/register', async (req, reply) => {
@@ -150,16 +200,23 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
   });
 
   // ── Google OAuth (authorization-code flow) ─────────────────────────────────
-  fastify.get('/api/auth/google/start', async (_req, reply) => {
+  fastify.get('/api/auth/google/start', async (req, reply) => {
     if (!googleEnabled()) return reply.redirect(`${appUrl()}/login?error=google_unconfigured`);
     const state = randomBytes(16).toString('base64url');
-    reply.setCookie(OAUTH_STATE_COOKIE, state, {
+    const cookieOpts = {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'lax' as const,
       secure: process.env.NODE_ENV === 'production',
       path: '/',
       maxAge: 600,
-    });
+    };
+    reply.setCookie(OAUTH_STATE_COOKIE, state, cookieOpts);
+    // "Connect Google" from the account page: remember which signed-in user to link to, so the
+    // callback attaches this Google identity to that account instead of finding/creating one.
+    if ((req.query as { link?: string }).link) {
+      const current = getOptionalUser(req, db);
+      if (current) reply.setCookie(OAUTH_LINK_COOKIE, current.id, cookieOpts);
+    }
     const params = new URLSearchParams({
       client_id: process.env.GOOGLE_CLIENT_ID!,
       redirect_uri: googleRedirectUri(),
@@ -175,8 +232,13 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
   fastify.get('/api/auth/google/callback', async (req, reply) => {
     const query = req.query as { code?: string; state?: string; error?: string };
     const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
+    const linkUserId = req.cookies?.[OAUTH_LINK_COOKIE];
     reply.clearCookie(OAUTH_STATE_COOKIE, { path: '/' });
-    if (query.error) return reply.redirect(`${appUrl()}/login?error=google_denied`);
+    reply.clearCookie(OAUTH_LINK_COOKIE, { path: '/' });
+    const linkErr = (e: string): string => `${appUrl()}/account?error=${e}`;
+    if (query.error) {
+      return reply.redirect(linkUserId ? linkErr('google_denied') : `${appUrl()}/login?error=google_denied`);
+    }
     if (!googleEnabled() || !query.code || !query.state || query.state !== cookieState) {
       return reply.redirect(`${appUrl()}/login?error=google_state`);
     }
@@ -201,13 +263,27 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
       });
       if (!infoRes.ok) return reply.redirect(`${appUrl()}/login?error=google_userinfo`);
       const profile = (await infoRes.json()) as GoogleProfile;
-      if (!profile.sub) return reply.redirect(`${appUrl()}/login?error=google_userinfo`);
+      if (!profile.sub) {
+        return reply.redirect(linkUserId ? linkErr('google_userinfo') : `${appUrl()}/login?error=google_userinfo`);
+      }
+
+      // Link flow: attach this Google identity to the already-signed-in account.
+      if (linkUserId) {
+        const owner = db.raw
+          .prepare("SELECT user_id as userId FROM accounts WHERE provider = 'google' AND provider_account_id = ?")
+          .get(profile.sub) as { userId: string } | undefined;
+        if (owner && owner.userId !== linkUserId) return reply.redirect(linkErr('google_in_use'));
+        db.raw
+          .prepare('INSERT OR IGNORE INTO accounts (id, user_id, provider, provider_account_id, created_at) VALUES (?, ?, ?, ?, ?)')
+          .run(`acc_${nanoid(16)}`, linkUserId, 'google', profile.sub, Date.now());
+        return reply.redirect(`${appUrl()}/account?linked=google`);
+      }
 
       const userId = upsertGoogleUser(db, profile);
       login(db, reply, userId);
       return reply.redirect(`${appUrl()}/terminal`);
     } catch {
-      return reply.redirect(`${appUrl()}/login?error=google_failed`);
+      return reply.redirect(linkUserId ? linkErr('google_failed') : `${appUrl()}/login?error=google_failed`);
     }
   });
 }
