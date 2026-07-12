@@ -94,6 +94,18 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- OAuth provider links (Google today, more later). One row per (provider, external id);
+    -- multiple providers can point at the same local user for account linking.
+    CREATE TABLE IF NOT EXISTS accounts (
+      id                  TEXT PRIMARY KEY,
+      user_id             TEXT NOT NULL,
+      provider            TEXT NOT NULL,
+      provider_account_id TEXT NOT NULL,
+      created_at          INTEGER NOT NULL,
+      UNIQUE (provider, provider_account_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS subscriptions (
       id            TEXT PRIMARY KEY,
       user_id       TEXT NOT NULL,
@@ -455,27 +467,44 @@ function migrate(db: DatabaseSync): void {
     db.prepare(
       "INSERT INTO users (id, email, display_name, role, created_at, updated_at) VALUES ('demo', 'demo@supercharts.local', 'Demo trader', 'user', ?, ?)",
     ).run(now, now);
-    db.prepare(
-      "INSERT INTO user_preferences (user_id, theme, preferences, updated_at) VALUES ('demo', 'dark', '{}', ?)",
-    ).run(now);
-    db.prepare(
-      "INSERT INTO watchlists (id, user_id, name, sort_order, created_at, updated_at) VALUES ('wl_default', 'demo', 'Default', 0, ?, ?)",
-    ).run(now, now);
-    const stmt = db.prepare(
-      'INSERT INTO watchlist_symbols (id, watchlist_id, symbol_id, sort_order, added_at) VALUES (?, ?, ?, ?, ?)',
-    );
-    const wlSyms = [
-      'BINANCE:BTCUSDT',
-      'BINANCE:ETHUSDT',
-      'BINANCE:SOLUSDT',
-      'BINANCE:BNBUSDT',
-      'BINANCE:XRPUSDT',
-      'BINANCE:DOGEUSDT',
-      'OANDA:EUR_USD',
-      'OANDA:GBP_USD',
-      'OANDA:USD_JPY',
-      'OANDA:XAU_USD',
-    ];
-    wlSyms.forEach((s, i) => stmt.run(`wls_${i}`, 'wl_default', s, i, now));
+    seedUserWorkspace(db, 'demo', now);
   }
+}
+
+/** Minimal statement-preparer shared by node:sqlite's DatabaseSync and our AppDB wrapper. */
+interface Preparer {
+  prepare: (sql: string) => { run: (...params: (string | number | null)[]) => unknown };
+}
+
+/**
+ * Seed a brand-new user's default workspace: dark theme prefs + a "Default" watchlist with a
+ * starter set of liquid crypto/forex symbols. Called for the demo seed and for every real
+ * account on first sign-up/OAuth so a fresh user never lands in an empty terminal. The caller
+ * inserts the `users` row first; ids are namespaced by userId so multiple users never collide.
+ */
+export function seedUserWorkspace(db: Preparer, userId: string, now: number): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO user_preferences (user_id, theme, preferences, updated_at) VALUES (?, ?, ?, ?)',
+  ).run(userId, 'dark', '{}', now);
+  const wlId = userId === 'demo' ? 'wl_default' : `wl_${userId}`;
+  db.prepare(
+    'INSERT OR IGNORE INTO watchlists (id, user_id, name, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(wlId, userId, 'Default', 0, now, now);
+  const stmt = db.prepare(
+    'INSERT OR IGNORE INTO watchlist_symbols (id, watchlist_id, symbol_id, sort_order, added_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  const wlSyms = [
+    'BINANCE:BTCUSDT',
+    'BINANCE:ETHUSDT',
+    'BINANCE:SOLUSDT',
+    'BINANCE:BNBUSDT',
+    'BINANCE:XRPUSDT',
+    'BINANCE:DOGEUSDT',
+    'OANDA:EUR_USD',
+    'OANDA:GBP_USD',
+    'OANDA:USD_JPY',
+    'OANDA:XAU_USD',
+  ];
+  const prefix = userId === 'demo' ? 'wls' : `wls_${userId}`;
+  wlSyms.forEach((s, i) => stmt.run(`${prefix}_${i}`, wlId, s, i, now));
 }

@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { BrandMark } from './brand-mark';
 import { ThemeToggle } from './theme-toggle';
 import { Button } from './ui/button';
+import { useSession } from '@/lib/auth';
 
 export function SiteHeader() {
+  const { user, loading, signOut } = useSession();
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/70 backdrop-blur-xl">
       <div className="container flex h-14 items-center justify-between gap-4">
@@ -34,14 +36,33 @@ export function SiteHeader() {
         </nav>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Link href="/login" className="hidden sm:block">
-            <Button variant="ghost" size="sm">
-              Sign in
-            </Button>
-          </Link>
-          <Link href="/terminal">
-            <Button size="sm">Open terminal</Button>
-          </Link>
+          {loading ? null : user ? (
+            <>
+              <span
+                className="hidden max-w-[160px] truncate text-sm text-muted-foreground sm:block"
+                title={user.email}
+              >
+                {user.displayName || user.email}
+              </span>
+              <Button variant="ghost" size="sm" onClick={() => void signOut()}>
+                Sign out
+              </Button>
+              <Link href="/terminal">
+                <Button size="sm">Open terminal</Button>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href="/login" className="hidden sm:block">
+                <Button variant="ghost" size="sm">
+                  Sign in
+                </Button>
+              </Link>
+              <Link href="/login">
+                <Button size="sm">Open terminal</Button>
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

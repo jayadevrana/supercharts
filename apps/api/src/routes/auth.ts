@@ -1,0 +1,213 @@
+import { randomBytes } from 'node:crypto';
+import type { FastifyInstance, FastifyReply } from 'fastify';
+import { nanoid } from 'nanoid';
+import { z } from 'zod';
+import type { AppDB } from '../db';
+import { seedUserWorkspace } from '../db';
+import {
+  clearSessionCookie,
+  createSession,
+  deleteSession,
+  getOptionalUser,
+  hashPassword,
+  setSessionCookie,
+  SESSION_COOKIE,
+  verifyPassword,
+  type SessionUser,
+} from '../auth';
+
+const OAUTH_STATE_COOKIE = 'sc_oauth_state';
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
+
+/** Public origin of the app — used to build the OAuth redirect URI and post-login redirects. */
+function appUrl(): string {
+  return (process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+}
+function googleRedirectUri(): string {
+  return `${appUrl()}/api/auth/google/callback`;
+}
+function googleEnabled(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
+interface GoogleProfile {
+  sub: string;
+  email?: string;
+  email_verified?: boolean;
+  name?: string;
+}
+
+/**
+ * Find-or-create the local user behind a Google profile. Links to an existing local account by
+ * verified email (so email/password users can later sign in with Google), otherwise provisions a
+ * fresh account with a seeded default workspace. Returns the local user id.
+ */
+function upsertGoogleUser(db: AppDB, profile: GoogleProfile): string {
+  const now = Date.now();
+  const existingLink = db.raw
+    .prepare("SELECT user_id as userId FROM accounts WHERE provider = 'google' AND provider_account_id = ?")
+    .get(profile.sub) as { userId: string } | undefined;
+  if (existingLink) return existingLink.userId;
+
+  const email = profile.email?.trim().toLowerCase();
+  let userId: string | undefined;
+
+  if (email && profile.email_verified) {
+    const byEmail = db.raw.prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: string } | undefined;
+    if (byEmail) userId = byEmail.id;
+  }
+
+  if (!userId) {
+    userId = `u_${nanoid(16)}`;
+    db.raw
+      .prepare('INSERT INTO users (id, email, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(userId, email ?? `${userId}@google.local`, profile.name ?? email ?? 'Trader', 'user', now, now);
+    seedUserWorkspace(db.raw, userId, now);
+  }
+
+  db.raw
+    .prepare('INSERT OR IGNORE INTO accounts (id, user_id, provider, provider_account_id, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(`acc_${nanoid(16)}`, userId, 'google', profile.sub, now);
+  return userId;
+}
+
+function toPublic(user: SessionUser): SessionUser {
+  return { id: user.id, email: user.email, displayName: user.displayName };
+}
+
+/** Start a fresh session for `userId` and set the cookie on the reply. */
+function login(db: AppDB, reply: FastifyReply, userId: string): void {
+  const session = createSession(db, userId);
+  setSessionCookie(reply, session.id);
+}
+
+export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
+  // Who am I? Always 200 so the client can branch on `user === null`. Also advertises which
+  // providers are configured so the UI can show/hide the Google button honestly.
+  fastify.get('/api/auth/me', async (req) => {
+    const user = getOptionalUser(req, db);
+    return { user: user ? toPublic(user) : null, googleEnabled: googleEnabled() };
+  });
+
+  fastify.post('/api/auth/register', async (req, reply) => {
+    const parsed = z
+      .object({
+        email: z.string().email().max(200),
+        password: z.string().min(8).max(200),
+        displayName: z.string().trim().max(80).optional(),
+      })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload', detail: parsed.error.issues[0]?.message };
+    }
+    const email = parsed.data.email.trim().toLowerCase();
+    const taken = db.raw.prepare('SELECT id FROM users WHERE email = ?').get(email);
+    if (taken) {
+      reply.code(409);
+      return { error: 'email_taken' };
+    }
+    const now = Date.now();
+    const userId = `u_${nanoid(16)}`;
+    db.raw
+      .prepare(
+        'INSERT INTO users (id, email, password_hash, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(userId, email, hashPassword(parsed.data.password), parsed.data.displayName ?? null, 'user', now, now);
+    seedUserWorkspace(db.raw, userId, now);
+    login(db, reply, userId);
+    return { user: { id: userId, email, displayName: parsed.data.displayName ?? null } };
+  });
+
+  fastify.post('/api/auth/login', async (req, reply) => {
+    const parsed = z
+      .object({ email: z.string().email().max(200), password: z.string().min(1).max(200) })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload' };
+    }
+    const email = parsed.data.email.trim().toLowerCase();
+    const row = db.raw
+      .prepare('SELECT id, email, password_hash as passwordHash, display_name as displayName FROM users WHERE email = ?')
+      .get(email) as { id: string; email: string; passwordHash: string | null; displayName: string | null } | undefined;
+    // Generic message + always run verify shape to avoid leaking which emails exist.
+    if (!row || !verifyPassword(parsed.data.password, row.passwordHash)) {
+      reply.code(401);
+      return { error: 'invalid_credentials' };
+    }
+    login(db, reply, row.id);
+    return { user: { id: row.id, email: row.email, displayName: row.displayName } };
+  });
+
+  fastify.post('/api/auth/logout', async (req, reply) => {
+    const sessionId = req.cookies?.[SESSION_COOKIE];
+    if (sessionId) deleteSession(db, sessionId);
+    clearSessionCookie(reply);
+    return { ok: true };
+  });
+
+  // ── Google OAuth (authorization-code flow) ─────────────────────────────────
+  fastify.get('/api/auth/google/start', async (_req, reply) => {
+    if (!googleEnabled()) return reply.redirect(`${appUrl()}/login?error=google_unconfigured`);
+    const state = randomBytes(16).toString('base64url');
+    reply.setCookie(OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 600,
+    });
+    const params = new URLSearchParams({
+      client_id: process.env.GOOGLE_CLIENT_ID!,
+      redirect_uri: googleRedirectUri(),
+      response_type: 'code',
+      scope: 'openid email profile',
+      state,
+      access_type: 'online',
+      prompt: 'select_account',
+    });
+    return reply.redirect(`${GOOGLE_AUTH_URL}?${params.toString()}`);
+  });
+
+  fastify.get('/api/auth/google/callback', async (req, reply) => {
+    const query = req.query as { code?: string; state?: string; error?: string };
+    const cookieState = req.cookies?.[OAUTH_STATE_COOKIE];
+    reply.clearCookie(OAUTH_STATE_COOKIE, { path: '/' });
+    if (query.error) return reply.redirect(`${appUrl()}/login?error=google_denied`);
+    if (!googleEnabled() || !query.code || !query.state || query.state !== cookieState) {
+      return reply.redirect(`${appUrl()}/login?error=google_state`);
+    }
+    try {
+      const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: query.code,
+          client_id: process.env.GOOGLE_CLIENT_ID!,
+          client_secret: process.env.GOOGLE_CLIENT_SECRET!,
+          redirect_uri: googleRedirectUri(),
+          grant_type: 'authorization_code',
+        }),
+      });
+      if (!tokenRes.ok) return reply.redirect(`${appUrl()}/login?error=google_token`);
+      const token = (await tokenRes.json()) as { access_token?: string };
+      if (!token.access_token) return reply.redirect(`${appUrl()}/login?error=google_token`);
+
+      const infoRes = await fetch(GOOGLE_USERINFO_URL, {
+        headers: { authorization: `Bearer ${token.access_token}` },
+      });
+      if (!infoRes.ok) return reply.redirect(`${appUrl()}/login?error=google_userinfo`);
+      const profile = (await infoRes.json()) as GoogleProfile;
+      if (!profile.sub) return reply.redirect(`${appUrl()}/login?error=google_userinfo`);
+
+      const userId = upsertGoogleUser(db, profile);
+      login(db, reply, userId);
+      return reply.redirect(`${appUrl()}/terminal`);
+    } catch {
+      return reply.redirect(`${appUrl()}/login?error=google_failed`);
+    }
+  });
+}

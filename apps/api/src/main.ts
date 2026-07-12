@@ -26,6 +26,7 @@ import { signalRoutes } from './routes/signals';
 import { indicatorRoutes } from './routes/indicators';
 import { futuresRoutes } from './routes/futures';
 import { registerWebSocketGateway } from './ws-gateway';
+import { authRoutes } from './routes/auth';
 import { registerDemoGuard } from './demo-guard';
 import { createDrawdownBreaker } from './dd-breaker';
 import { breakerRoutes } from './routes/breaker';
@@ -218,6 +219,7 @@ async function start(): Promise<void> {
     mt5BridgePort: MT5_BRIDGE_PORT,
   }));
 
+  authRoutes(app, db);
   marketRoutes(app, ingestion);
   scannerRoutes(app, ingestion, db);
   drawingRoutes(app, db);
@@ -237,7 +239,7 @@ async function start(): Promise<void> {
   signalRoutes(app, db, signalRunner);
   indicatorRoutes(app, db);
   futuresRoutes(app);
-  const wsBroadcaster = registerWebSocketGateway(app, ingestion, mt5Store);
+  const wsBroadcaster = registerWebSocketGateway(app, ingestion, mt5Store, db);
 
   // Alert engine — needs the WS broadcaster, so register routes AFTER the gateway is up.
   const alertEngine = new AlertEngine({

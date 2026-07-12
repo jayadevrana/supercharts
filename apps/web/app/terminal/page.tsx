@@ -10,12 +10,20 @@ import { ReplayBar } from '@/features/terminal/replay-bar';
 import { useTerminalStore } from '@/features/terminal/terminal-store';
 import { useMT5Store } from '@/features/terminal/mt5-store';
 import { getWSClient } from '@/lib/ws-client';
+import { useSession } from '@/lib/auth';
 
 export default function TerminalPage() {
   const { showLeftRail, showRightRail } = useTerminalStore();
+  const { user, loading: sessionLoading } = useSession();
   const ingestMT5 = useMT5Store((s) => s.ingestEvent);
   const refreshAccounts = useMT5Store((s) => s.refreshAccounts);
   const refreshPositions = useMT5Store((s) => s.refreshPositions);
+
+  // Belt-and-braces gate: middleware bounces visitors with no session cookie, but a present-yet-
+  // expired cookie reaches here — once /api/auth/me confirms no user, send them to sign in.
+  useEffect(() => {
+    if (!sessionLoading && !user) window.location.href = '/login';
+  }, [sessionLoading, user]);
 
   // Docs deep link: /terminal?pulse=<base64url(code)> loads the snippet into the Script dock
   // (one-shot, then stripped from the URL so refresh doesn't re-apply it).

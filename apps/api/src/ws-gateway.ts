@@ -15,6 +15,8 @@ import type {
 // of resolving a dynamic ESM import on every `request_volume_profile` frame.
 import { buildVisibleRangeProfile } from '@supercharts/chart-core/pure';
 import type { MT5Store, MT5Event } from './mt5/state';
+import type { AppDB } from './db';
+import { getOptionalUser } from './auth';
 
 const PROTOCOL_VERSION = 1;
 const MAX_SUBS_PER_CONN = 32;
@@ -28,8 +30,8 @@ const DEFAULT_OVERLAYS: SubscribeMarketMessage['overlays'] = [
 
 interface Connection {
   id: string;
-  /** Session user id this connection belongs to. Defaults to `demo` until auth ships. */
-  userId: string;
+  /** Session user id this connection belongs to, or `null` when the socket is anonymous. */
+  userId: string | null;
   socket: WebSocket;
   /** Set of (symbol, interval) keys this connection wants candle/trade/orderbook fanout for. */
   subs: Map<
@@ -63,14 +65,17 @@ export function registerWebSocketGateway(
   fastify: FastifyInstance,
   ctx: IngestionContext,
   mt5Store?: MT5Store,
+  db?: AppDB,
 ): WsBroadcaster {
   const connections = new Set<Connection>();
-  fastify.get('/ws', { websocket: true }, (socket /* , req */) => {
+  fastify.get('/ws', { websocket: true }, (socket, req) => {
+    // Identify the socket from the session cookie on the upgrade request (same-origin in
+    // production, so the cookie is sent). Anonymous sockets still get public market data —
+    // they simply never receive per-user alert fanout.
+    const user = db ? getOptionalUser(req, db) : null;
     const conn: Connection = {
       id: nanoid(10),
-      // Until Auth.js lands every WS belongs to `demo`. The auth route module is the
-      // sole owner of "who is this" — when it returns a real session, lift it here.
-      userId: 'demo',
+      userId: user?.id ?? null,
       socket,
       subs: new Map(),
       heatmapAcquires: new Map(),
