@@ -28,6 +28,7 @@ import { futuresRoutes } from './routes/futures';
 import { registerWebSocketGateway } from './ws-gateway';
 import { authRoutes } from './routes/auth';
 import { brokerRoutes } from './routes/broker';
+import { brokerAutomationRoutes } from './routes/broker-automation';
 import { adminRoutes } from './routes/admin';
 import { newestActiveCredentials } from './broker/store';
 import { seedVmEgress } from './broker/egress-store';
@@ -279,6 +280,9 @@ async function start(): Promise<void> {
   });
   alertEngine.load();
   alertRoutes(app, db, alertEngine, ingestion);
+  // GW-7 arm surface — the SuperTrend flip automation route. Registered after the engine exists so
+  // arming can subscribe the pair live; reuses the same egress-whitelist gate as manual orders.
+  brokerAutomationRoutes(app, db, alertEngine, defaultKiteGatewayFactory);
   breakerRoutes(app, db, ddBreaker);
 
   // Poll the breaker so it trips + auto-resets at the UTC boundary even without traffic.

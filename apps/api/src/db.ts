@@ -525,6 +525,10 @@ function migrate(db: DatabaseSync): void {
   for (const stmt of [
     "ALTER TABLE alerts ADD COLUMN interval TEXT NOT NULL DEFAULT '1m'",
     'ALTER TABLE alerts ADD COLUMN last_fired_at INTEGER',
+    // GW-7 arm surface: groups the BUY + SELL legs of one armed SuperTrend flip automation so the
+    // pair can be listed + disarmed together. NULL for every ordinary/legacy alert (the live 48/144
+    // MA-cross alerts included) — purely additive.
+    'ALTER TABLE alerts ADD COLUMN automation_id TEXT',
   ]) {
     try {
       db.exec(stmt);

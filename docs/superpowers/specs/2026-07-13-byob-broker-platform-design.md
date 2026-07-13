@@ -153,10 +153,22 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    surface. 13 tests incl. a real-`signal-eval`+real-`supertrend` integration proof (buy fires on an
    up-flip only, sell on a down-flip only). 678/678; commit `c05f811` (pushed; VM synced no-restart —
    pure module, nothing imports it at runtime yet). The cookbook already ships a display `supertrend-flip`
-   recipe. **Remaining (next loop) = final delivery surface:** an **arm route**
-   (`POST /api/broker/automation/supertrend` — requirePro + whitelisted conn → persist+subscribe both
-   legs, return ids + disarm) + the **arm-on-a-Kite-instrument UI**; then the 9:00 IST Telegram
-   reconnect nudge and order-fill notifications.
+   recipe.
+7c. **GW-7 arm route** ✅ (2026-07-14): `POST /api/broker/automation/supertrend`
+   (`apps/api/src/routes/broker-automation.ts`) — requirePro + the SAME `resolveWriteGateway` gate as
+   a manual order (connected + fresh daily token + **whitelisted** egress IP) → runs
+   `buildSupertrendAutomation` → persists BOTH legs as ordinary indicator alerts sharing one new
+   `alerts.automation_id` column → subscribes both to the live `AlertEngine` → returns
+   `{ automationId, buy.id, sell.id, egressIp }`. Plus `GET /api/broker/automation` (armed pairs,
+   grouped) + `DELETE /api/broker/automation/:automationId` (disarm = delete both legs + unsubscribe).
+   **Places NO order, mutates no broker state** — only writes alert rows; the wired GW-7 executor does
+   the flip when a leg fires. Additive: legacy alerts carry a NULL `automation_id`; the live 48/144
+   MA-cross alerts + MT5 untouched. 6 route tests (anon 401 / free 403 / no-conn 404 / not-whitelisted
+   409 persists+subscribes NOTHING / arm → both legs opposite-flip conditions + shared brokerOrder +
+   both subscribed / bad-config 400 / list-group + disarm removes both + 404 on re-disarm). 684/684.
+   **Remaining = final delivery surface:** the **arm-on-a-Kite-instrument UI** (instrument picker +
+   atr/mult/qty/product/cap form + live ARMED indicator + disarm) on the alert/script surface; then
+   the 9:00 IST Telegram reconnect nudge and order-fill notifications.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
