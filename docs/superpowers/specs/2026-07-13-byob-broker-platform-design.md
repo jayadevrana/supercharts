@@ -135,8 +135,9 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
 4. **GW-4** ✅ (2026-07-13): Plan gating (`users.plan` free|pro + `plan_expires_at`) + `requirePro`
    gate (admin bypass) now backs every broker endpoint (was admin-only) + `/admin` panel (activate
    Pro, view connections last-4, order audit). Manual activation until a payment gateway lands.
-5. **GW-5**: Egress IP pool (tables, bin-packing allocator, ProxyAgent write-plane routing, admin
-   pool management, user whitelist-onboarding step).
+5. **GW-5** ✅ (2026-07-13): Egress IP pool (tables + UNIQUE(ip,broker) SEBI constraint, bin-packing
+   allocator, undici ProxyAgent write-plane routing, admin pool management, whitelist-onboarding +
+   409 gate on order writes). VM IP seeded from `EGRESS_VM_IP`. 643/643; deployed.
 6. **GW-6** ✅ (2026-07-13, pulled forward): Per-user broker charts — the user's Kite feed drives the chart/watchlists (KITE: symbols).
 7. **GW-7**: Alert→order automation (additive `broker_order` action + caps + kill-switch) + Telegram
    reconnect nudge + fill notifications.
