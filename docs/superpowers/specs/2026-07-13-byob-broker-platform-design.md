@@ -145,10 +145,18 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    `automation-gate.ts` (kill-switch > per-alert daily cap) + extracted `resolveWriteGateway` (single
    audited write-plane resolver; route delegates, behavior-identical) + `alert-order-executor.ts`
    (never throws; audit-before/place-after; close-leg reject aborts the flip) wired into AlertEngine
-   with `isKillSwitchHalted=ddBreaker.isHalted`. 22 new tests; 665/665; commit `48c4276` (pushed,
-   deploy pending VM start). **Remaining (next loop):** the SuperTrend PulseScript recipe + the
-   arm-on-a-Kite-instrument UI (= final delivery surface), the 9:00 IST Telegram reconnect nudge, and
-   order-fill notifications.
+   with `isKillSwitchHalted=ddBreaker.isHalted`. 22 new tests; 665/665; commit `48c4276`; deployed on
+   `supercharts2`.
+7b. **GW-7 builder** ✅ (2026-07-14): `buildSupertrendAutomation()` (`apps/api/src/broker/supertrend-automation.ts`)
+   — pure translation of a SuperTrend + Kite-instrument config into the ARMED buy+sell indicator-alert
+   flip pair (dir `crosses_above/below 0`, one shared `delivery.brokerOrder`), the backend of the arm
+   surface. 13 tests incl. a real-`signal-eval`+real-`supertrend` integration proof (buy fires on an
+   up-flip only, sell on a down-flip only). 678/678; commit `c05f811` (pushed; VM synced no-restart —
+   pure module, nothing imports it at runtime yet). The cookbook already ships a display `supertrend-flip`
+   recipe. **Remaining (next loop) = final delivery surface:** an **arm route**
+   (`POST /api/broker/automation/supertrend` — requirePro + whitelisted conn → persist+subscribe both
+   legs, return ids + disarm) + the **arm-on-a-Kite-instrument UI**; then the 9:00 IST Telegram
+   reconnect nudge and order-fill notifications.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.

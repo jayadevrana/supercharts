@@ -34,6 +34,7 @@ increment per session, tick the box there AND log here.
 
 | Date | Item | Commits | Evidence |
 |---|---|---|---|
+| 2026-07-14 | **GW-7 — SuperTrend flip-automation builder (final-delivery ARM surface).** `apps/api/src/broker/supertrend-automation.ts` — pure `buildSupertrendAutomation()` translates a SuperTrend + Kite-instrument config into the ARMED indicator-alert **PAIR** the owner runs on any Kite instrument: BUY leg = SuperTrend `direction` `crosses_above 0` (regime −1→+1, side buy), SELL leg = `crosses_below 0` (side sell). Both legs share ONE `delivery.brokerOrder`, so the done GW-7 executor turns each fire into a position-FLIP (BUY→long / SELL→short; close opposite first; idempotent). It only builds the create payloads the audited `POST /api/alerts` (type:`indicator`) already validates/persists — **places no order, mutates nothing, and nothing imports it at runtime yet** (backend for the next increment = arm route + UI). Additive: live 48/144 ma_cross alerts + MT5 untouched. | `c05f811` (**pushed to main; VM synced `git pull --ff-only`, NO pm2 restart — a zero-runtime-delta module must not bounce the live alert engine**) | **678/678** (`pnpm vitest run --no-file-parallelism`; +13 new). **Integration proof:** built conditions run through the REAL shared `signal-eval` evaluator + REAL `supertrend` indicator over a zigzag fixture (flips verified up`[37,97]`/down`[67,128]`) — buy fires exactly on an up-flip and NOT a down-flip, sell the reverse, neither on a quiet mid-trend bar. Plus shape (pair/flip-conditions/one shared spec with tuned atr·mult/shared brokerOrder/defaults atr10·mult3·telegram-on·IST) + validation (qty positive-int, non-empty symbol/exchange, mult>0, atr≥1 throw). api+web typecheck clean. **Prod (supercharts2) after code-sync: site 200, health ok, binance+kite connected** (engine uptime unchanged — not restarted). |
 | 2026-07-14 | **PROD RESCUE — VM migrated `supercharts`→`supercharts2`, GW-7 deployed, site back up.** Prod VM `supercharts` was TERMINATED + un-startable ("Compute Engine detected suspicious activity" = the recurring GCP crypto-mining FALSE-POSITIVE on Binance-WS + build CPU; 2nd time). **Data preserved:** snapshotted the boot disk (`supercharts-db-rescue-0714`) FIRST → new disk from snapshot → new `e2-standard-2` **`supercharts2`** (asia-south1-a) → verified DB intact (13 users, 1 broker_conn=owner Kite, 1 egress) → deleted flagged VM → moved static IP **35.200.208.191** onto supercharts2 → git pull GW-7 + build + pm2 restart. **⚠️ DEPLOY TARGET IS NOW `supercharts2` (not `supercharts`)** — every `gcloud compute ssh`/deploy must use `supercharts2`. **⚠️ GCP will likely re-flag this workload again** — durable fix = move to a non-GCP VPS (Hetzner/DO); needs owner's provider account (`infra/deploy/vm-bootstrap.sh` one-commands it on any fresh Ubuntu). | (host op; code `41a4d45`) | **LIVE:** `curl https://supercharting.com` → **200** via 35.200.208.191; `/admin` 307, broker anon 401, health ok + binance+kite **connected**; DB row counts preserved through the migration. |
 | 2026-07-14 | **GW-7 (core) — alert/PulseScript → broker order automation (position-flip + caps + kill-switch)**. Additive `delivery.brokerOrder` on ma_cross **and** indicator alerts (`AlertBrokerOrderConfig`: broker/tradingSymbol/exchange/quantity/product/maxTradesPerDay). On a fire the alert engine routes a **position-FLIP** market order through the EXISTING audited pipeline (`resolveWriteGateway` + `broker_orders` audit-before-broker), fully gated — legacy 48/144 alerts carry no `brokerOrder` so they're untouched; MT5 engine untouched. **Pure helpers:** `flip-planner.ts` (BUY→long / SELL→short; opposite side closes first THEN opens; already-in-direction = idempotent no-op, never stacks; all market orders, close leg sized to the actual open qty) + `automation-gate.ts` (kill-switch(dd-breaker) > per-alert daily cap > allow). **`write-gateway.ts`:** extracted `resolveWriteGateway` — the single audited write-plane resolver (Pro conn + fresh daily token + SEBI-whitelisted egress IP → read+write gateways); the route's `writeGatewayFor` now delegates to it (behavior-identical) + shared `defaultKiteGatewayFactory`. **`alert-order-executor.ts`:** gate → resolve → read positions (main IP) → planFlip → audit-before/place-after via the egress write gateway; NEVER throws (fire-and-forget like Telegram); a close-leg rejection aborts the flip (never opens the new side onto an open one); per-alert in-memory UTC-day cap mirrors the signal-runner `firesToday`. AlertEngine gained an optional `brokerOrderExecutor` (called after web/telegram delivery when `delivery.brokerOrder` set); `main.ts` wires it with `isKillSwitchHalted=()=>ddBreaker.isHalted()` (shares the kill-switch with the MT5 runner). Route zod schema round-trips `brokerOrder` for the arming UI. **The build LOOP never armed live automation — every path proven vs a STUB gateway; no live order placed.** | `48c4276` (**pushed to main; deploy BLOCKED — VM off, see Questions**) | **665/665** (`pnpm vitest run --no-file-parallelism`; the parallel run shows 1 flake = the documented M9 interpreter-perf sample `tests/docs-samples.test.ts`, passes isolated at **853ms** < 2000ms — no script-lang code touched). **+22 new tests:** flip-planner 8, automation-gate 6, alert-order-executor 8 (flat→BUY 1 order·short→BUY 2-order flip·already-long→noop·kill-switch→skipped-no-broker·daily-cap→skipped·un-whitelisted→skipped·token-expired→skipped·close-leg-reject→abort+audit rejected). Refactor kept **broker-trade-routes 8/8** (behavior-identical). types+api+web typecheck **clean**. **Deploy NOT run: prod VM `supercharts` (35.200.208.191) TERMINATED since 2026-07-13 12:18 PDT (owner-stopped after GW-5); `curl https://supercharting.com` → 000. Code safe on `main`, auto-deploys on next VM start.** |
 | 2026-07-13 | **GW-5 — SEBI-compliant egress-IP pool + order write-plane routing** (plan in-line; owner corrected me on the SEBI per-client static-IP rule). Pure bin-packing `egress-allocator.ts` (never 2 same-broker clients on one IP; 1 Zerodha+1 Angel+1 Dhan may share; fills fullest usable IP before a new one). `egress_ips` + `ip_assignments` tables (**UNIQUE(egress_ip_id, broker)** = the SEBI rule enforced by the DB) + `egress-store.ts` (VM-IP seed, encrypted proxy_url, assign, whitelist confirm, cached **undici `ProxyAgent`** dispatcher). Order **writes** (place/modify/cancel/exit) now resolve the user's egress IP, require it **whitelisted** (409 `ip_not_whitelisted` w/ the IP until confirmed), route via its proxy (direct for the VM IP), audit the `egress_ip`; **reads stay on the main IP**. Connect + GET connections expose the IP + whitelist status; `POST /broker/whitelist-confirm`; admin `GET/POST/DELETE /api/admin/egress` pool mgmt. Web: connect-dialog whitelist onboarding step + `/admin` "Order-routing IPs" section. `main` seeds the VM IP from `EGRESS_VM_IP`. **undici** added (proxy routing). | `9faa0a1`→`f29d5d8` (**deployed LIVE**) | **643/643** (+13: allocator 7, store 6; trade-routes gate test: not-whitelisted→**409**→confirm→order placed, audit `egress_ip=35.0.0.1`; DB rejects 2nd same-broker client). api+web typecheck clean. Prod: site 200, `/admin` **307**, broker anon **401**, binance+kite connected, **egress_ips seeded `35.200.208.191` (vm)**. UI browser-screenshot deferred (local :4000 held by another session); backend fully unit-tested + prod structurally verified. **Owner action to trade: whitelist `35.200.208.191` in the Kite app, then confirm in the dialog.** |
@@ -62,7 +63,7 @@ increment per session, tick the box there AND log here.
 ## In progress
 
 - **DEPLOYED + AUTH LIVE**: https://supercharting.com (Google OAuth structurally done, needs the OAuth client; email/password + email verification via Resend LIVE; account settings live). **DOCS TRACK COMPLETE (DOCS-1..3).**
-- **ACTIVE GOAL: BYOB broker trading platform** (spec `docs/superpowers/specs/2026-07-13-byob-broker-platform-design.md`, build order §4 GW-1..GW-10; supersedes the personal-Kite decision in `docs/markets-expansion.md`). Done: **GW-1** (gateway+adapter+encrypted store), **GW-2** (connect wizard+daily reconnect), **GW-6** (per-user Kite charts, pulled forward), **GW-3** (Trade tab — order pipeline routes + right-rail ticket/orders/positions), **GW-4** (plan gate `requirePro` + `/admin` panel), **GW-5** (egress-IP pool + write-plane routing), **GW-7 core** (alert→broker FLIP automation engine: flip-planner + automation-gate + resolveWriteGateway + alert-order-executor wired into AlertEngine, all opt-in via `delivery.brokerOrder`, stub-tested — commit `48c4276`). Broker endpoints are **plan-gated** (`requirePro`: admin OR active `plan='pro'`); manual Pro activation from `/admin` until a payment gateway lands.
+- **ACTIVE GOAL: BYOB broker trading platform** (spec `docs/superpowers/specs/2026-07-13-byob-broker-platform-design.md`, build order §4 GW-1..GW-10; supersedes the personal-Kite decision in `docs/markets-expansion.md`). Done: **GW-1** (gateway+adapter+encrypted store), **GW-2** (connect wizard+daily reconnect), **GW-6** (per-user Kite charts, pulled forward), **GW-3** (Trade tab — order pipeline routes + right-rail ticket/orders/positions), **GW-4** (plan gate `requirePro` + `/admin` panel), **GW-5** (egress-IP pool + write-plane routing), **GW-7 core** (alert→broker FLIP automation engine: flip-planner + automation-gate + resolveWriteGateway + alert-order-executor wired into AlertEngine, all opt-in via `delivery.brokerOrder`, stub-tested — commit `48c4276`), **GW-7 builder** (`buildSupertrendAutomation` — pure arm-surface backend that emits the buy+sell indicator-alert flip pair; `c05f811`). Broker endpoints are **plan-gated** (`requirePro`: admin OR active `plan='pro'`); manual Pro activation from `/admin` until a payment gateway lands.
 
 ## Next
 
@@ -72,16 +73,22 @@ it auto-trades their connected Zerodha with **position-FLIP**: BUY signal → cl
 long; SELL signal → close long + open short. Orders route through the done pipeline (GW-1..GW-5:
 audited, egress-IP whitelisted, plan-gated). **Loop runs every 2h** toward this (`byob-build-loop`).
 
-**Build order — GW-7 core landed (`48c4276`); next up:**
+**Build order — GW-7 core + builder landed (`48c4276`, `c05f811`); next up:**
 - ✅ **GW-7 core (backend automation engine)** — `delivery.brokerOrder` on ma_cross + indicator
   alerts → position-FLIP market order through the audited pipeline; flip-planner + automation-gate
   (kill-switch + per-alert daily cap) + `resolveWriteGateway` + `alert-order-executor` wired into
-  AlertEngine. Stub-tested only; the OWNER arms live. **Pushed to `main`, NOT deployed (VM off).**
-- **GW-7 remaining (next loop):** (a) the **SuperTrend PulseScript recipe** (reuse `ta.supertrend`)
-  emitting clean flip buy/sell marks → cookbook + an **arm-able-on-a-Kite-instrument UI** on the
-  alert/script (qty/product/instrument/cap form + a live "armed" indicator) — this is the FINAL
-  DELIVERY surface; (b) Telegram **9:00 IST reconnect nudge** for users with active connections;
-  (c) **order-fill notifications**. The `alert()`-bridge path already rides the indicator-alert
+  AlertEngine. Stub-tested only; the OWNER arms live. **Deployed on `supercharts2`.**
+- ✅ **GW-7 builder (`c05f811`)** — `buildSupertrendAutomation()` (pure, 13 tests incl. real-indicator
+  flip proof): a SuperTrend + Kite-instrument config → the ARMED buy+sell indicator-alert flip pair
+  (dir `crosses_above/below 0`) sharing ONE `brokerOrder`. This is the backend of the arm surface.
+  The cookbook already ships a display `supertrend-flip` recipe (`ta.supertrend`, `st.dir > st.dir[1]`).
+- **GW-7 remaining (next loop) — the FINAL DELIVERY surface:** (a) an **arm route** —
+  `POST /api/broker/automation/supertrend` (requirePro + active whitelisted Kite conn) that runs
+  `buildSupertrendAutomation`, persists BOTH legs via the existing alert store, subscribes them, and
+  returns the two alert ids + a "disarm" (delete pair) path; (b) the **arm-on-a-Kite-instrument UI**
+  (instrument picker + atr/mult/qty/product/cap form + live "ARMED" indicator + disarm) on the
+  alert/script surface; (c) Telegram **9:00 IST reconnect nudge** for users with active connections;
+  (d) **order-fill notifications**. The `alert()`-bridge path already rides the indicator-alert
   route (a PulseScript scan/alert with `brokerOrder` set flips on match).
 - Then GW-8 (OANDA trading), GW-9 (headless login), GW-10 (scanner-on-broker + beta).
 
@@ -119,18 +126,19 @@ autocomplete) then IND-1..2. SCANNER (SCAN-1..4) ✅ · DOCS (DOCS-1..3) ✅ · 
 
 ## Questions for owner
 
-- 🔴 **PROD IS DOWN + GW-7 NOT DEPLOYED — the VM is off.** `gcloud compute instances describe
-  supercharts --zone=asia-south1-a` → **TERMINATED since 2026-07-13 12:18 PDT** (stopped right after
-  the GW-5 deploy — looks intentional). `curl https://supercharting.com` → **000**. The GW-7 code is
-  committed + pushed to `main` (`48c4276`, 665/665 green, typechecks clean) and will deploy on the
-  next VM start. **The loop did NOT auto-start the VM** — starting a stopped production VM is an
-  outward-facing action (brings the public site online + resumes billing) and may have been a
-  deliberate stop, so it's an owner call. **To deploy GW-7 + bring prod back:**
-  `gcloud compute instances start supercharts --zone=asia-south1-a`, then SSH in
-  (`gcloud compute ssh supercharts --zone=asia-south1-a`) and run
-  `curl -fsSL https://raw.githubusercontent.com/jayadevrana/supercharts/main/infra/deploy/vm-deploy.sh | bash`
-  (or `cd ~/supercharts && git pull --ff-only && pm2 restart all --update-env`). The live 48/144
-  alert engine reloads from the DB on boot; no new deps were added (no `pnpm install` needed).
+- ✅ **PROD BACK UP + GW-7 DEPLOYED** — the VM is `supercharts2` (asia-south1-a), RUNNING; this
+  session confirmed `curl https://supercharting.com` → **200**, `/api/health` ok, binance+kite
+  **connected**. GW-7 core (`48c4276`) + builder (`c05f811`) are on the VM. **⚠️ DEPLOY TARGET IS
+  `supercharts2`** (the old `supercharts` VM is gone — see the PROD RESCUE row). The GCP mining
+  false-flag will likely recur; the durable fix is a non-GCP VPS (`infra/deploy/vm-bootstrap.sh`
+  one-commands any fresh Ubuntu) — needs the owner's provider account.
+- ⚠️ **Deploy convention for zero-runtime-delta increments:** the GW-7 builder (`c05f811`) is a pure
+  module NOTHING imports at runtime yet, so this run synced the VM with `git pull --ff-only` and did
+  **NOT** `pm2 restart` — bouncing the live 48/144-alert engine + Binance WS for no runtime change is
+  needless risk. The next behavioral increment (the arm route) will carry the restart+live-verify.
+- ▶️ **When the arm route + UI land, the owner arms live** — the loop never places a live order
+  (spec §4/§5); every path is stub-proven. Owner status: IP `35.200.208.191` whitelisted in Kite +
+  confirmed server-side, so manual Buy/Sell already works; automation is one route+UI increment away.
 - ✅ **Dev SSD space RECOVERED** — `/Volumes/PortableSSD` now reports **648G free** (was 0 B / 100%
   full last run). Local `pnpm test` + typecheck ran clean this session. (Prior note: freeing was done
   by clearing `apps/web/.next` + `packages/*/dist` + `apps/*/dist`, all regenerate on build.)
