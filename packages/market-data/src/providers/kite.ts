@@ -141,10 +141,29 @@ export class KiteProvider implements MarketDataProvider {
   }
 
   async searchSymbols(query: string, limit = 50): Promise<MarketSymbol[]> {
-    const q = canonicalPart(query);
-    return [...this.catalog.values()]
-      .filter((row) => !q || canonicalPart(row.tradingSymbol).includes(q) || canonicalPart(row.base).includes(q))
-      .slice(0, limit);
+    const q = canonicalPart(query); // upper-cased + spaces→_, so matching is case-insensitive
+    if (!q) return [...this.catalog.values()].slice(0, limit);
+    // Relevance ranking (lower = better) so "IDEA" surfaces the EQUITY first, not its F&O
+    // contracts: exact symbol match → prefix → name match → substring, and within a tier the
+    // cash instruments (stock/index) rank above futures/options, shorter symbols above long
+    // derivative contract names.
+    const CLASS_RANK: Record<string, number> = { stock: 0, index: 1, futures: 3, commodity: 3, options: 4 };
+    const scored: Array<{ row: KiteInstrument; score: number }> = [];
+    for (const row of this.catalog.values()) {
+      const ts = canonicalPart(row.tradingSymbol);
+      const nm = canonicalPart(row.base);
+      let base: number;
+      if (ts === q) base = 0;
+      else if (ts.startsWith(q)) base = 100;
+      else if (nm === q) base = 150;
+      else if (nm.startsWith(q)) base = 200;
+      else if (ts.includes(q) || nm.includes(q)) base = 300;
+      else continue;
+      const score = base + (CLASS_RANK[row.assetClass] ?? 5) * 10 + Math.min(ts.length, 40) * 0.1;
+      scored.push({ row, score });
+    }
+    scored.sort((a, b) => a.score - b.score || a.row.tradingSymbol.localeCompare(b.row.tradingSymbol));
+    return scored.slice(0, limit).map((s) => s.row);
   }
 
   async getSymbol(canonicalId: string): Promise<MarketSymbol | null> {
