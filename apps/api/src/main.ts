@@ -28,6 +28,7 @@ import { futuresRoutes } from './routes/futures';
 import { registerWebSocketGateway } from './ws-gateway';
 import { authRoutes } from './routes/auth';
 import { brokerRoutes } from './routes/broker';
+import { adminRoutes } from './routes/admin';
 import { newestActiveCredentials } from './broker/store';
 import { registerDemoGuard } from './demo-guard';
 import { createDrawdownBreaker } from './dd-breaker';
@@ -230,6 +231,7 @@ async function start(): Promise<void> {
 
   authRoutes(app, db);
   brokerRoutes(app, db, ingestion);
+  adminRoutes(app, db);
   marketRoutes(app, ingestion, db);
   scannerRoutes(app, ingestion, db);
   drawingRoutes(app, db);
