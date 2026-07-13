@@ -25,6 +25,7 @@
     "@supercharts/types": "workspace:*",
     "fastify": "^5.1.0",
     "nanoid": "^5.0.7",
+    "undici": "^6.21.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
