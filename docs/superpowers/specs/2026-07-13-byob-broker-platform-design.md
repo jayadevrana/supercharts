@@ -124,17 +124,18 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
 
 ## 4. Build order — one increment per 5-hour loop cycle (test → deploy → verify → next)
 
-1. **GW-1**: BrokerGateway interface + Kite adapter (validate/orders/positions) + `broker_connections`
+1. **GW-1** ✅ (2026-07-13): BrokerGateway interface + Kite adapter (validate/orders/positions) + `broker_connections`
    + encryption helpers. Tested against the owner's `.env` creds (`KITE_API_KEY/SECRET/ACCESS_TOKEN`).
-2. **GW-2**: Kite connect wizard (clone OANDA wizard) + daily one-tap reconnect + token-expiry UX.
-3. **GW-3**: Trade tab — place/modify/cancel + Positions/Orders panels, browser-verified end-to-end
-   with the owner's account (1-qty limit order far from market, then cancelled).
+2. **GW-2** ✅ (2026-07-13): Kite connect wizard (clone OANDA wizard) + daily one-tap reconnect + token-expiry UX.
+3. **GW-3** ✅ (2026-07-13): Trade tab — place/modify/cancel + Positions/Orders panels. Order pipeline routes
+   (audited before broker, verbatim errors) + right-rail Kite ticket. Backend proven via Fastify-inject route
+   tests + browser (confirm dialog, honest states); live order probe skipped — daily token stale (TokenException).
    **Interim gate:** until GW-4 ships, ALL broker endpoints (connect + trading) are restricted to
    `role='admin'` — no non-owner exposure of ungated trading in production.
-4. **GW-4**: Plan gating (`users.plan`) + `/admin` panel (activate users, view connections/orders).
+4. **GW-4**: Plan gating (`users.plan`) + `/admin` panel (activate users, view connections/orders).  ← **NEXT**
 5. **GW-5**: Egress IP pool (tables, bin-packing allocator, ProxyAgent write-plane routing, admin
    pool management, user whitelist-onboarding step).
-6. **GW-6**: Per-user broker charts — the user's Kite feed drives the chart/watchlists (KITE: symbols).
+6. **GW-6** ✅ (2026-07-13, pulled forward): Per-user broker charts — the user's Kite feed drives the chart/watchlists (KITE: symbols).
 7. **GW-7**: Alert→order automation (additive `broker_order` action + caps + kill-switch) + Telegram
    reconnect nudge + fill notifications.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
