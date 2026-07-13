@@ -30,6 +30,7 @@ import { authRoutes } from './routes/auth';
 import { brokerRoutes } from './routes/broker';
 import { adminRoutes } from './routes/admin';
 import { newestActiveCredentials } from './broker/store';
+import { seedVmEgress } from './broker/egress-store';
 import { registerDemoGuard } from './demo-guard';
 import { createDrawdownBreaker } from './dd-breaker';
 import { breakerRoutes } from './routes/breaker';
@@ -92,6 +93,10 @@ async function start(): Promise<void> {
   registerDemoGuard(app, process.env);
 
   const db = openDB(process.env);
+  // Seed the main VM IP as the first-slot egress for order routing (GW-5). Orders from the first
+  // client of each broker leave via this IP directly (no proxy); EGRESS_VM_IP is the whitelistable
+  // public IP the user registers in their broker console.
+  if (process.env.EGRESS_VM_IP) seedVmEgress(db, process.env.EGRESS_VM_IP);
   // If the user connected OANDA via the in-app wizard, those saved (already-verified) creds
   // drive the live forex feed — overriding env. Otherwise bootstrap falls back to env → Yahoo.
   const oandaRow = db.raw

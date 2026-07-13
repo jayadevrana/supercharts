@@ -11,15 +11,17 @@ import {
   completeOrderAudit, deleteConnection, getGatewayCredentials, listConnections,
   recordOrderAudit, saveConnection, updateAccessToken,
 } from '../broker/store';
+import { assignEgress, confirmWhitelist, dispatcherFor, getUserEgress } from '../broker/egress-store';
 
 /**
- * Builds a per-request execution gateway from a user's decrypted Kite credentials.
- * Injectable so the trading routes can be unit-tested against a stub without hitting Kite.
+ * Builds a per-request execution gateway from a user's decrypted Kite credentials, optionally
+ * routed through the user's assigned egress-IP proxy (GW-5). Injectable so the trading routes can
+ * be unit-tested against a stub without hitting Kite.
  */
-export type BrokerGatewayFactory = (creds: { apiKey: string; accessToken: string }) => BrokerGateway;
+export type BrokerGatewayFactory = (creds: { apiKey: string; accessToken: string }, dispatcher?: unknown) => BrokerGateway;
 
-const defaultKiteFactory: BrokerGatewayFactory = (creds) =>
-  new KiteGateway({ apiKey: creds.apiKey, accessToken: creds.accessToken });
+const defaultKiteFactory: BrokerGatewayFactory = (creds, dispatcher) =>
+  new KiteGateway({ apiKey: creds.apiKey, accessToken: creds.accessToken, proxyDispatcher: dispatcher });
 
 /**
  * BYOB broker connections (GW-2). PLAN-GATED (GW-4): every endpoint runs through `requirePro`,
@@ -62,11 +64,33 @@ export function brokerRoutes(
   };
   fastify.get('/api/broker/connections', async (req) => {
     const user = requirePro(req, db);
-    const items = listConnections(db, user.id).map((c) => ({
-      ...c,
-      loginUrl: c.broker === 'kite' ? buildKiteLoginUrl(loginKeyFor(db, user.id)) : undefined,
-    }));
+    const items = listConnections(db, user.id).map((c) => {
+      if (c.broker !== 'kite') return c;
+      // Lazily ensure an egress assignment so the whitelist onboarding step can always show the IP.
+      if (!getUserEgress(db, 'kite', user.id)) assignEgress(db, 'kite', user.id);
+      const egress = getUserEgress(db, 'kite', user.id);
+      return {
+        ...c,
+        loginUrl: buildKiteLoginUrl(loginKeyFor(db, user.id)),
+        egressIp: egress?.ip ?? null,
+        egressWhitelisted: egress?.whitelisted ?? false,
+      };
+    });
     return { items };
+  });
+
+  // The user confirms they've whitelisted their order-routing IP in the broker console.
+  fastify.post('/api/broker/whitelist-confirm', async (req, reply) => {
+    const user = requirePro(req, db);
+    const parsed = z.object({ broker: z.literal('kite') }).safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload' };
+    }
+    if (!getUserEgress(db, 'kite', user.id)) assignEgress(db, 'kite', user.id);
+    const ok = confirmWhitelist(db, 'kite', user.id);
+    const egress = getUserEgress(db, 'kite', user.id);
+    return { ok, egressIp: egress?.ip ?? null, whitelisted: egress?.whitelisted ?? false };
   });
 
   fastify.post('/api/broker/connect', async (req, reply) => {
@@ -155,6 +179,45 @@ export function brokerRoutes(
     return { error: 'broker_rejected', message: err instanceof Error ? err.message : 'broker request failed' };
   };
 
+  /**
+   * WRITE-plane gateway (GW-5): resolves the user's assigned egress IP, requires it to be
+   * whitelisted in their Kite app (SEBI), and builds the gateway routed through that IP's proxy
+   * (direct for the VM IP). Reads use `gatewayFor` (main VM IP — brokers allow reads from any IP).
+   */
+  const writeGatewayFor = (user: SessionUser, reply: FastifyReply): { gw: BrokerGateway; egressIp: string } | null => {
+    const creds = getGatewayCredentials(db, user.id, 'kite');
+    if (!creds) {
+      reply.code(404);
+      reply.send({ error: 'not_connected', message: 'Connect your Kite app first.' });
+      return null;
+    }
+    if (!creds.accessToken) {
+      reply.code(409);
+      reply.send({ error: 'token_expired', message: 'Reconnect Kite for a fresh daily token before trading.' });
+      return null;
+    }
+    let egress = getUserEgress(db, 'kite', user.id);
+    if (!egress) {
+      const a = assignEgress(db, 'kite', user.id);
+      if (a.status === 'needs_ip') {
+        reply.code(409);
+        reply.send({ error: 'no_egress_ip', message: 'No order-routing IP is available yet — contact support to add one.' });
+        return null;
+      }
+      egress = getUserEgress(db, 'kite', user.id);
+    }
+    if (!egress || !egress.whitelisted) {
+      reply.code(409);
+      reply.send({
+        error: 'ip_not_whitelisted',
+        message: `Whitelist your order-routing IP ${egress?.ip ?? ''} in your Kite app, then confirm — SEBI requires it before placing orders.`,
+        ip: egress?.ip,
+      });
+      return null;
+    }
+    return { gw: gatewayFactory({ apiKey: creds.apiKey, accessToken: creds.accessToken }, dispatcherFor(egress)), egressIp: egress.ip };
+  };
+
   fastify.get('/api/broker/orders', async (req, reply) => {
     const user = requirePro(req, db);
     const gw = gatewayFor(user, reply);
@@ -184,11 +247,11 @@ export function brokerRoutes(
       reply.code(400);
       return { error: 'invalid_intent', message: valid.error };
     }
-    const gw = gatewayFor(user, reply);
-    if (!gw) return reply;
-    const auditId = recordOrderAudit(db, { userId: user.id, broker: 'kite', intent: valid.intent, placedVia: 'manual', egressIp: null });
+    const w = writeGatewayFor(user, reply);
+    if (!w) return reply;
+    const auditId = recordOrderAudit(db, { userId: user.id, broker: 'kite', intent: valid.intent, placedVia: 'manual', egressIp: w.egressIp });
     try {
-      const ref = await gw.placeOrder(valid.intent);
+      const ref = await w.gw.placeOrder(valid.intent);
       completeOrderAudit(db, auditId, { brokerOrderId: ref.brokerOrderId, status: 'placed' });
       return { ok: true, brokerOrderId: ref.brokerOrderId, auditId };
     } catch (err) {
@@ -208,14 +271,14 @@ export function brokerRoutes(
       return { error: 'invalid_changes', message: parsedChanges.error.issues[0]?.message ?? 'invalid changes' };
     }
     const variety = varietySchema.catch('regular').parse(body.variety);
-    const gw = gatewayFor(user, reply);
-    if (!gw) return reply;
+    const w = writeGatewayFor(user, reply);
+    if (!w) return reply;
     const auditId = recordOrderAudit(db, {
-      userId: user.id, broker: 'kite', placedVia: 'manual', egressIp: null,
+      userId: user.id, broker: 'kite', placedVia: 'manual', egressIp: w.egressIp,
       intent: { action: 'modify', brokerOrderId, variety, changes: parsedChanges.data },
     });
     try {
-      const ref = await gw.modifyOrder(brokerOrderId, parsedChanges.data, variety);
+      const ref = await w.gw.modifyOrder(brokerOrderId, parsedChanges.data, variety);
       completeOrderAudit(db, auditId, { brokerOrderId: ref.brokerOrderId, status: 'modified' });
       return { ok: true, brokerOrderId: ref.brokerOrderId };
     } catch (err) {
@@ -229,14 +292,14 @@ export function brokerRoutes(
     const user = requirePro(req, db);
     const brokerOrderId = (req.params as { id: string }).id;
     const variety = varietySchema.catch('regular').parse((req.query as { variety?: unknown } | undefined)?.variety);
-    const gw = gatewayFor(user, reply);
-    if (!gw) return reply;
+    const w = writeGatewayFor(user, reply);
+    if (!w) return reply;
     const auditId = recordOrderAudit(db, {
-      userId: user.id, broker: 'kite', placedVia: 'manual', egressIp: null,
+      userId: user.id, broker: 'kite', placedVia: 'manual', egressIp: w.egressIp,
       intent: { action: 'cancel', brokerOrderId, variety },
     });
     try {
-      await gw.cancelOrder(brokerOrderId, variety);
+      await w.gw.cancelOrder(brokerOrderId, variety);
       completeOrderAudit(db, auditId, { brokerOrderId, status: 'cancelled' });
       return { ok: true };
     } catch (err) {
@@ -258,17 +321,17 @@ export function brokerRoutes(
       reply.code(400);
       return { error: 'position_flat', message: 'Position is already flat.' };
     }
-    const gw = gatewayFor(user, reply);
-    if (!gw) return reply;
+    const w = writeGatewayFor(user, reply);
+    if (!w) return reply;
     // The closing intent (market, opposite side) is what we audit — an exit is a real order attempt.
     const closingIntent: OrderIntent = {
       symbol: position.symbol, exchange: position.exchange,
       side: position.quantity > 0 ? 'sell' : 'buy', quantity: Math.abs(position.quantity),
       orderType: 'market', product: position.product.toLowerCase() as OrderIntent['product'],
     };
-    const auditId = recordOrderAudit(db, { userId: user.id, broker: 'kite', intent: closingIntent, placedVia: 'manual', egressIp: null });
+    const auditId = recordOrderAudit(db, { userId: user.id, broker: 'kite', intent: closingIntent, placedVia: 'manual', egressIp: w.egressIp });
     try {
-      const ref = await gw.exitPosition(position);
+      const ref = await w.gw.exitPosition(position);
       completeOrderAudit(db, auditId, { brokerOrderId: ref.brokerOrderId, status: 'exited' });
       return { ok: true, brokerOrderId: ref.brokerOrderId };
     } catch (err) {

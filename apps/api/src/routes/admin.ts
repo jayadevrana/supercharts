@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AppDB } from '../db';
 import { requireAdmin } from '../auth';
 import { resolvePlanUpdate } from '../plan';
+import { addEgressIp, listEgressPool, removeEgressIp } from '../broker/egress-store';
 
 /**
  * Owner admin panel API (spec §3.4, §4 GW-4). ROLE='admin' ONLY on every endpoint (401 anon /
@@ -72,6 +73,33 @@ export function adminRoutes(fastify: FastifyInstance, db: AppDB): void {
     return {
       items: rows.map(({ apiKey, ...r }) => ({ ...r, apiKeyLast4: apiKey.slice(-4) })),
     };
+  });
+
+  // ── Egress-IP pool (GW-5) — order write-plane routing management ──
+  fastify.get('/api/admin/egress', async (req) => {
+    requireAdmin(req, db);
+    return { items: listEgressPool(db) }; // brokersUsed = SEBI slot occupancy; proxy_url never serialised
+  });
+
+  const egressSchema = z.object({
+    ip: z.string().min(3).max(64),
+    proxyUrl: z.string().min(6).max(512), // e.g. http://user:pass@host:port
+    source: z.enum(['proxy', 'vps']).optional(),
+    region: z.string().max(64).optional(),
+    label: z.string().max(64).optional(),
+  });
+  fastify.post('/api/admin/egress', async (req, reply) => {
+    requireAdmin(req, db);
+    const parsed = egressSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload', message: parsed.error.issues[0]?.message };
+    }
+    return addEgressIp(db, parsed.data);
+  });
+  fastify.delete('/api/admin/egress/:id', async (req) => {
+    requireAdmin(req, db);
+    return { ok: removeEgressIp(db, (req.params as { id: string }).id) };
   });
 
   // Recent order audit rows across users (immutable trail). Newest first, capped.
