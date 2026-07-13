@@ -150,6 +150,35 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- Order write-plane egress pool (GW-5). Each IP the broker whitelists; proxy_url encrypted
+    -- (NULL = direct, i.e. the main VM IP). Order place/modify/cancel routes through the user's
+    -- assigned IP so SEBI per-client IP whitelisting is honoured.
+    CREATE TABLE IF NOT EXISTS egress_ips (
+      id         TEXT PRIMARY KEY,
+      ip         TEXT NOT NULL,
+      proxy_url  TEXT,
+      source     TEXT NOT NULL DEFAULT 'proxy',
+      region     TEXT,
+      label      TEXT,
+      status     TEXT NOT NULL DEFAULT 'active',
+      created_at INTEGER NOT NULL
+    );
+
+    -- The DB constraint IS the SEBI rule: UNIQUE(egress_ip_id, broker) makes it structurally
+    -- impossible to map two clients of the same broker to one IP. One assignment per (broker,user).
+    CREATE TABLE IF NOT EXISTS ip_assignments (
+      id             TEXT PRIMARY KEY,
+      egress_ip_id   TEXT NOT NULL,
+      broker         TEXT NOT NULL,
+      user_id        TEXT NOT NULL,
+      whitelisted_at INTEGER,
+      created_at     INTEGER NOT NULL,
+      UNIQUE (egress_ip_id, broker),
+      UNIQUE (broker, user_id),
+      FOREIGN KEY (egress_ip_id) REFERENCES egress_ips(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS subscriptions (
       id            TEXT PRIMARY KEY,
       user_id       TEXT NOT NULL,
