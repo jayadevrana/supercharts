@@ -21,6 +21,30 @@ import type { IndicatorInstance } from './chart';
 export type MaType = 'sma' | 'ema' | 'rma' | 'wma';
 export type MaSource = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
 
+/**
+ * BYOB broker-order automation (GW-7). ADDITIVE, opt-in per alert: when set, a fire routes a
+ * **position-flip** market order through the audited broker order pipeline (the same one manual
+ * trades use). BUY → go long (close any short first); SELL → go short (close any long first);
+ * already in that direction → no-op (never stacks). Gated by the user's Pro plan, an active +
+ * whitelisted broker connection, the dd-breaker kill-switch, and this alert's daily cap.
+ *
+ * Legacy alerts never carry this field, so the live 48/144 MA-cross alerts are 100% unaffected —
+ * the engine only touches a broker when `brokerOrder` is present AND an executor is wired.
+ */
+export interface AlertBrokerOrderConfig {
+  broker: 'kite';
+  /** Broker trading symbol to trade, e.g. 'RELIANCE', 'NIFTY24JUL24000CE'. NOT the SuperCharts id. */
+  tradingSymbol: string;
+  /** 'NSE' | 'BSE' | 'NFO' | 'MCX' … */
+  exchange: string;
+  /** Quantity (lots × lot-size for F&O/MCX); the target position size after a flip. */
+  quantity: number;
+  /** Product code: intraday (MIS), delivery (CNC), or carry-forward derivatives (NRML). */
+  product: 'mis' | 'cnc' | 'nrml';
+  /** Max automated flips per UTC day for THIS alert (safety cap). Omitted → unlimited (still kill-switch gated). */
+  maxTradesPerDay?: number;
+}
+
 export interface MaCrossAlertConfig {
   /**
    * Primary moving average. In **single-MA mode** (the default), the engine fires when
@@ -84,6 +108,11 @@ export interface MaCrossAlertConfig {
      * see what their alert would have made in real time before wiring it to MT5.
      */
     paper?: boolean;
+    /**
+     * GW-7 broker-order automation. When set, a fire places a real position-flip market
+     * order through the audited broker pipeline. Opt-in, plan/whitelist/kill-switch gated.
+     */
+    brokerOrder?: AlertBrokerOrderConfig;
   };
   /**
    * IANA timezone for the formatted timestamp in the Telegram message,
@@ -128,6 +157,8 @@ export interface IndicatorAlertConfig {
     telegram: boolean;
     telegramBotId?: string;
     paper?: boolean;
+    /** GW-7 broker-order automation (see AlertBrokerOrderConfig). Opt-in, gated. */
+    brokerOrder?: AlertBrokerOrderConfig;
   };
   /** IANA timezone for the formatted timestamp in the Telegram message. */
   timezone: string;

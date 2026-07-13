@@ -13,6 +13,7 @@ import { INTERVAL_MS } from '@supercharts/types';
 import { computeMaCross, pickSource, rsi as rsiSeries } from '@supercharts/chart-core/pure';
 import { nanoid } from 'nanoid';
 import { collectIndicatorRefs, evaluateConditionSet } from './signal-eval';
+import type { AlertOrderExecutor } from './broker/alert-order-executor';
 import type { AppDB } from './db';
 import {
   sendTelegramMessage,
@@ -53,6 +54,12 @@ export interface AlertEngineOptions {
   telegram?: TelegramSender;
   /** Override the telegram photo sender for tests. */
   telegramPhoto?: TelegramPhotoSender;
+  /**
+   * GW-7 broker-order automation. When present, an alert carrying a `delivery.brokerOrder` config
+   * routes a position-flip market order through the audited broker pipeline on each fire. Omitted
+   * (the default / test path) → the engine never touches a broker, so legacy alerts are untouched.
+   */
+  brokerOrderExecutor?: AlertOrderExecutor;
 }
 
 export class AlertEngine {
@@ -61,6 +68,7 @@ export class AlertEngine {
   private readonly broadcast: WebBroadcaster;
   private readonly telegram: TelegramSender;
   private readonly telegramPhoto: TelegramPhotoSender;
+  private readonly brokerOrderExecutor?: AlertOrderExecutor;
   private subs = new Map<string, ActiveSubscription>();
   /** Alert ids that should be active. Guards the async backfill→listen race. */
   private wanted = new Set<string>();
@@ -71,6 +79,33 @@ export class AlertEngine {
     this.broadcast = opts.broadcast;
     this.telegram = opts.telegram ?? sendTelegramMessage;
     this.telegramPhoto = opts.telegramPhoto ?? sendTelegramPhoto;
+    this.brokerOrderExecutor = opts.brokerOrderExecutor;
+  }
+
+  /**
+   * GW-7 fire-and-forget broker automation. Mirrors Telegram delivery: fully isolated so a broker
+   * failure can never break the alert fire, the paper book, or the live feed. Only runs when the
+   * alert opted into `delivery.brokerOrder` AND an executor is wired (prod). Errors are logged.
+   */
+  private automateBrokerOrder(
+    alert: AlertDefinition,
+    event: AlertEvent,
+    placedVia: 'alert' | 'indicator',
+  ): void {
+    const brokerOrder = alert.config.delivery.brokerOrder;
+    if (!brokerOrder || !this.brokerOrderExecutor) return;
+    void this.brokerOrderExecutor
+      .execute({ userId: alert.userId, alertId: alert.id, side: event.side, config: brokerOrder, placedVia })
+      .then((outcome) => {
+        if (outcome.status === 'error') {
+
+          console.error('[alert-engine] broker order failed', { alertId: alert.id, outcome });
+        }
+      })
+      .catch((err) => {
+
+        console.error('[alert-engine] broker order executor threw', { alertId: alert.id, err });
+      });
   }
 
   /** Boot from DB: subscribe every enabled alert. */
@@ -320,6 +355,9 @@ export class AlertEngine {
       this.broadcast(alert.userId, event);
     }
 
+    // GW-7: opt-in broker-order automation (position flip). Fire-and-forget, fully gated.
+    this.automateBrokerOrder(alert, event, 'alert');
+
     // Telegram delivery — prefer the explicitly-chosen bot id, fall back to the
     // user's first enabled telegram_bots row, fall back further to the legacy
     // singleton telegram_configs row for backwards compat.
@@ -504,6 +542,9 @@ export class AlertEngine {
 
     if (cfg.delivery.paper) this.bookPaperTrade(alert, event);
     if (cfg.delivery.web) this.broadcast(alert.userId, event);
+
+    // GW-7: opt-in broker-order automation (position flip). Fire-and-forget, fully gated.
+    this.automateBrokerOrder(alert, event, 'indicator');
 
     if (cfg.delivery.telegram) {
       const botCfg = this.resolveTelegramBot(alert.userId, cfg.delivery.telegramBotId);

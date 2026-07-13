@@ -39,6 +39,8 @@ import { MT5Store, startMT5Bridge, createIntentRouter } from './mt5';
 import { createSignalRunner } from './mt5/signal-runner';
 import type { SignalRecipe, Interval } from '@supercharts/types';
 import { AlertEngine } from './alert-engine';
+import { createAlertOrderExecutor } from './broker/alert-order-executor';
+import { defaultKiteGatewayFactory } from './broker/write-gateway';
 import { loadEnvFile } from './env';
 
 loadEnvFile();
@@ -258,11 +260,22 @@ async function start(): Promise<void> {
   futuresRoutes(app);
   const wsBroadcaster = registerWebSocketGateway(app, ingestion, mt5Store, db);
 
+  // GW-7: broker-order automation executor. Shares the dd-breaker kill-switch with the MT5 signal
+  // runner so a tripped breaker halts BOTH. Passed to the alert engine so an alert carrying a
+  // `delivery.brokerOrder` config flips a live position on each fire (opt-in, plan/whitelist gated).
+  const brokerOrderExecutor = createAlertOrderExecutor({
+    db,
+    gatewayFactory: defaultKiteGatewayFactory,
+    isKillSwitchHalted: () => ddBreaker.isHalted(),
+    log: (msg, extra) => app.log.warn({ extra }, msg),
+  });
+
   // Alert engine — needs the WS broadcaster, so register routes AFTER the gateway is up.
   const alertEngine = new AlertEngine({
     db,
     ctx: ingestion,
     broadcast: (userId, event) => wsBroadcaster.broadcastAlertFired(userId, event),
+    brokerOrderExecutor,
   });
   alertEngine.load();
   alertRoutes(app, db, alertEngine, ingestion);

@@ -11,17 +11,13 @@ import {
   completeOrderAudit, deleteConnection, getGatewayCredentials, listConnections,
   recordOrderAudit, saveConnection, updateAccessToken,
 } from '../broker/store';
-import { assignEgress, confirmWhitelist, dispatcherFor, getUserEgress } from '../broker/egress-store';
+import { assignEgress, confirmWhitelist, getUserEgress } from '../broker/egress-store';
+import { resolveWriteGateway, defaultKiteGatewayFactory, type BrokerGatewayFactory } from '../broker/write-gateway';
 
-/**
- * Builds a per-request execution gateway from a user's decrypted Kite credentials, optionally
- * routed through the user's assigned egress-IP proxy (GW-5). Injectable so the trading routes can
- * be unit-tested against a stub without hitting Kite.
- */
-export type BrokerGatewayFactory = (creds: { apiKey: string; accessToken: string }, dispatcher?: unknown) => BrokerGateway;
+// Re-exported for tests + callers that inject a stub gateway (GW-3/GW-7).
+export type { BrokerGatewayFactory };
 
-const defaultKiteFactory: BrokerGatewayFactory = (creds, dispatcher) =>
-  new KiteGateway({ apiKey: creds.apiKey, accessToken: creds.accessToken, proxyDispatcher: dispatcher });
+const defaultKiteFactory: BrokerGatewayFactory = defaultKiteGatewayFactory;
 
 /**
  * BYOB broker connections (GW-2). PLAN-GATED (GW-4): every endpoint runs through `requirePro`,
@@ -182,40 +178,17 @@ export function brokerRoutes(
   /**
    * WRITE-plane gateway (GW-5): resolves the user's assigned egress IP, requires it to be
    * whitelisted in their Kite app (SEBI), and builds the gateway routed through that IP's proxy
-   * (direct for the VM IP). Reads use `gatewayFor` (main VM IP — brokers allow reads from any IP).
+   * (direct for the VM IP). Delegates to the shared `resolveWriteGateway` (the single audited
+   * write-plane resolver the GW-7 alert executor also uses) and maps its typed errors to HTTP.
    */
   const writeGatewayFor = (user: SessionUser, reply: FastifyReply): { gw: BrokerGateway; egressIp: string } | null => {
-    const creds = getGatewayCredentials(db, user.id, 'kite');
-    if (!creds) {
-      reply.code(404);
-      reply.send({ error: 'not_connected', message: 'Connect your Kite app first.' });
+    const r = resolveWriteGateway(db, gatewayFactory, user.id, 'kite');
+    if (!r.ok) {
+      reply.code(r.code);
+      reply.send(r.ip ? { error: r.error, message: r.message, ip: r.ip } : { error: r.error, message: r.message });
       return null;
     }
-    if (!creds.accessToken) {
-      reply.code(409);
-      reply.send({ error: 'token_expired', message: 'Reconnect Kite for a fresh daily token before trading.' });
-      return null;
-    }
-    let egress = getUserEgress(db, 'kite', user.id);
-    if (!egress) {
-      const a = assignEgress(db, 'kite', user.id);
-      if (a.status === 'needs_ip') {
-        reply.code(409);
-        reply.send({ error: 'no_egress_ip', message: 'No order-routing IP is available yet — contact support to add one.' });
-        return null;
-      }
-      egress = getUserEgress(db, 'kite', user.id);
-    }
-    if (!egress || !egress.whitelisted) {
-      reply.code(409);
-      reply.send({
-        error: 'ip_not_whitelisted',
-        message: `Whitelist your order-routing IP ${egress?.ip ?? ''} in your Kite app, then confirm — SEBI requires it before placing orders.`,
-        ip: egress?.ip,
-      });
-      return null;
-    }
-    return { gw: gatewayFactory({ apiKey: creds.apiKey, accessToken: creds.accessToken }, dispatcherFor(egress)), egressIp: egress.ip };
+    return { gw: r.value.writeGw, egressIp: r.value.egressIp };
   };
 
   fastify.get('/api/broker/orders', async (req, reply) => {

@@ -26,6 +26,22 @@ import {
 
 const INTERVAL_SET = new Set<Interval>(INTERVALS);
 
+/**
+ * GW-7 broker-order automation config (opt-in per alert). Additive; validated the same on both
+ * alert types. The executor + gates enforce plan/whitelist/kill-switch/cap at fire time — this
+ * only pins the wire shape so the arming UI can round-trip it.
+ */
+const brokerOrderSchema = z
+  .object({
+    broker: z.literal('kite'),
+    tradingSymbol: z.string().min(1).max(64),
+    exchange: z.string().min(1).max(16),
+    quantity: z.coerce.number().int().positive(),
+    product: z.enum(['mis', 'cnc', 'nrml']),
+    maxTradesPerDay: z.coerce.number().int().positive().optional(),
+  })
+  .optional();
+
 const maCrossConfigSchema = z.object({
   ma: z.object({
     type: z.enum(['sma', 'ema', 'rma', 'wma']),
@@ -56,6 +72,7 @@ const maCrossConfigSchema = z.object({
     // Paper-trading flag (Phase 1 #5). Was missing here, so the modal's toggle was
     // silently stripped on save and no paper positions were ever booked. Restored.
     paper: z.boolean().optional(),
+    brokerOrder: brokerOrderSchema,
   }),
   timezone: z.string().min(2).max(40).default('UTC'),
   style: z
@@ -85,6 +102,7 @@ const indicatorAlertConfigSchema = z.object({
     telegram: z.boolean().default(false),
     telegramBotId: z.string().optional(),
     paper: z.boolean().optional(),
+    brokerOrder: brokerOrderSchema,
   }),
   timezone: z.string().min(2).max(40).default('UTC'),
 });
