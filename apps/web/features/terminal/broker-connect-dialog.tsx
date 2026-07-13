@@ -23,6 +23,9 @@ interface ConnectionSummary {
   accountMeta: { accountId: string; name: string } | null;
   lastLoginAt: number | null;
   loginUrl?: string;
+  /** GW-5: the order-routing IP the user must whitelist in their broker console (SEBI). */
+  egressIp?: string | null;
+  egressWhitelisted?: boolean;
 }
 
 /**
@@ -126,7 +129,20 @@ export function BrokerConnectDialog() {
     }
   };
 
+  const confirmWhitelist = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const { ok } = await postJson('/broker/whitelist-confirm', { broker: 'kite' });
+      await refresh();
+      if (ok) toast({ title: 'IP whitelisted', description: 'Order placement is now enabled.', tone: 'success' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const connected = kite?.status === 'active';
+  const needsWhitelist = connected && Boolean(kite?.egressIp) && !kite?.egressWhitelisted;
   const needsDailyLogin = Boolean(kite) && !connected;
   const showTokenEntry = Boolean(pendingLoginUrl) || reconnecting || needsDailyLogin;
   const loginUrl = pendingLoginUrl ?? kite?.loginUrl ?? '';
@@ -136,8 +152,8 @@ export function BrokerConnectDialog() {
       <DialogTrigger asChild>
         <Button variant="ghost" size="sm" className="relative px-2 text-muted-foreground hover:text-foreground" title="Connect your broker (Zerodha Kite)" aria-label="Connect broker">
           <Landmark className="h-4 w-4" />
-          {connected ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
-          {needsDailyLogin ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bear" /> : null}
+          {connected && !needsWhitelist ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bull" /> : null}
+          {needsDailyLogin || needsWhitelist ? <span className="absolute right-1 top-1 inline-block h-1.5 w-1.5 rounded-full bg-bear" /> : null}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
@@ -164,6 +180,28 @@ export function BrokerConnectDialog() {
                 </div>
               </div>
             </div>
+            {needsWhitelist ? (
+              <div className="flex flex-col gap-2 rounded-md border border-warn/40 bg-warn/10 p-3 text-[11px]">
+                <div className="flex items-start gap-1.5 text-foreground">
+                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" />
+                  <span>
+                    One-time SEBI step before you can place orders: whitelist your order-routing IP{' '}
+                    <code className="rounded bg-surface-sunken px-1 font-semibold text-foreground">{kite?.egressIp}</code> in your Kite Connect app,
+                    then confirm below. Charts & positions work without it.
+                  </span>
+                </div>
+                <a href="https://developers.kite.trade/apps" target="_blank" rel="noreferrer" className="flex items-center gap-1 text-accent hover:underline">
+                  <ExternalLink className="h-3 w-3" /> Open Kite app settings
+                </a>
+                <Button size="sm" loading={busy} onClick={() => void confirmWhitelist()}>
+                  I&rsquo;ve whitelisted {kite?.egressIp}
+                </Button>
+              </div>
+            ) : connected && kite?.egressIp ? (
+              <p className="text-[11px] text-muted-foreground">
+                Orders route via your dedicated IP <code className="text-foreground">{kite.egressIp}</code> <span className="text-bull">· whitelisted ✓</span>
+              </p>
+            ) : null}
             {!connected ? (
               <p className="text-[11px] leading-relaxed text-muted-foreground">
                 Kite access tokens expire every trading day. Reconnect: open the Zerodha login, sign in, and paste the{' '}
