@@ -45,6 +45,11 @@ export function SiteHeader() {
               >
                 {user.displayName || user.email}
               </Link>
+              {user.role === 'admin' && (
+                <Link href="/admin" className="hidden text-sm text-accent hover:opacity-80 sm:block" title="Admin panel">
+                  Admin
+                </Link>
+              )}
               <Button variant="ghost" size="sm" onClick={() => void signOut()}>
                 Sign out
               </Button>

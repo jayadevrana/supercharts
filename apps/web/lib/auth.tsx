@@ -8,8 +8,14 @@ export interface AuthUser {
   email: string;
   displayName: string | null;
   emailVerified: boolean;
-  /** 'admin' unlocks owner-only surfaces (broker connect until GW-4, /admin panel). */
+  /** 'admin' unlocks owner-only surfaces (the /admin panel). */
   role?: string;
+  /** BYOB plan (GW-4): 'free' | 'pro'. */
+  plan?: string;
+  /** Epoch ms Pro expiry, or null for lifetime / free. */
+  planExpiresAt?: number | null;
+  /** Resolved server-side: may this user use the broker surface (Pro active or admin). */
+  brokerAccess?: boolean;
 }
 
 interface MeResponse {
