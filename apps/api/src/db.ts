@@ -516,6 +516,21 @@ function migrate(db: DatabaseSync): void {
     if (!/duplicate column name/i.test(msg)) throw err;
   }
 
+  // BYOB plan gate (GW-4). `plan` = 'free'|'pro' (manual admin activation until a payment gateway
+  // lands); `plan_expires_at` = epoch ms or NULL for lifetime. Existing users default to 'free' —
+  // no one loses access (broker endpoints were admin-only before this) and admins always bypass.
+  for (const stmt of [
+    "ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'",
+    'ALTER TABLE users ADD COLUMN plan_expires_at INTEGER',
+  ]) {
+    try {
+      db.exec(stmt);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/duplicate column name/i.test(msg)) throw err;
+    }
+  }
+
   const exists = db.prepare("SELECT id FROM users WHERE id = 'demo'").get();
   if (!exists) {
     const now = Date.now();

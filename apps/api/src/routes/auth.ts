@@ -11,6 +11,7 @@ import {
   getOptionalUser,
   getUser,
   hashPassword,
+  planInfo,
   setSessionCookie,
   SESSION_COOKIE,
   verifyPassword,
@@ -127,8 +128,9 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
     const providers = (
       db.raw.prepare('SELECT provider FROM accounts WHERE user_id = ?').all(user.id) as { provider: string }[]
     ).map((p) => p.provider);
+    const plan = planInfo(db, user);
     return {
-      user: { ...toPublic(user), emailVerified: Boolean(row?.emailVerified) },
+      user: { ...toPublic(user), emailVerified: Boolean(row?.emailVerified), ...plan },
       googleEnabled: googleEnabled(),
       hasPassword: Boolean(row?.passwordHash),
       providers,

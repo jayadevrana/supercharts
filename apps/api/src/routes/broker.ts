@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { IngestionContext } from '@supercharts/ingestion';
 import type { AppDB } from '../db';
 import type { SessionUser } from '../auth';
-import { requireAdmin } from '../auth';
+import { requirePro } from '../auth';
 import { KiteGateway } from '../broker/kite-gateway';
 import type { BrokerGateway, BrokerPosition, OrderIntent } from '../broker/types';
 import { modifyChangesSchema, validateOrderIntent, varietySchema } from '../broker/order-intent';
@@ -22,8 +22,10 @@ const defaultKiteFactory: BrokerGatewayFactory = (creds) =>
   new KiteGateway({ apiKey: creds.apiKey, accessToken: creds.accessToken });
 
 /**
- * BYOB broker connections (GW-2). ADMIN-GATED until GW-4 ships the $15/mo plan gate —
- * no non-owner exposure of broker endpoints in production (spec §4 GW-3 note).
+ * BYOB broker connections (GW-2). PLAN-GATED (GW-4): every endpoint runs through `requirePro`,
+ * so a signed-in user with an active `plan='pro'` (or any admin) may connect + trade; free users
+ * get a 403 `plan_required`. Pro activation is manual from the /admin panel until a payment gateway
+ * lands (spec §2). The egress-IP write plane is still GW-5.
  *
  * Flow: POST /connect without a request_token stores the app key/secret (pending) and returns
  * the user's Kite login URL. Completing that login redirects with a request_token, which either
@@ -59,7 +61,7 @@ export function brokerRoutes(
     });
   };
   fastify.get('/api/broker/connections', async (req) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const items = listConnections(db, user.id).map((c) => ({
       ...c,
       loginUrl: c.broker === 'kite' ? buildKiteLoginUrl(loginKeyFor(db, user.id)) : undefined,
@@ -68,7 +70,7 @@ export function brokerRoutes(
   });
 
   fastify.post('/api/broker/connect', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const parsed = connectSchema.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -91,7 +93,7 @@ export function brokerRoutes(
   });
 
   fastify.post('/api/broker/reconnect', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const parsed = reconnectSchema.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);
@@ -114,7 +116,7 @@ export function brokerRoutes(
   });
 
   fastify.delete('/api/broker/connections/:broker', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const broker = (req.params as { broker: string }).broker;
     if (broker !== 'kite') {
       reply.code(400);
@@ -154,7 +156,7 @@ export function brokerRoutes(
   };
 
   fastify.get('/api/broker/orders', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const gw = gatewayFor(user, reply);
     if (!gw) return reply;
     try {
@@ -165,7 +167,7 @@ export function brokerRoutes(
   });
 
   fastify.get('/api/broker/positions', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const gw = gatewayFor(user, reply);
     if (!gw) return reply;
     try {
@@ -176,7 +178,7 @@ export function brokerRoutes(
   });
 
   fastify.post('/api/broker/orders', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const valid = validateOrderIntent(req.body);
     if (!valid.ok) {
       reply.code(400);
@@ -197,7 +199,7 @@ export function brokerRoutes(
   });
 
   fastify.put('/api/broker/orders/:id', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const brokerOrderId = (req.params as { id: string }).id;
     const body = (req.body ?? {}) as { changes?: unknown; variety?: unknown };
     const parsedChanges = modifyChangesSchema.safeParse(body.changes);
@@ -224,7 +226,7 @@ export function brokerRoutes(
   });
 
   fastify.delete('/api/broker/orders/:id', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const brokerOrderId = (req.params as { id: string }).id;
     const variety = varietySchema.catch('regular').parse((req.query as { variety?: unknown } | undefined)?.variety);
     const gw = gatewayFor(user, reply);
@@ -245,7 +247,7 @@ export function brokerRoutes(
   });
 
   fastify.post('/api/broker/positions/exit', async (req, reply) => {
-    const user = requireAdmin(req, db);
+    const user = requirePro(req, db);
     const parsed = positionSchema.safeParse(req.body);
     if (!parsed.success) {
       reply.code(400);

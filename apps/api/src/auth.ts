@@ -1,6 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { AppDB } from './db';
+import { resolvePlanAccess } from './plan';
 
 export interface SessionUser {
   id: string;
@@ -57,6 +58,35 @@ export function requireAdmin(req: FastifyRequest, db: AppDB): SessionUser {
     throw Object.assign(new Error('admin_required'), { statusCode: 403 });
   }
   return user;
+}
+
+/**
+ * Resolve the signed-in user and require Pro-plan broker access (GW-4). Admins always pass; a Pro
+ * plan is active until its optional expiry; free/expired throws a 403 `plan_required`. This is the
+ * gate that opens the broker endpoints beyond `role='admin'` — a paying user activated from /admin
+ * can now connect + trade. Anonymous callers still throw a 401 via `getUser`.
+ */
+export function requirePro(req: FastifyRequest, db: AppDB, now: number = Date.now()): SessionUser {
+  const user = getUser(req, db);
+  const row = db.raw
+    .prepare('SELECT plan, plan_expires_at as planExpiresAt FROM users WHERE id = ?')
+    .get(user.id) as { plan: string | null; planExpiresAt: number | null } | undefined;
+  const access = resolvePlanAccess({ role: user.role, plan: row?.plan, planExpiresAt: row?.planExpiresAt }, now);
+  if (!access.allowed) {
+    throw Object.assign(new Error('plan_required'), { statusCode: 403 });
+  }
+  return user;
+}
+
+/** Read a user's plan tier + expiry + resolved broker-access flag (for `/me` and the admin panel). */
+export function planInfo(db: AppDB, user: SessionUser, now: number = Date.now()): {
+  plan: string; planExpiresAt: number | null; brokerAccess: boolean;
+} {
+  const row = db.raw
+    .prepare('SELECT plan, plan_expires_at as planExpiresAt FROM users WHERE id = ?')
+    .get(user.id) as { plan: string | null; planExpiresAt: number | null } | undefined;
+  const access = resolvePlanAccess({ role: user.role, plan: row?.plan, planExpiresAt: row?.planExpiresAt }, now);
+  return { plan: row?.plan ?? 'free', planExpiresAt: row?.planExpiresAt ?? null, brokerAccess: access.allowed };
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────────

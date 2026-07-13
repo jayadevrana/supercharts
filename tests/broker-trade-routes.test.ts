@@ -56,6 +56,28 @@ describe('broker trade routes', () => {
     if (prev === undefined) delete process.env.AUTH_ENABLED; else process.env.AUTH_ENABLED = prev;
   });
 
+  it('a Pro (non-admin) user with an active plan may trade; an expired plan is 403 (GW-4)', async () => {
+    // Active Pro: role stays 'user', plan='pro', no expiry → broker access allowed.
+    const okDb = openDB({ DATABASE_URL: `file:${join(dir, 'pro-ok.sqlite')}` } as NodeJS.ProcessEnv);
+    okDb.raw.prepare("UPDATE users SET role='user', plan='pro', plan_expires_at=NULL WHERE id='demo'").run();
+    saveConnection(okDb, { userId: 'demo', broker: 'kite', apiKey: 'k1', apiSecret: 's1', accessToken: null, accountMeta: null });
+    updateAccessToken(okDb, 'demo', 'kite', 'tok');
+    const prev = process.env.AUTH_ENABLED; process.env.AUTH_ENABLED = '0';
+    const okApp = appWith(okDb);
+    expect((await okApp.inject({ method: 'GET', url: '/api/broker/orders' })).statusCode).toBe(200);
+    await okApp.close();
+
+    // Expired Pro: plan='pro' but the expiry is in the past → 403 (not 401/200).
+    const expDb = openDB({ DATABASE_URL: `file:${join(dir, 'pro-exp.sqlite')}` } as NodeJS.ProcessEnv);
+    expDb.raw.prepare("UPDATE users SET role='user', plan='pro', plan_expires_at=1 WHERE id='demo'").run();
+    saveConnection(expDb, { userId: 'demo', broker: 'kite', apiKey: 'k1', apiSecret: 's1', accessToken: null, accountMeta: null });
+    updateAccessToken(expDb, 'demo', 'kite', 'tok');
+    const expApp = appWith(expDb);
+    expect((await expApp.inject({ method: 'GET', url: '/api/broker/orders' })).statusCode).toBe(403);
+    await expApp.close();
+    if (prev === undefined) delete process.env.AUTH_ENABLED; else process.env.AUTH_ENABLED = prev;
+  });
+
   it('places an order, audits BEFORE the broker, surfaces id', async () => {
     const db = openDB({ DATABASE_URL: `file:${join(dir, 'place.sqlite')}` } as NodeJS.ProcessEnv);
     seedAdminConnection(db);
