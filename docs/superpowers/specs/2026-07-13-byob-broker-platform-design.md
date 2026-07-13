@@ -132,7 +132,9 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    tests + browser (confirm dialog, honest states); live order probe skipped — daily token stale (TokenException).
    **Interim gate:** until GW-4 ships, ALL broker endpoints (connect + trading) are restricted to
    `role='admin'` — no non-owner exposure of ungated trading in production.
-4. **GW-4**: Plan gating (`users.plan`) + `/admin` panel (activate users, view connections/orders).  ← **NEXT**
+4. **GW-4** ✅ (2026-07-13): Plan gating (`users.plan` free|pro + `plan_expires_at`) + `requirePro`
+   gate (admin bypass) now backs every broker endpoint (was admin-only) + `/admin` panel (activate
+   Pro, view connections last-4, order audit). Manual activation until a payment gateway lands.
 5. **GW-5**: Egress IP pool (tables, bin-packing allocator, ProxyAgent write-plane routing, admin
    pool management, user whitelist-onboarding step).
 6. **GW-6** ✅ (2026-07-13, pulled forward): Per-user broker charts — the user's Kite feed drives the chart/watchlists (KITE: symbols).

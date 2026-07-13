@@ -59,15 +59,17 @@ increment per session, tick the box there AND log here.
 ## In progress
 
 - **DEPLOYED + AUTH LIVE**: https://supercharting.com (Google OAuth structurally done, needs the OAuth client; email/password + email verification via Resend LIVE; account settings live). **DOCS TRACK COMPLETE (DOCS-1..3).**
-- **ACTIVE GOAL: BYOB broker trading platform** (spec `docs/superpowers/specs/2026-07-13-byob-broker-platform-design.md`, build order §4 GW-1..GW-10; supersedes the personal-Kite decision in `docs/markets-expansion.md`). Done: **GW-1** (gateway+adapter+encrypted store), **GW-2** (connect wizard+daily reconnect), **GW-6** (per-user Kite charts, pulled forward), **GW-3** (Trade tab — order pipeline routes + right-rail ticket/orders/positions). All broker endpoints stay **admin-gated** until GW-4 ships the $15/mo plan gate.
+- **ACTIVE GOAL: BYOB broker trading platform** (spec `docs/superpowers/specs/2026-07-13-byob-broker-platform-design.md`, build order §4 GW-1..GW-10; supersedes the personal-Kite decision in `docs/markets-expansion.md`). Done: **GW-1** (gateway+adapter+encrypted store), **GW-2** (connect wizard+daily reconnect), **GW-6** (per-user Kite charts, pulled forward), **GW-3** (Trade tab — order pipeline routes + right-rail ticket/orders/positions), **GW-4** (plan gate `requirePro` + `/admin` panel). Broker endpoints are now **plan-gated** (`requirePro`: admin OR active `plan='pro'`); manual Pro activation from `/admin` until a payment gateway lands.
 
 ## Next
 
-**BYOB build order (spec §4) — next is GW-4:** plan gating (`users.plan` free|pro + `plan_expires_at`)
-+ an `/admin` panel (activate users, view connections/orders) — the gate that lets broker endpoints
-open beyond `role='admin'`. Then GW-5 (egress IP pool + ProxyAgent write plane), GW-7 (alert→order
-automation + kill-switch + Telegram reconnect nudge), GW-8 (OANDA trading adapter), GW-9 (headless
-auto-login opt-in), GW-10 (scanner-on-broker-universe + beta hardening).
+**BYOB build order (spec §4) — next is GW-5:** egress IP pool — `egress_ips` + `ip_assignments`
+tables (UNIQUE(egress_ip_id, broker) enforces SEBI one-IP-per-client-per-broker), a bin-packing
+allocator, ProxyAgent write-plane routing for place/modify/cancel/exit (reads stay on the VM IP),
+admin pool management, and the user "whitelist this IP in your broker console" onboarding step that
+blocks order endpoints until confirmed. Then GW-7 (alert→order automation + kill-switch + Telegram
+reconnect nudge), GW-8 (OANDA trading adapter), GW-9 (headless auto-login opt-in), GW-10
+(scanner-on-broker-universe + beta hardening).
 
 **Deferred (owner's Phase-A launch track, resume after BYOB):** M6-M10/PULSE (sub-pane plots →
 script drawing objects → `alert()`→Telegram bridge → interpreter optimization → editor
@@ -97,3 +99,14 @@ autocomplete) then IND-1..2. SCANNER (SCAN-1..4) ✅ · DOCS (DOCS-1..3) ✅ · 
 - React 19 RC + Next 15: HMR occasionally serves stale chunks after mid-edit saves — clear
   `.next` + restart if imports "disappear".
 - Installing deps (`pnpm add`) can kill both dev watchers — restart per CLAUDE.md Ops.
+
+## Questions for owner
+
+- ⚠️ **The dev SSD (`/Volumes/PortableSSD`) is 100% FULL — 0 B free** (932G used, mostly the
+  large media/work dirs at the volume root: `Hermis/` 207G, `full stack videos/` 204G, etc.). This
+  broke local `next build` mid-run (ENOSPC → `PageNotFoundError`/`ENOENT` for robots/sitemap/icon)
+  and blocked local browser verification + a concurrent chat's dev server (`localhost:3000` was
+  500ing). **GW-4 was deployed via the VM build instead** (VM disk healthy — 23G free) and prod
+  verified. **Action:** free space on the SSD so local dev/build/browser-verify work again;
+  build caches only reclaim ~2G and a concurrent dev server re-consumes it. Freed this run:
+  `apps/web/.next` + all `packages/*/dist` + `apps/*/dist` (all regenerate on build).
