@@ -64,13 +64,24 @@ increment per session, tick the box there AND log here.
 
 ## Next
 
-**BYOB build order (spec §4) — next is GW-5:** egress IP pool — `egress_ips` + `ip_assignments`
-tables (UNIQUE(egress_ip_id, broker) enforces SEBI one-IP-per-client-per-broker), a bin-packing
-allocator, ProxyAgent write-plane routing for place/modify/cancel/exit (reads stay on the VM IP),
-admin pool management, and the user "whitelist this IP in your broker console" onboarding step that
-blocks order endpoints until confirmed. Then GW-7 (alert→order automation + kill-switch + Telegram
-reconnect nudge), GW-8 (OANDA trading adapter), GW-9 (headless auto-login opt-in), GW-10
-(scanner-on-broker-universe + beta hardening).
+**🎯 FINAL DELIVERY (owner goal 2026-07-13) — SuperTrend PulseScript + Zerodha flip-automation.**
+The owner arms a **SuperTrend PulseScript** on ANY Kite instrument (stock/options/futures/MCX) and
+it auto-trades their connected Zerodha with **position-FLIP**: BUY signal → close any short + open
+long; SELL signal → close long + open short. Orders route through the done pipeline (GW-1..GW-5:
+audited, egress-IP whitelisted, plan-gated). **Loop runs every 2h** toward this (`byob-build-loop`).
+
+**Build order — next is GW-7 (the automation core):**
+- **GW-7**: additive `broker_order` action on an alert/PulseScript signal → route through the
+  EXISTING `/api/broker/orders` pipeline. Pure, unit-tested **FLIP helper** (BUY = close-short-then-
+  open-long, SELL = close-long-then-open-short, idempotent). Per-user max-trades/day cap + dd-breaker
+  kill-switch gate automated orders. Configurable qty/product/instrument. **Loop never places a live
+  order** — stub tests + safe probe only; the OWNER arms live. NEVER touch the live 48/144 alerts.
+- Then the **SuperTrend PulseScript recipe** (reuse `ta.supertrend`) emitting clean flip marks, in the
+  cookbook + arm-able as automation, with "arm this on your Kite instrument" docs. = the delivery.
+- Then GW-8 (OANDA trading), GW-9 (headless login), GW-10 (scanner-on-broker + beta).
+
+**Owner status:** IP `35.200.208.191` whitelisted in Kite (screenshot) + confirmed server-side —
+manual Buy/Sell from the chart works NOW. Loop paused→re-armed at 2h with this goal.
 
 **Deferred (owner's Phase-A launch track, resume after BYOB):** M6-M10/PULSE (sub-pane plots →
 script drawing objects → `alert()`→Telegram bridge → interpreter optimization → editor
