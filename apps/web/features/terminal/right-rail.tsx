@@ -23,9 +23,11 @@ import { Slider } from '@/components/ui/slider';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import { api } from '@/lib/api';
+import { useSession } from '@/lib/auth';
 import { formatCompact, formatPercent, formatPrice, formatRelativeTime, formatSymbolLabel } from '@/lib/format';
 import { useTerminalStore, type PaneState } from './terminal-store';
 import { OrderPanel } from './order-panel';
+import { BrokerTradePanel } from './broker-trade-panel';
 import { IndicatorPanel } from './indicator-panel';
 import { ScannerTab } from './scanner-tab';
 import type { NewsItem, ProviderHealthStatus } from '@supercharts/types';
@@ -49,6 +51,10 @@ export function RightRail() {
   const rightRailTab = useTerminalStore((s) => s.rightRailTab);
   const setRightRailTab = useTerminalStore((s) => s.setRightRailTab);
   const activePane = panes.find((p) => p.id === activePaneId) ?? panes[0]!;
+  const { user } = useSession();
+  // BYOB broker trading (GW-3): admins on a KITE symbol get the Kite order ticket; everything else
+  // keeps the MT5 order panel. Gate stays admin-only until GW-4 ships the $15/mo plan gate.
+  const useBrokerTrade = user?.role === 'admin' && activePane.symbol.startsWith('KITE:');
 
   return (
     <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/85">
@@ -85,7 +91,7 @@ export function RightRail() {
         </TabsList>
         <div className="min-h-0 flex-1 overflow-hidden">
           <TabsContent value="trade" className="h-full overflow-y-auto scroll-thin">
-            <OrderPanel pane={activePane} />
+            {useBrokerTrade ? <BrokerTradePanel pane={activePane} /> : <OrderPanel pane={activePane} />}
           </TabsContent>
           <TabsContent value="ind" className="h-full overflow-y-auto scroll-thin">
             <IndicatorPanel pane={activePane} />
