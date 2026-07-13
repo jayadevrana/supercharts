@@ -110,9 +110,13 @@ export function deleteConnection(db: AppDB, userId: string, broker: BrokerId): b
   return Number(res.changes) > 0;
 }
 
-/** Spec hard rule 5: the audit row lands BEFORE any request hits a broker. */
+/**
+ * Spec hard rule 5: the audit row lands BEFORE any request hits a broker.
+ * `intent` is a full OrderIntent for placements/exits, or an action descriptor
+ * (`{ action: 'modify' | 'cancel', … }`) for order mutations — both JSON-serialised verbatim.
+ */
 export function recordOrderAudit(db: AppDB, input: {
-  userId: string; broker: BrokerId; intent: OrderIntent;
+  userId: string; broker: BrokerId; intent: OrderIntent | Record<string, unknown>;
   placedVia: 'manual' | 'alert' | 'indicator'; egressIp: string | null;
 }): string {
   const id = `bo_${nanoid(14)}`;
