@@ -139,8 +139,16 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    allocator, undici ProxyAgent write-plane routing, admin pool management, whitelist-onboarding +
    409 gate on order writes). VM IP seeded from `EGRESS_VM_IP`. 643/643; deployed.
 6. **GW-6** ✅ (2026-07-13, pulled forward): Per-user broker charts — the user's Kite feed drives the chart/watchlists (KITE: symbols).
-7. **GW-7**: Alert→order automation (additive `broker_order` action + caps + kill-switch) + Telegram
-   reconnect nudge + fill notifications.
+7. **GW-7 core** ✅ (2026-07-14): Alert→order automation ENGINE — additive `delivery.brokerOrder` on
+   ma_cross + indicator alerts routes a **position-FLIP** market order through the audited pipeline.
+   Pure `flip-planner.ts` (BUY→long/SELL→short, opposite closes first then opens, idempotent no-op) +
+   `automation-gate.ts` (kill-switch > per-alert daily cap) + extracted `resolveWriteGateway` (single
+   audited write-plane resolver; route delegates, behavior-identical) + `alert-order-executor.ts`
+   (never throws; audit-before/place-after; close-leg reject aborts the flip) wired into AlertEngine
+   with `isKillSwitchHalted=ddBreaker.isHalted`. 22 new tests; 665/665; commit `48c4276` (pushed,
+   deploy pending VM start). **Remaining (next loop):** the SuperTrend PulseScript recipe + the
+   arm-on-a-Kite-instrument UI (= final delivery surface), the 9:00 IST Telegram reconnect nudge, and
+   order-fill notifications.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
