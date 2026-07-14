@@ -14,6 +14,7 @@ import {
   defaultKiteGatewayFactory,
   type BrokerGatewayFactory,
 } from '../broker/write-gateway';
+import { isTokenStale, formatReconnectNudge } from '../broker/reconnect-nudge';
 
 /**
  * GW-7 FINAL-DELIVERY arm surface — the route that turns a SuperTrend + Kite-instrument config into
@@ -193,6 +194,42 @@ export function brokerAutomationRoutes(
       }];
     });
     return { items };
+  });
+
+  /**
+   * GW-7 polish (a): per-user daily-token reconnect status for the arm UI. Read-only. Tells the
+   * caller whether their Kite daily token has gone stale while they have armed automations — the one
+   * operational reason an armed flip silently stops trading. The daily 9:00 IST scheduler (main.ts,
+   * env-gated) pushes the same message to Telegram; this route surfaces it in-app.
+   */
+  fastify.get('/api/broker/automation/reconnect-status', async (req) => {
+    const user = requirePro(req, db);
+    const conn = db.raw
+      .prepare(
+        "SELECT status, last_login_at as lastLoginAt FROM broker_connections WHERE user_id = ? AND broker = 'kite'",
+      )
+      .get(user.id) as { status: string; lastLoginAt: number | null } | undefined;
+    const armedAutomationCount = (
+      db.raw
+        .prepare(
+          "SELECT COUNT(DISTINCT automation_id) as n FROM alerts WHERE user_id = ? AND automation_id IS NOT NULL",
+        )
+        .get(user.id) as { n: number }
+    ).n;
+    const connected = conn?.status === 'active';
+    const lastLoginAt = conn?.lastLoginAt ?? null;
+    const stale = connected ? isTokenStale(lastLoginAt, Date.now()) : false;
+    const needsReconnect = connected && stale && armedAutomationCount > 0;
+    return {
+      connected,
+      armedAutomationCount,
+      lastLoginAt,
+      stale,
+      needsReconnect,
+      message: needsReconnect
+        ? formatReconnectNudge({ userId: user.id, broker: 'kite', armedAutomationCount, lastLoginAt })
+        : null,
+    };
   });
 
   fastify.delete('/api/broker/automation/:automationId', async (req, reply) => {

@@ -189,4 +189,41 @@ describe('broker automation (arm) routes', () => {
     expect(again.statusCode).toBe(404);
     await app.close();
   });
+
+  it('reconnect-status: 401 anon; fresh token → no reconnect; stale token with an armed pair → needsReconnect + message', async () => {
+    const db = openDB({ DATABASE_URL: `file:${join(dir, 'recon.sqlite')}` } as NodeJS.ProcessEnv);
+
+    delete process.env.AUTH_ENABLED;
+    const anon = appWith(db);
+    expect((await anon.app.inject({ method: 'GET', url: '/api/broker/automation/reconnect-status' })).statusCode).toBe(401);
+    await anon.app.close();
+
+    seedProConnection(db); // updateAccessToken stamps last_login_at = now → token is fresh
+    process.env.AUTH_ENABLED = '0';
+    const { app } = appWith(db);
+
+    // Arm a pair, then check status — a just-reconnected token must NOT ask to reconnect.
+    await app.inject({ method: 'POST', url: '/api/broker/automation/supertrend', payload: armPayload });
+    const fresh = (await app.inject({ method: 'GET', url: '/api/broker/automation/reconnect-status' })).json();
+    expect(fresh).toMatchObject({ connected: true, armedAutomationCount: 1, stale: false, needsReconnect: false, message: null });
+
+    // Age the daily token to three days ago → stale relative to today's IST reset boundary.
+    db.raw.prepare("UPDATE broker_connections SET last_login_at = ? WHERE user_id='demo' AND broker='kite'")
+      .run(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const stale = (await app.inject({ method: 'GET', url: '/api/broker/automation/reconnect-status' })).json();
+    expect(stale).toMatchObject({ connected: true, armedAutomationCount: 1, stale: true, needsReconnect: true });
+    expect(stale.message).toContain('Zerodha Kite');
+    await app.close();
+  });
+
+  it('reconnect-status: a Pro user with NO Kite connection → connected:false, needsReconnect:false', async () => {
+    const db = openDB({ DATABASE_URL: `file:${join(dir, 'recon-noconn.sqlite')}` } as NodeJS.ProcessEnv);
+    db.raw.prepare("UPDATE users SET plan='pro' WHERE id='demo'").run();
+    process.env.AUTH_ENABLED = '0';
+    const { app } = appWith(db);
+    const res = await app.inject({ method: 'GET', url: '/api/broker/automation/reconnect-status' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ connected: false, armedAutomationCount: 0, needsReconnect: false, message: null });
+    await app.close();
+  });
 });

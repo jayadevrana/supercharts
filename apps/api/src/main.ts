@@ -42,6 +42,7 @@ import type { SignalRecipe, Interval } from '@supercharts/types';
 import { AlertEngine } from './alert-engine';
 import { createAlertOrderExecutor } from './broker/alert-order-executor';
 import { defaultKiteGatewayFactory } from './broker/write-gateway';
+import { runReconnectNudge, istClock, type ArmedConnection } from './broker/reconnect-nudge';
 import { loadEnvFile } from './env';
 
 loadEnvFile();
@@ -294,8 +295,70 @@ async function start(): Promise<void> {
     }
   }, 60_000);
 
+  // GW-7 polish (a): daily 09:00 IST Kite-token reconnect nudge. OFF by default — set
+  // BROKER_RECONNECT_NUDGE=1 to arm it (self-protecting gate, like the email-verification flag: the
+  // build loop ships the capability dormant so it can never surprise-message anyone). When armed it
+  // fires once per IST day at the target hour, DM-ing users whose daily token has gone stale while
+  // they hold armed automations. Sends only Telegram reminders — never places or touches an order.
+  let nudgeTimer: NodeJS.Timeout | undefined;
+  if (process.env.BROKER_RECONNECT_NUDGE === '1') {
+    const nudgeHourIst = Number(process.env.BROKER_RECONNECT_NUDGE_HOUR ?? 9);
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://supercharting.com';
+    let lastNudgeDay = -1; // IST day index the nudge last ran — dedup so it fires at most once/day
+    const loadArmedConnections = (): ArmedConnection[] =>
+      (
+        db.raw
+          .prepare(
+            `SELECT bc.user_id as userId, bc.status as status, bc.last_login_at as lastLoginAt,
+                    (SELECT COUNT(DISTINCT a.automation_id) FROM alerts a
+                       WHERE a.user_id = bc.user_id AND a.automation_id IS NOT NULL) as armedAutomationCount
+               FROM broker_connections bc
+              WHERE bc.broker = 'kite' AND bc.status = 'active'`,
+          )
+          .all() as Array<{ userId: string; status: string; lastLoginAt: number | null; armedAutomationCount: number }>
+      ).map((r) => ({ ...r, broker: 'kite' as const }));
+    const resolveBot = (userId: string) => {
+      let cfg = db.raw
+        .prepare(
+          `SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots
+             WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+        )
+        .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+      if (!cfg) {
+        cfg = db.raw
+          .prepare('SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_configs WHERE user_id = ?')
+          .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+      }
+      return cfg;
+    };
+    nudgeTimer = setInterval(() => {
+      const now = Date.now();
+      const { hour, dayIndex } = istClock(now);
+      if (hour !== nudgeHourIst || dayIndex === lastNudgeDay) return;
+      lastNudgeDay = dayIndex;
+      void runReconnectNudge({
+        now,
+        appUrl,
+        loadArmedConnections,
+        resolveBot,
+        send: ({ botToken, chatId, text }) => sendTelegramMessage({ botToken, chatId, text, parseMode: 'HTML' }),
+        log: (msg, extra) => app.log.warn({ extra }, msg),
+      })
+        .then((res) => {
+          if (res.candidates.length) {
+            app.log.info(
+              { sent: res.sent.length, skipped: res.skipped.length, candidates: res.candidates.length },
+              '[gw7] reconnect nudge run',
+            );
+          }
+        })
+        .catch((err) => app.log.error({ err }, '[gw7] reconnect nudge failed'));
+    }, 5 * 60_000);
+  }
+
   app.addHook('onClose', async () => {
     clearInterval(breakerTimer);
+    if (nudgeTimer) clearInterval(nudgeTimer);
     alertEngine.shutdown();
     signalRunner.shutdown();
     await mt5Bridge.close();
