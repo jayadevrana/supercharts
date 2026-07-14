@@ -166,9 +166,22 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    MA-cross alerts + MT5 untouched. 6 route tests (anon 401 / free 403 / no-conn 404 / not-whitelisted
    409 persists+subscribes NOTHING / arm → both legs opposite-flip conditions + shared brokerOrder +
    both subscribed / bad-config 400 / list-group + disarm removes both + 404 on re-disarm). 684/684.
-   **Remaining = final delivery surface:** the **arm-on-a-Kite-instrument UI** (instrument picker +
-   atr/mult/qty/product/cap form + live ARMED indicator + disarm) on the alert/script surface; then
-   the 9:00 IST Telegram reconnect nudge and order-fill notifications.
+   **Remaining = final delivery surface:** ✅ the arm-on-a-Kite-instrument UI (7d below); then the
+   9:00 IST Telegram reconnect nudge and order-fill notifications.
+7d. **GW-7 arm UI** ✅ (2026-07-14): `apps/web/features/terminal/automation-arm-dialog.tsx` — the
+   admin-gated top-bar dialog (Bot icon, beside the broker connect button) that arms/lists/disarms a
+   SuperTrend position-flip on the **active pane's Kite instrument**, driven by the 7c arm route.
+   Reads the active pane symbol → `KITE:` id → atr/mult/qty/product(MIS·CNC·NRML)/max-flips-per-day
+   (blank = ∞)/telegram form → **Arm** → the route's whitelist gate returns verbatim failures (403
+   not-Pro / 404 not-connected / 409 not-whitelisted-with-IP). Below: the live armed-automations list
+   (`GET /api/broker/automation`) with an ARMED/paused badge + disarm. Thin shell over the PURE,
+   tested `apps/web/lib/automation-arm.ts` (`defaultArmForm`/`validateArmForm` mirroring the route's
+   zod schema + deriving tradingSymbol+exchange from the KITE id/`describeAutomation`). Places NO
+   order — the wired GW-7 executor flips on a live signal. 15 tests; 699/699; api+web typecheck +
+   web build clean; commit `c21a581`; deployed on `supercharts2` (web-only restart, alert engine
+   untouched); prod: site 200, arm routes anon → 401. **This completes the core final-delivery
+   surface** (owner can arm a SuperTrend flip on any Kite instrument from the UI). Remaining GW-7
+   polish: 9:00 IST Telegram reconnect nudge + order-fill notifications.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
