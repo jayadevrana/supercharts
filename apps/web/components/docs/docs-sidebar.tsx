@@ -18,6 +18,7 @@ const SECTIONS: Array<{ title: string; items: Array<{ href: string; label: strin
     items: [
       { href: '/docs/cookbook', label: 'Cookbook' },
       { href: '/docs/backtesting', label: 'Backtesting & optimization' },
+      { href: '/docs/automation', label: 'Automate on Zerodha' },
       { href: '/docs/from-pine', label: 'Coming from Pine' },
     ],
   },

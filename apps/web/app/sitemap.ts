@@ -11,6 +11,7 @@ const PATHS: Array<{ path: string; priority: number }> = [
   { path: '/docs/language', priority: 0.7 },
   { path: '/docs/cookbook', priority: 0.8 },
   { path: '/docs/backtesting', priority: 0.7 },
+  { path: '/docs/automation', priority: 0.8 },
   { path: '/docs/from-pine', priority: 0.8 },
   { path: '/docs/reference/ta', priority: 0.6 },
   { path: '/docs/reference/math', priority: 0.6 },
