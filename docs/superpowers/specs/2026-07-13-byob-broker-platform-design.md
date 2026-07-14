@@ -182,6 +182,16 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    untouched); prod: site 200, arm routes anon → 401. **This completes the core final-delivery
    surface** (owner can arm a SuperTrend flip on any Kite instrument from the UI). Remaining GW-7
    polish: 9:00 IST Telegram reconnect nudge + order-fill notifications.
+7e. **GW-7 polish (a) reconnect nudge** ✅ (2026-07-14): `apps/api/src/broker/reconnect-nudge.ts`
+   (pure — Kite daily tokens invalidate each IST morning ~06:00, so an armed flip silently stops
+   until reconnect): `istTokenResetBoundary`/`istClock` (fixed +5:30, no DST) · `isTokenStale` ·
+   `computeReconnectNudges` (active + armed + stale) · `formatReconnectNudge` (HTML) ·
+   `runReconnectNudge` (composes over injected loadArmedConnections/resolveBot/send — never throws,
+   never places an order). Read route `GET /api/broker/automation/reconnect-status` (requirePro) +
+   env-gated (`BROKER_RECONNECT_NUDGE=1`, default OFF) 09:00 IST scheduler in `main.ts` (once/IST-day,
+   deduped, first-enabled-bot). 19 tests; suite 718/718; commit `0c81840`; deployed on `supercharts2`
+   (API-only restart); prod: site 200, reconnect-status anon → 401. Remaining polish: (b) order-fill
+   notifications on a flip.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
