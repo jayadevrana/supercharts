@@ -134,6 +134,115 @@ describe('createAlertOrderExecutor — GW-7 alert → broker order automation', 
     expect(r).toMatchObject({ status: 'skipped', reason: 'token_expired' });
   });
 
+  // --- GW-7 polish (b): order-fill Telegram notifications ---
+  interface NotifierState {
+    sent: Array<{ botToken: string; chatId: string; text: string }>;
+    bot?: { botToken: string; chatId: string; enabled: number };
+    throwOnSend?: boolean;
+    lastBotIdArg?: string | undefined;
+  }
+  function stubNotifier(state: NotifierState) {
+    return {
+      resolveBot: (_userId: string, botId?: string) => {
+        state.lastBotIdArg = botId;
+        return state.bot;
+      },
+      send: async (args: { botToken: string; chatId: string; text: string }) => {
+        if (state.throwOnSend) throw new Error('telegram down');
+        state.sent.push(args);
+      },
+      appUrl: 'https://supercharting.com',
+    };
+  }
+  const enabledBot = { botToken: 'bt', chatId: 'cid', enabled: 1 };
+
+  it('placed flip + telegram-on alert → sends an order-fill note to the resolved bot (chosen botId honored)', async () => {
+    const db = seedDb('notify-fill.sqlite');
+    const state: StubState = { positions: [], placed: [], positionsCalls: 0 };
+    const nstate: NotifierState = { sent: [], bot: enabledBot };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const r = await exec.execute(input({ notify: { telegramBotId: 'bot_9' } }));
+    expect(r.status).toBe('placed');
+    expect(nstate.sent).toHaveLength(1);
+    expect(nstate.lastBotIdArg).toBe('bot_9');
+    expect(nstate.sent[0].text).toContain('Opened long');
+    expect(nstate.sent[0].text).toContain('NSE:RELIANCE');
+  });
+
+  it('broker-rejected flip + telegram-on → sends an honest reject note (verbatim broker message)', async () => {
+    const db = seedDb('notify-reject.sqlite');
+    const state: StubState = {
+      positions: [], placed: [], positionsCalls: 0,
+      failPlaceOn: (_i, callIndex) => callIndex === 0,
+    };
+    const nstate: NotifierState = { sent: [], bot: enabledBot };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const r = await exec.execute(input({ notify: {} }));
+    expect(r.status).toBe('error');
+    expect(nstate.sent).toHaveLength(1);
+    expect(nstate.sent[0].text).toContain('rejected');
+    expect(nstate.sent[0].text).toContain('InputException');
+  });
+
+  it('no note when the alert did NOT opt into telegram (notify omitted), even on a placed order', async () => {
+    const db = seedDb('notify-off.sqlite');
+    const state: StubState = { positions: [], placed: [], positionsCalls: 0 };
+    const nstate: NotifierState = { sent: [], bot: enabledBot };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const r = await exec.execute(input()); // no notify field
+    expect(r.status).toBe('placed');
+    expect(nstate.sent).toHaveLength(0);
+  });
+
+  it('no note for a no-op flip (already in direction) or a skipped gate', async () => {
+    const db = seedDb('notify-noop.sqlite');
+    const state: StubState = { positions: [{ symbol: 'RELIANCE', exchange: 'NSE', product: 'MIS', quantity: 10, averagePrice: 1, lastPrice: 1, pnl: 0 }], placed: [], positionsCalls: 0 };
+    const nstate: NotifierState = { sent: [], bot: enabledBot };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const noop = await exec.execute(input({ notify: {} }));
+    expect(noop.status).toBe('noop');
+    expect(nstate.sent).toHaveLength(0);
+    // kill-switch skip also stays silent
+    const exec2 = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => true, notifier: stubNotifier(nstate),
+    });
+    const skip = await exec2.execute(input({ notify: {} }));
+    expect(skip.status).toBe('skipped');
+    expect(nstate.sent).toHaveLength(0);
+  });
+
+  it('a Telegram send failure never changes the outcome (fill note is fire-and-forget)', async () => {
+    const db = seedDb('notify-throw.sqlite');
+    const state: StubState = { positions: [], placed: [], positionsCalls: 0 };
+    const nstate: NotifierState = { sent: [], bot: enabledBot, throwOnSend: true };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const r = await exec.execute(input({ notify: {} }));
+    expect(r.status).toBe('placed'); // order still placed; the throw was swallowed
+    expect(state.placed).toHaveLength(1);
+  });
+
+  it('no note when the user has no enabled bot (disabled/absent), no throw', async () => {
+    const db = seedDb('notify-nobot.sqlite');
+    const state: StubState = { positions: [], placed: [], positionsCalls: 0 };
+    const nstate: NotifierState = { sent: [], bot: { botToken: 'bt', chatId: 'cid', enabled: 0 } };
+    const exec = createAlertOrderExecutor({
+      db, gatewayFactory: stubFactory(state), isKillSwitchHalted: () => false, notifier: stubNotifier(nstate),
+    });
+    const r = await exec.execute(input({ notify: {} }));
+    expect(r.status).toBe('placed');
+    expect(nstate.sent).toHaveLength(0);
+  });
+
   it('broker rejection on the CLOSE leg aborts the flip (never opens the new side) + audits rejected', async () => {
     const db = seedDb('reject.sqlite');
     const state: StubState = {

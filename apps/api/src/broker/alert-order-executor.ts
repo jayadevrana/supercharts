@@ -5,6 +5,7 @@ import { planFlip, type FlipReason } from './flip-planner';
 import { evaluateAutomationGate } from './automation-gate';
 import { resolveWriteGateway, type BrokerGatewayFactory } from './write-gateway';
 import { recordOrderAudit, completeOrderAudit } from './store';
+import { buildAutomationNote } from './order-fill-note';
 import { startOfUtcDay } from '../dd-breaker';
 
 /**
@@ -33,6 +34,12 @@ export interface AlertOrderExecuteInput {
   config: AlertBrokerOrderConfig;
   /** Audit provenance — 'alert' for ma_cross/indicator alerts, 'indicator' reserved for finer tagging. */
   placedVia: 'alert' | 'indicator';
+  /**
+   * GW-7 polish (b): when present, an order-fill Telegram note is sent (via the wired notifier) on a
+   * placed/rejected flip. The engine sets this ONLY when the alert opted into Telegram delivery, so
+   * the fill note respects the user's existing notification choice — never a surprise message.
+   */
+  notify?: { telegramBotId?: string };
 }
 
 export type AlertOrderOutcome =
@@ -45,11 +52,28 @@ export interface AlertOrderExecutor {
   execute(input: AlertOrderExecuteInput): Promise<AlertOrderOutcome>;
 }
 
+/**
+ * GW-7 polish (b): optional Telegram order-fill notifier. Injected so tests never hit Telegram and
+ * the loop can prove every path against a stub. Omitted → the executor sends no notifications
+ * (the default / legacy path).
+ */
+export interface AlertOrderNotifier {
+  /** Resolve the user's Telegram bot (prefer the alert's chosen botId, else their default). */
+  resolveBot: (
+    userId: string,
+    botId?: string,
+  ) => { botToken: string; chatId: string; enabled: number } | undefined;
+  send: (args: { botToken: string; chatId: string; text: string }) => Promise<void>;
+  appUrl?: string;
+}
+
 export interface AlertOrderExecutorDeps {
   db: AppDB;
   gatewayFactory: BrokerGatewayFactory;
   /** Returns true when the dd-breaker has halted new automation for the day. */
   isKillSwitchHalted: () => boolean;
+  /** GW-7 polish (b): when wired, order-fill Telegram notes are sent on placed/rejected flips. */
+  notifier?: AlertOrderNotifier;
   now?: () => number;
   log?: (msg: string, extra?: unknown) => void;
 }
@@ -73,7 +97,40 @@ export function createAlertOrderExecutor(deps: AlertOrderExecutorDeps): AlertOrd
     else entry.count += 1;
   }
 
+  /**
+   * Send the order-fill Telegram note for a placed/rejected flip. Fire-and-forget: NEVER throws and
+   * never changes the outcome — a wedged Telegram can't undo (or hide) a live order. Only runs when a
+   * notifier is wired AND the alert opted into Telegram (`inp.notify` set).
+   */
+  async function notifyFill(inp: AlertOrderExecuteInput, outcome: AlertOrderOutcome): Promise<void> {
+    const notifier = deps.notifier;
+    if (!notifier || !inp.notify) return;
+    try {
+      const text = buildAutomationNote(outcome, {
+        broker: inp.config.broker,
+        tradingSymbol: inp.config.tradingSymbol,
+        exchange: inp.config.exchange,
+        side: inp.side,
+        quantity: inp.config.quantity,
+        product: inp.config.product,
+        appUrl: notifier.appUrl,
+      });
+      if (!text) return; // noop / skipped / non-reject error → nothing to say
+      const bot = notifier.resolveBot(inp.userId, inp.notify.telegramBotId);
+      if (!bot || bot.enabled !== 1 || !bot.botToken || !bot.chatId) return;
+      await notifier.send({ botToken: bot.botToken, chatId: bot.chatId, text });
+    } catch (err) {
+      deps.log?.('[gw7] order-fill notification failed', { alertId: inp.alertId, err });
+    }
+  }
+
   async function execute(inp: AlertOrderExecuteInput): Promise<AlertOrderOutcome> {
+    const outcome = await runFlip(inp);
+    await notifyFill(inp, outcome);
+    return outcome;
+  }
+
+  async function runFlip(inp: AlertOrderExecuteInput): Promise<AlertOrderOutcome> {
     const { userId, alertId, side, config, placedVia } = inp;
     try {
       // 1 + 2: kill-switch + per-alert daily cap. Neither touches the broker.

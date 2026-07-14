@@ -94,8 +94,13 @@ export class AlertEngine {
   ): void {
     const brokerOrder = alert.config.delivery.brokerOrder;
     if (!brokerOrder || !this.brokerOrderExecutor) return;
+    // GW-7 polish (b): send an order-fill Telegram note ONLY when the alert opted into Telegram
+    // delivery — the fill note rides the user's existing choice, so it's never a surprise message.
+    const notify = alert.config.delivery.telegram
+      ? { telegramBotId: alert.config.delivery.telegramBotId }
+      : undefined;
     void this.brokerOrderExecutor
-      .execute({ userId: alert.userId, alertId: alert.id, side: event.side, config: brokerOrder, placedVia })
+      .execute({ userId: alert.userId, alertId: alert.id, side: event.side, config: brokerOrder, placedVia, notify })
       .then((outcome) => {
         if (outcome.status === 'error') {
 

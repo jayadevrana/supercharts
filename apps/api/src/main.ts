@@ -262,13 +262,48 @@ async function start(): Promise<void> {
   futuresRoutes(app);
   const wsBroadcaster = registerWebSocketGateway(app, ingestion, mt5Store, db);
 
+  // Resolve a user's Telegram bot for broker order-fill notes: the alert's chosen bot id first, then
+  // their first enabled telegram_bots row, then the legacy telegram_configs singleton. Mirrors the
+  // alert engine's own delivery resolution so a fill note lands wherever the alert's signal note does.
+  const resolveUserBot = (userId: string, botId?: string) => {
+    let cfg: { botToken: string; chatId: string; enabled: number } | undefined;
+    if (botId) {
+      cfg = db.raw
+        .prepare(
+          'SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots WHERE id = ? AND user_id = ?',
+        )
+        .get(botId, userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    if (!cfg) {
+      cfg = db.raw
+        .prepare(
+          `SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_bots
+             WHERE user_id = ? AND enabled = 1 ORDER BY created_at ASC LIMIT 1`,
+        )
+        .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    if (!cfg) {
+      cfg = db.raw
+        .prepare('SELECT bot_token as botToken, chat_id as chatId, enabled FROM telegram_configs WHERE user_id = ?')
+        .get(userId) as { botToken: string; chatId: string; enabled: number } | undefined;
+    }
+    return cfg;
+  };
+
   // GW-7: broker-order automation executor. Shares the dd-breaker kill-switch with the MT5 signal
   // runner so a tripped breaker halts BOTH. Passed to the alert engine so an alert carrying a
   // `delivery.brokerOrder` config flips a live position on each fire (opt-in, plan/whitelist gated).
+  // GW-7 polish (b): the notifier sends an order-fill Telegram note on a placed/rejected flip, but
+  // only for alerts that opted into Telegram delivery (the engine gates that via the `notify` field).
   const brokerOrderExecutor = createAlertOrderExecutor({
     db,
     gatewayFactory: defaultKiteGatewayFactory,
     isKillSwitchHalted: () => ddBreaker.isHalted(),
+    notifier: {
+      resolveBot: resolveUserBot,
+      send: ({ botToken, chatId, text }) => sendTelegramMessage({ botToken, chatId, text, parseMode: 'HTML' }),
+      appUrl: process.env.NEXT_PUBLIC_APP_URL ?? 'https://supercharting.com',
+    },
     log: (msg, extra) => app.log.warn({ extra }, msg),
   });
 
