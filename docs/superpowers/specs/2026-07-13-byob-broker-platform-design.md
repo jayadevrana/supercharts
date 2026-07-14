@@ -192,6 +192,22 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    deduped, first-enabled-bot). 19 tests; suite 718/718; commit `0c81840`; deployed on `supercharts2`
    (API-only restart); prod: site 200, reconnect-status anon → 401. Remaining polish: (b) order-fill
    notifications on a flip.
+7f. **GW-7 polish (b) order-fill notifications** ✅ (2026-07-14): `apps/api/src/broker/order-fill-note.ts`
+   (pure) — `formatOrderFillNote` (opened/flipped long/short + `EXCHANGE:SYMBOL` + `SIDE qty (PRODUCT)`
+   + broker label + order ids + optional /terminal link, HTML), `formatOrderRejectNote` (broker's
+   verbatim message, HTML-escaped), `buildAutomationNote(outcome, ctx)` -> body-or-null (notifies ONLY
+   `placed` + `broker_rejected`; noop/skipped/positions-failed/executor-failed stay silent -> no
+   double-spam). Wired into the alert-order executor as an optional injected `AlertOrderNotifier`:
+   `execute` splits `runFlip` (audited core, unchanged) from a fire-and-forget `notifyFill` that never
+   throws / never changes the outcome. The alert engine passes the `notify` field ONLY when the alert
+   opted into Telegram delivery (fill note rides the user's existing choice - no surprise message);
+   `main.ts` wires a 3-tier bot resolve (alert's chosen id -> first enabled `telegram_bots` -> legacy
+   `telegram_configs`) + `sendTelegramMessage` HTML. Additive: legacy 48/144 MA-cross + MT5 + the
+   engine's own signal delivery untouched (no `brokerOrder` -> executor never runs). Places NO order -
+   every path stub-proven. 12 tests; suite 730/730; api+web typecheck clean; commit `33bf758`; deployed
+   on `supercharts2` (API-only restart); prod: site 200, binance+kite connected, automation routes anon
+   -> 401. **GW-7 COMPLETE** (core -> builder -> arm route -> arm UI -> reconnect nudge -> fill notes).
+   Next: GW-8.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
