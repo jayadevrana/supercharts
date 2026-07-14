@@ -37,6 +37,7 @@ import { useWSStatus } from '@/lib/ws-client';
 import { IndicatorsDialog } from './indicators-dialog';
 import { OandaConnectDialog } from './oanda-connect-dialog';
 import { BrokerConnectDialog } from './broker-connect-dialog';
+import { AutomationArmDialog } from './automation-arm-dialog';
 import { useSession } from '@/lib/auth';
 import { ImportCsvDialog } from './import-csv-dialog';
 import { BacktestDialog } from './backtest-dialog';
@@ -435,6 +436,7 @@ export function TerminalTopBar() {
         <WebhooksDialog />
         <OandaConnectDialog />
         {sessionUser?.role === 'admin' ? <BrokerConnectDialog /> : null}
+        {sessionUser?.role === 'admin' ? <AutomationArmDialog /> : null}
         <Divider />
         <MT5Chip />
         <StrategyBuilderDialog
