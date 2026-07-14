@@ -208,6 +208,22 @@ All secrets AES-256-GCM under the existing `ENCRYPTION_KEY`; client only ever se
    on `supercharts2` (API-only restart); prod: site 200, binance+kite connected, automation routes anon
    -> 401. **GW-7 COMPLETE** (core -> builder -> arm route -> arm UI -> reconnect nudge -> fill notes).
    Next: GW-8.
+7g. **GW-7 docs capstone — "Automate a SuperTrend flip on Zerodha"** ✅ (2026-07-14): the FINAL-DELIVERY
+   user-facing guide (`/docs/automation`) that ties the whole GW-1..GW-7 chain together — how to ARM a
+   SuperTrend position-flip on ANY connected Kite instrument (stock/option/future/MCX). Pure content
+   module `apps/web/features/docs/automation-guide.ts` (`AUTOMATION_STRATEGY_SCRIPT` — a runnable
+   `ta.supertrend` flip recipe emitting clean BUY+SELL flip marks · `AUTOMATION_DEFAULTS` — the single
+   documented atr10·mult3·qty1·MIS·cap5·telegram source · `FLIP_TABLE` flat/opposite/same semantics =
+   the real flip-planner · `ARM_STEPS` · `SAFETY_RAILS`) rendered by `apps/web/app/docs/automation/page.tsx`
+   (highlighted script + Run-in-terminal deep link + flip table + numbered arm steps + safety grid +
+   honest-costs note). Wired into the docs sidebar (Guides), sitemap, and hub card. **Drift-guarded:**
+   `tests/docs-automation.test.ts` (5) runs the script through the REAL interpreter (asserts ≥1 buy AND
+   ≥1 sell flip mark + the SuperTrend line) and pins `AUTOMATION_DEFAULTS` field-for-field against BOTH
+   `defaultArmForm()` and `buildSupertrendAutomation()` — so a number on the page can never silently
+   disagree with what the terminal arms. Additive docs-only (places no order; alert engine / Telegram /
+   MT5 untouched). 735/735; api+web typecheck clean; commit `0346afb`; deployed on `supercharts2`
+   (web-only rebuild+restart, API 2h uptime untouched); prod: `/docs/automation` 200 with content,
+   sitemap includes it, `/api/health` binance+kite connected, anon `/api/broker/automation` → 401.
 8. **GW-8**: OANDA trading adapter (same interface; no IP constraint) — forex BYOB complete.
 9. **GW-9**: Headless auto-login opt-in worker (risk acknowledgment + encrypted creds + morning
    login replay + failure alerts). LAST because custody risk is highest.
