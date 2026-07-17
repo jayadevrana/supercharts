@@ -80,6 +80,7 @@ import { getWSClient } from '@/lib/ws-client';
 import type { AlertDefinition, AlertEvent } from '@supercharts/types';
 import { useTheme } from '@/components/theme-provider';
 import { getSkin } from '@/lib/skins';
+import { CLASSIC_DESIGN_ID } from '@/lib/designs';
 import { formatPrice, formatPercent, formatSymbolLabel } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import type { PaneState } from './terminal-store';
@@ -141,8 +142,15 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   // the FIRST matching alert; the rest still fire server-side but don't draw.
   const [paneAlerts, setPaneAlerts] = useState<AlertDefinition[]>([]);
   const [alertsRefreshTick, setAlertsRefreshTick] = useState(0);
-  const { theme } = useTheme();
-  const resolvedTheme = useMemo(() => getSkin(theme).chart, [theme]);
+  const { theme, design } = useTheme();
+  const resolvedTheme = useMemo(() => {
+    const chart = getSkin(theme).chart;
+    // Canvas can't resolve CSS var() font stacks — when a design pack is active,
+    // the axis/label font follows the real computed UI font instead.
+    if (design === CLASSIC_DESIGN_ID || typeof window === 'undefined') return chart;
+    const family = getComputedStyle(document.body).fontFamily;
+    return { ...chart, font: { ...chart.font, family } };
+  }, [theme, design]);
   const drawTool = useTerminalStore((s) => s.drawTool);
   const setDrawTool = useTerminalStore((s) => s.setDrawTool);
   const backtestPreview = useTerminalStore((s) => s.backtestPreview);

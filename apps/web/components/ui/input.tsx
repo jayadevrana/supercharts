@@ -22,7 +22,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
       {leftAdornment ? <div className="mr-2 text-muted-foreground">{leftAdornment}</div> : null}
       <input
         ref={ref}
-        className="h-9 flex-1 bg-transparent text-sm placeholder:text-muted-foreground/70 focus:outline-none"
+        className="h-[var(--control-h-md,2.25rem)] flex-1 bg-transparent text-[length:var(--control-fs-md,0.875rem)] placeholder:text-muted-foreground/70 focus:outline-none"
         {...rest}
       />
       {rightAdornment ? <div className="ml-2 text-muted-foreground">{rightAdornment}</div> : null}

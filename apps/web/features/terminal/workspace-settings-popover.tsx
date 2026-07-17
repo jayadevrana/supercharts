@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Switch } from '@/components/ui/switch';
 import { useTheme } from '@/components/theme-provider';
 import { SKINS } from '@/lib/skins';
+import { DESIGNS } from '@/lib/designs';
 import { useTerminalStore } from './terminal-store';
 
 function SettingRow({
@@ -72,7 +73,7 @@ function SkinCard({
  * live-applies a skin (CSS vars + chart palette) via the theme provider.
  */
 export function WorkspaceSettingsPopover() {
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, design, setDesign } = useTheme();
   const showLeftRail = useTerminalStore((s) => s.showLeftRail);
   const setShowLeftRail = useTerminalStore((s) => s.setShowLeftRail);
   const showRightRail = useTerminalStore((s) => s.showRightRail);
@@ -91,6 +92,30 @@ export function WorkspaceSettingsPopover() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-2">
+        <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Design
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 px-2 pb-2">
+          {DESIGNS.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDesign(d.id)}
+              aria-pressed={design === d.id}
+              title={d.tagline}
+              className={`flex items-center gap-2 rounded-md border p-2 text-left transition-colors ${
+                design === d.id ? 'border-accent bg-surface-raised' : 'border-border hover:bg-surface-raised'
+              }`}
+            >
+              <span className="text-sm font-semibold leading-none text-foreground">{d.specimen}</span>
+              <span
+                className={`text-[11px] leading-none ${design === d.id ? 'text-foreground' : 'text-muted-foreground'}`}
+              >
+                {d.label}
+              </span>
+            </button>
+          ))}
+        </div>
         <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Theme
         </div>

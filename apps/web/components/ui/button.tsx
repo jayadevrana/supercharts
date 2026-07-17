@@ -22,12 +22,14 @@ const variantClasses: Record<Variant, string> = {
   subtle: 'bg-muted text-foreground hover:bg-muted/80',
 };
 
+// Heights/font-sizes read the design-pack tokens (globals.css [data-design]);
+// fallbacks are the classic values so no design attribute = unchanged.
 const sizeClasses: Record<Size, string> = {
-  xs: 'h-7 px-2.5 text-[11px]',
-  sm: 'h-8 px-3 text-xs',
-  md: 'h-9 px-4 text-sm',
-  lg: 'h-11 px-6 text-sm',
-  icon: 'h-8 w-8',
+  xs: 'h-[var(--control-h-xs,1.75rem)] px-2.5 text-[length:var(--control-fs-xs,11px)]',
+  sm: 'h-[var(--control-h-sm,2rem)] px-3 text-[length:var(--control-fs-sm,0.75rem)]',
+  md: 'h-[var(--control-h-md,2.25rem)] px-4 text-[length:var(--control-fs-md,0.875rem)]',
+  lg: 'h-[var(--control-h-lg,2.75rem)] px-6 text-[length:var(--control-fs-md,0.875rem)]',
+  icon: 'h-[var(--control-h-sm,2rem)] w-[var(--control-h-sm,2rem)]',
 };
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(

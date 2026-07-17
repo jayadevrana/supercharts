@@ -80,3 +80,21 @@ live on localhost via the Settings cog.
 
 Layout restructure (top bar / rails / spacing system), typography scale changes, per-user
 server-persisted theme (localStorage only, as today). Live alert engine untouched.
+
+## Addendum (same day) — Design packs: 6 FULL designs, not just colors
+
+Owner feedback: skins alone read as "only a theme change" — they want overall design
+(icons, type, everything). Additive second dimension, `data-design` + `lib/designs.ts`:
+
+- **What a design controls:** UI font (`--font-sans`, real fonts via next/font: Inter /
+  Barlow Semi Condensed / JetBrains Mono), icon stroke weight (`svg.lucide` reads
+  `--icon-stroke`), control density (`--control-h-*` / `--control-fs-*` consumed by the
+  Button/Input/Tabs primitives), letter-spacing, shape (radius + panel tokens — design
+  blocks sit after skin blocks so a design's shape wins), and the chart canvas font
+  (follows the computed body font; canvas can't resolve CSS var() stacks).
+- **The 6:** Apex (TV-grade · graphite) · Ledger (condensed dense · carbon) · Matrix
+  (mono console · phosphor) · Nova (modern product · midnight) · Swiss (print-clean ·
+  arctic) · Sovereign (executive · aurum). Classic = no attr = original look, untouched.
+- Picking a design applies its paired skin too (one complete look); the Theme grid can
+  recolor afterwards. Picker: Settings popover "Design" grid above "Theme".
+- Persistence: `sc.design` localStorage next to `sc.theme`; unknown values → classic.

@@ -208,9 +208,163 @@
   --panel-radius: 6px;
 }
 
+/* =========================================================
+   Design packs — full look variants (typography + icon weight +
+   control density + shape), layered ON TOP of a skin's colors.
+   Registry: apps/web/lib/designs.ts. No data-design = Classic.
+   These blocks sit after the skin blocks so a design's shape
+   tokens win over a skin's.
+   ========================================================= */
+
+/* Apex — TradingView-grade: Inter, compact, squared, 1.75px icons. */
+:root[data-design='apex'] {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --ui-tracking: -0.01em;
+  --icon-stroke: 1.75;
+  --control-h-xs: 26px;
+  --control-h-sm: 28px;
+  --control-h-md: 32px;
+  --control-h-lg: 40px;
+  --control-fs-xs: 11px;
+  --control-fs-sm: 12px;
+  --control-fs-md: 13px;
+  --radius-sm: 2px;
+  --radius: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.5);
+  --panel-blur: none;
+  --panel-radius: 4px;
+}
+
+/* Ledger — institutional dense: condensed type, sharp, tight rows. */
+:root[data-design='ledger'] {
+  --font-sans: var(--font-condensed), 'Arial Narrow', ui-sans-serif, sans-serif;
+  --ui-tracking: 0.015em;
+  --icon-stroke: 2;
+  --control-h-xs: 22px;
+  --control-h-sm: 24px;
+  --control-h-md: 28px;
+  --control-h-lg: 34px;
+  --control-fs-xs: 10.5px;
+  --control-fs-sm: 11.5px;
+  --control-fs-md: 12.5px;
+  --radius-sm: 0px;
+  --radius: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 2px 10px -6px rgba(0, 0, 0, 0.7);
+  --panel-blur: none;
+  --panel-radius: 2px;
+}
+
+/* Matrix — quant console: monospace UI, blocky, thin icons. */
+:root[data-design='matrix'] {
+  --font-sans: var(--font-mono-ui), 'JetBrains Mono', Menlo, monospace;
+  --ui-tracking: -0.02em;
+  --icon-stroke: 1.5;
+  --control-h-xs: 24px;
+  --control-h-sm: 26px;
+  --control-h-md: 30px;
+  --control-h-lg: 36px;
+  --control-fs-xs: 10px;
+  --control-fs-sm: 11px;
+  --control-fs-md: 12px;
+  --radius-sm: 0px;
+  --radius: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 3px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 2px 10px -6px rgba(0, 0, 0, 0.6);
+  --panel-blur: none;
+  --panel-radius: 2px;
+}
+
+/* Nova — modern product feel: Inter tight, roomier, soft radii, light icons. */
+:root[data-design='nova'] {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --ui-tracking: -0.02em;
+  --icon-stroke: 1.5;
+  --control-h-xs: 26px;
+  --control-h-sm: 30px;
+  --control-h-md: 34px;
+  --control-h-lg: 42px;
+  --control-fs-xs: 11px;
+  --control-fs-sm: 12px;
+  --control-fs-md: 13px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.5);
+  --panel-blur: none;
+  --panel-radius: 10px;
+}
+
+/* Swiss — print-clean: Helvetica-first, crisp hairlines, minimal. */
+:root[data-design='swiss'] {
+  --font-sans: 'Helvetica Neue', var(--font-inter), Helvetica, Arial, sans-serif;
+  --ui-tracking: -0.005em;
+  --icon-stroke: 1.5;
+  --control-h-xs: 26px;
+  --control-h-sm: 28px;
+  --control-h-md: 32px;
+  --control-h-lg: 40px;
+  --control-fs-xs: 11px;
+  --control-fs-sm: 12px;
+  --control-fs-md: 13px;
+  --radius-sm: 0px;
+  --radius: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 3px 14px -10px rgba(15, 23, 42, 0.25);
+  --panel-blur: none;
+  --panel-radius: 3px;
+}
+
+/* Sovereign — executive: larger type, generous pill shapes, bold icons. */
+:root[data-design='sovereign'] {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --ui-tracking: 0.005em;
+  --icon-stroke: 2;
+  --control-h-xs: 28px;
+  --control-h-sm: 32px;
+  --control-h-md: 36px;
+  --control-h-lg: 44px;
+  --control-fs-xs: 11.5px;
+  --control-fs-sm: 12.5px;
+  --control-fs-md: 14px;
+  --radius-sm: 8px;
+  --radius: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 10px 28px -14px rgba(0, 0, 0, 0.55);
+  --panel-blur: none;
+  --panel-radius: 12px;
+}
+
+/* Icon weight follows the active design (lucide default = 2). */
+svg.lucide {
+  stroke-width: var(--icon-stroke, 2);
+}
+
 /* Default theme until JS sets the data attribute. */
 :root {
   color-scheme: dark light;
+  /* Classic font stack — designs override --font-sans via their block. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'SF Pro Display', 'Inter', 'Segoe UI',
+    Roboto, Helvetica, Arial, sans-serif;
 }
 :root:not([data-theme]) {
   --bg: 220 18% 5%;
@@ -238,6 +392,7 @@ body {
   background: hsl(var(--bg));
   color: hsl(var(--fg));
   font-family: var(--font-sans);
+  letter-spacing: var(--ui-tracking, 0);
   font-feature-settings: 'ss01', 'cv11';
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
