@@ -88,7 +88,7 @@ export function LeftRail() {
 
   return (
     <TooltipProvider>
-      <aside className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface/80 py-3">
+      <aside className="absolute inset-y-0 left-0 z-30 flex w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-border bg-surface/95 py-3 lg:static lg:z-auto lg:overflow-visible lg:bg-surface/80">
         {TOOLS.map((tool, i) => {
           const showBreak = GROUP_BREAKS.has(tool.group ?? '') && TOOLS[i - 1]?.group !== tool.group;
           return (
