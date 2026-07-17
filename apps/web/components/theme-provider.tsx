@@ -1,8 +1,8 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_SKIN_ID, getSkin, isSkinId } from '@/lib/skins';
-import { CLASSIC_DESIGN_ID, getDesign, isDesignId } from '@/lib/designs';
+import { getSkin, isSkinId } from '@/lib/skins';
+import { CLASSIC_DESIGN_ID, DEFAULT_DESIGN_ID, getDesign, isDesignId } from '@/lib/designs';
 
 /** A skin id from the registry ('dark' | 'light' | 'graphite' | …). */
 type Theme = string;
@@ -24,20 +24,27 @@ function applyDesignAttr(id: string) {
   else document.documentElement.setAttribute('data-design', id);
 }
 
+const defaultSkin = getDesign(DEFAULT_DESIGN_ID).skinId;
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(DEFAULT_SKIN_ID);
-  const [design, setDesignState] = useState<string>(CLASSIC_DESIGN_ID);
+  const [theme, setThemeState] = useState<Theme>(defaultSkin);
+  const [design, setDesignState] = useState<string>(DEFAULT_DESIGN_ID);
 
   useEffect(() => {
-    const storedTheme = typeof window !== 'undefined' ? localStorage.getItem('sc.theme') : null;
-    const initialTheme = isSkinId(storedTheme) ? (storedTheme as Theme) : DEFAULT_SKIN_ID;
-    setThemeState(initialTheme);
-    document.documentElement.setAttribute('data-theme', initialTheme);
-
+    // A stored design means the user has made a choice in the design-pack era —
+    // honor it plus their skin. A stored theme WITHOUT a design predates the
+    // system (old dark/light toggle); migrate those browsers to the flagship
+    // default instead of pinning them to the legacy look.
     const storedDesign = typeof window !== 'undefined' ? localStorage.getItem('sc.design') : null;
-    const initialDesign = isDesignId(storedDesign) ? (storedDesign as string) : CLASSIC_DESIGN_ID;
+    const storedTheme = typeof window !== 'undefined' ? localStorage.getItem('sc.theme') : null;
+    const chosen = isDesignId(storedDesign);
+    const initialDesign = chosen ? (storedDesign as string) : DEFAULT_DESIGN_ID;
+    const initialTheme =
+      chosen && isSkinId(storedTheme) ? (storedTheme as Theme) : getDesign(initialDesign).skinId;
     setDesignState(initialDesign);
     applyDesignAttr(initialDesign);
+    setThemeState(initialTheme);
+    document.documentElement.setAttribute('data-theme', initialTheme);
   }, []);
 
   const setTheme = useCallback((t: Theme) => {

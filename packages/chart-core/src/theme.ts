@@ -285,6 +285,36 @@ export const ARCTIC_THEME: ChartTheme = {
   valueArea: 'rgba(41,98,255,0.1)',
 };
 
+/** High-contrast flagship — near-black, electric blue, vivid candles. */
+export const OBSIDIAN_THEME: ChartTheme = {
+  ...DARK_THEME,
+  name: 'custom',
+  background: '#05060a',
+  surface: '#0b0d14',
+  surfaceMuted: '#12151e',
+  border: '#232837',
+  gridLine: 'rgba(255,255,255,0.055)',
+  gridLineStrong: 'rgba(255,255,255,0.11)',
+  text: '#eef2f8',
+  textMuted: '#93a0b4',
+  textAxis: '#8b98ac',
+  accent: '#3d7bff',
+  bull: '#00c26e',
+  bear: '#ff3b46',
+  bullDim: 'rgba(0,194,110,0.5)',
+  bearDim: 'rgba(255,59,70,0.5)',
+  wick: '#a8b2c2',
+  crosshair: 'rgba(150,180,255,0.55)',
+  crosshairLabelBg: '#1c2233',
+  crosshairLabelText: '#ffffff',
+  volumeBull: 'rgba(0,194,110,0.55)',
+  volumeBear: 'rgba(255,59,70,0.55)',
+  heatmap: { bid: [0, 194, 110], ask: [255, 59, 70], background: [5, 6, 10] },
+  drawing: { selectionStroke: '#3d7bff', handleFill: '#05060a', handleStroke: '#3d7bff' },
+  poc: '#ffc63d',
+  valueArea: 'rgba(61,123,255,0.16)',
+};
+
 /** Premium warm charcoal with gold accents. */
 export const AURUM_THEME: ChartTheme = {
   ...DARK_THEME,

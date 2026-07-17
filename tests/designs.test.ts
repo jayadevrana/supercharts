@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CLASSIC_DESIGN_ID, DESIGNS, getDesign, isDesignId } from '../apps/web/lib/designs';
+import {
+  CLASSIC_DESIGN_ID,
+  DEFAULT_DESIGN_ID,
+  DESIGNS,
+  getDesign,
+  isDesignId,
+} from '../apps/web/lib/designs';
 import { isSkinId } from '../apps/web/lib/skins';
 
 const repo = join(__dirname, '..');
@@ -11,12 +17,18 @@ describe('design-pack registry', () => {
     const ids = DESIGNS.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain(CLASSIC_DESIGN_ID);
-    for (const id of ['apex', 'ledger', 'matrix', 'nova', 'swiss', 'sovereign']) {
+    for (const id of ['vertex', 'apex', 'ledger', 'matrix', 'nova', 'swiss', 'sovereign']) {
       expect(ids).toContain(id);
     }
     for (const d of DESIGNS) {
       expect(isSkinId(d.skinId), `${d.id} pairs unknown skin ${d.skinId}`).toBe(true);
     }
+  });
+
+  it('the shipped default is the Vertex/Obsidian flagship', () => {
+    expect(DEFAULT_DESIGN_ID).toBe('vertex');
+    expect(isDesignId(DEFAULT_DESIGN_ID)).toBe(true);
+    expect(getDesign(DEFAULT_DESIGN_ID).skinId).toBe('obsidian');
   });
 
   it('getDesign falls back to classic for unknown ids', () => {

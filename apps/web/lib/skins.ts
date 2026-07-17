@@ -13,6 +13,7 @@ import {
   GRAPHITE_THEME,
   LIGHT_THEME,
   MIDNIGHT_THEME,
+  OBSIDIAN_THEME,
   PHOSPHOR_THEME,
   type ChartTheme,
 } from '@supercharts/chart-core';
@@ -43,6 +44,14 @@ export const SKINS: Skin[] = [
     family: 'light',
     chart: LIGHT_THEME,
     preview: { bg: '#ffffff', accent: '#3b6cff', bull: '#0ea371', bear: '#d6354a' },
+  },
+  {
+    id: 'obsidian',
+    label: 'Obsidian',
+    tagline: 'High-contrast flagship: near-black · electric blue',
+    family: 'dark',
+    chart: OBSIDIAN_THEME,
+    preview: { bg: '#05060a', accent: '#3d7bff', bull: '#00c26e', bear: '#ff3b46' },
   },
   {
     id: 'graphite',

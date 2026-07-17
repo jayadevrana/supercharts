@@ -18,8 +18,17 @@ export interface DesignPack {
 }
 
 export const CLASSIC_DESIGN_ID = 'classic';
+/** The shipped default look (owner goal: professional, high-contrast, 3D depth). */
+export const DEFAULT_DESIGN_ID = 'vertex';
 
 export const DESIGNS: DesignPack[] = [
+  {
+    id: 'vertex',
+    label: 'Vertex',
+    tagline: 'Flagship: high-contrast 3D depth',
+    skinId: 'obsidian',
+    specimen: 'Aa',
+  },
   {
     id: CLASSIC_DESIGN_ID,
     label: 'Classic',
