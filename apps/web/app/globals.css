@@ -40,6 +40,174 @@
   --warn: 36 86% 50%;
 }
 
+/* =========================================================
+   Skins — full chrome variants (colors + radius + panel feel).
+   Registry: apps/web/lib/skins.ts. Chart palettes: chart-core theme.ts.
+   Radius/panel vars fall back to the classic look when unset.
+   ========================================================= */
+
+/* Graphite — flat, dense charcoal-blue (the professional reference). */
+:root[data-theme='graphite'] {
+  --bg: 222 28% 10%;
+  --fg: 222 12% 84%;
+  --muted: 223 20% 15%;
+  --muted-fg: 228 6% 50%;
+  --surface: 222 24% 12%;
+  --surface-raised: 223 20% 15%;
+  --surface-sunken: 222 30% 8%;
+  --border: 224 15% 20%;
+  --ring: 222 100% 58%;
+  --accent: 222 100% 58%;
+  --accent-fg: 0 0% 100%;
+  --bull: 166 90% 32%;
+  --bear: 355 88% 58%;
+  --warn: 36 100% 50%;
+  --radius-sm: 2px;
+  --radius: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 4px 16px -8px rgba(0, 0, 0, 0.5);
+  --panel-blur: none;
+  --panel-radius: 4px;
+}
+
+/* Midnight — institutional trading-desk navy. */
+:root[data-theme='midnight'] {
+  --bg: 220 49% 8%;
+  --fg: 217 41% 91%;
+  --muted: 221 42% 15%;
+  --muted-fg: 220 25% 59%;
+  --surface: 221 46% 11%;
+  --surface-raised: 221 42% 15%;
+  --surface-sunken: 220 55% 6%;
+  --border: 219 40% 20%;
+  --ring: 199 93% 60%;
+  --accent: 199 93% 60%;
+  --accent-fg: 220 49% 8%;
+  --bull: 160 84% 39%;
+  --bear: 350 89% 60%;
+  --warn: 43 96% 56%;
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.55);
+  --panel-blur: none;
+  --panel-radius: 6px;
+}
+
+/* Carbon — terminal black with amber (Bloomberg-desk energy). */
+:root[data-theme='carbon'] {
+  --bg: 0 0% 0%;
+  --fg: 0 0% 90%;
+  --muted: 0 0% 9%;
+  --muted-fg: 0 0% 54%;
+  --surface: 0 0% 4%;
+  --surface-raised: 0 0% 7%;
+  --surface-sunken: 0 0% 2%;
+  --border: 0 0% 15%;
+  --ring: 38 92% 50%;
+  --accent: 38 92% 50%;
+  --accent-fg: 0 0% 0%;
+  --bull: 155 87% 43%;
+  --bear: 352 91% 62%;
+  --warn: 38 92% 50%;
+  --radius-sm: 1px;
+  --radius: 2px;
+  --radius-md: 2px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 2px 12px -6px rgba(0, 0, 0, 0.7);
+  --panel-blur: none;
+  --panel-radius: 2px;
+}
+
+/* Phosphor — quant terminal, green-on-black. */
+:root[data-theme='phosphor'] {
+  --bg: 120 20% 5%;
+  --fg: 120 28% 87%;
+  --muted: 126 18% 10%;
+  --muted-fg: 128 12% 54%;
+  --surface: 128 21% 7%;
+  --surface-raised: 126 18% 10%;
+  --surface-sunken: 120 25% 3%;
+  --border: 131 20% 15%;
+  --ring: 142 71% 45%;
+  --accent: 142 71% 45%;
+  --accent-fg: 120 20% 5%;
+  --bull: 142 76% 36%;
+  --bear: 0 74% 51%;
+  --warn: 45 93% 47%;
+  --radius-sm: 1px;
+  --radius: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --radius-xl: 5px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 2px 12px -6px rgba(0, 0, 0, 0.6);
+  --panel-blur: none;
+  --panel-radius: 3px;
+}
+
+/* Arctic — professional light, crisp hairlines. */
+:root[data-theme='arctic'] {
+  --bg: 0 0% 100%;
+  --fg: 222 47% 11%;
+  --muted: 210 40% 96%;
+  --muted-fg: 215 16% 47%;
+  --surface: 210 40% 98%;
+  --surface-raised: 0 0% 100%;
+  --surface-sunken: 214 32% 95%;
+  --border: 214 32% 91%;
+  --ring: 222 100% 58%;
+  --accent: 222 100% 58%;
+  --accent-fg: 0 0% 100%;
+  --bull: 166 90% 32%;
+  --bear: 355 88% 58%;
+  --warn: 32 95% 44%;
+  --radius-sm: 2px;
+  --radius: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 4px 16px -10px rgba(15, 23, 42, 0.18);
+  --panel-blur: none;
+  --panel-radius: 4px;
+}
+
+/* Aurum — premium warm charcoal with gold. */
+:root[data-theme='aurum'] {
+  --bg: 40 20% 6%;
+  --fg: 40 33% 89%;
+  --muted: 40 21% 10%;
+  --muted-fg: 39 14% 54%;
+  --surface: 38 18% 8%;
+  --surface-raised: 40 21% 10%;
+  --surface-sunken: 40 25% 4%;
+  --border: 44 31% 14%;
+  --ring: 45 93% 47%;
+  --accent: 45 93% 47%;
+  --accent-fg: 40 20% 6%;
+  --bull: 174 63% 40%;
+  --bear: 1 83% 63%;
+  --warn: 45 93% 47%;
+  --radius-sm: 3px;
+  --radius: 4px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --panel-bg: hsl(var(--surface-raised));
+  --panel-shadow: 0 6px 20px -10px rgba(0, 0, 0, 0.6);
+  --panel-blur: none;
+  --panel-radius: 6px;
+}
+
 /* Default theme until JS sets the data attribute. */
 :root {
   color-scheme: dark light;
@@ -77,15 +245,20 @@ body {
 
 /* ============ Utility primitives ============ */
 .glass-panel {
-  background:
+  /* Skins flatten this via --panel-*; fallbacks = the classic glass look. */
+  background: var(
+    --panel-bg,
     linear-gradient(180deg, hsl(var(--surface) / 0.92), hsl(var(--surface) / 0.78)),
-    radial-gradient(120% 60% at 50% 0%, hsl(var(--accent) / 0.06), transparent 60%);
+    radial-gradient(120% 60% at 50% 0%, hsl(var(--accent) / 0.06), transparent 60%)
+  );
   border: 1px solid hsl(var(--border));
-  border-radius: 14px;
-  box-shadow:
+  border-radius: var(--panel-radius, 14px);
+  box-shadow: var(
+    --panel-shadow,
     inset 0 1px 0 hsl(var(--border) / 0.6),
-    0 8px 24px -16px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(14px) saturate(120%);
+    0 8px 24px -16px rgba(0, 0, 0, 0.5)
+  );
+  backdrop-filter: var(--panel-blur, blur(14px) saturate(120%));
 }
 
 .hairline {

@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChartCore,
-  DARK_THEME,
-  LIGHT_THEME,
   PriceSeriesLayer,
   LiquidityHeatmapLayer,
   VolumeProfileLayer,
@@ -81,6 +79,7 @@ import { fetchAlerts } from '@/lib/alerts';
 import { getWSClient } from '@/lib/ws-client';
 import type { AlertDefinition, AlertEvent } from '@supercharts/types';
 import { useTheme } from '@/components/theme-provider';
+import { getSkin } from '@/lib/skins';
 import { formatPrice, formatPercent, formatSymbolLabel } from '@/lib/format';
 import { Badge } from '@/components/ui/badge';
 import type { PaneState } from './terminal-store';
@@ -143,7 +142,7 @@ export function ChartPane({ pane, active, onClick }: ChartPaneProps) {
   const [paneAlerts, setPaneAlerts] = useState<AlertDefinition[]>([]);
   const [alertsRefreshTick, setAlertsRefreshTick] = useState(0);
   const { theme } = useTheme();
-  const resolvedTheme = useMemo(() => (theme === 'dark' ? DARK_THEME : LIGHT_THEME), [theme]);
+  const resolvedTheme = useMemo(() => getSkin(theme).chart, [theme]);
   const drawTool = useTerminalStore((s) => s.drawTool);
   const setDrawTool = useTerminalStore((s) => s.setDrawTool);
   const backtestPreview = useTerminalStore((s) => s.backtestPreview);

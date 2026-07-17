@@ -1,8 +1,10 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { DEFAULT_SKIN_ID, getSkin, isSkinId } from '@/lib/skins';
 
-type Theme = 'dark' | 'light';
+/** A skin id from the registry ('dark' | 'light' | 'graphite' | …). */
+type Theme = string;
 
 interface ThemeContextValue {
   theme: Theme;
@@ -13,16 +15,17 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('dark');
+  const [theme, setThemeState] = useState<Theme>(DEFAULT_SKIN_ID);
 
   useEffect(() => {
-    const stored = (typeof window !== 'undefined' ? localStorage.getItem('sc.theme') : null) as Theme | null;
-    const initial = stored ?? 'dark';
+    const stored = typeof window !== 'undefined' ? localStorage.getItem('sc.theme') : null;
+    const initial = isSkinId(stored) ? (stored as Theme) : DEFAULT_SKIN_ID;
     setThemeState(initial);
     document.documentElement.setAttribute('data-theme', initial);
   }, []);
 
   const setTheme = useCallback((t: Theme) => {
+    if (!isSkinId(t)) return;
     setThemeState(t);
     document.documentElement.setAttribute('data-theme', t);
     try {
@@ -32,8 +35,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Sun/moon toggle jumps to the opposite family's base theme; skin picking
+  // happens in the terminal Settings popover.
   const toggle = useCallback(() => {
-    setTheme(theme === 'dark' ? 'light' : 'dark');
+    setTheme(getSkin(theme).family === 'dark' ? 'light' : 'dark');
   }, [theme, setTheme]);
 
   const value = useMemo(() => ({ theme, setTheme, toggle }), [theme, setTheme, toggle]);
