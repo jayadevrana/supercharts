@@ -57,7 +57,7 @@ export function RightRail() {
   const useBrokerTrade = user?.role === 'admin' && activePane.symbol.startsWith('KITE:');
 
   return (
-    <aside className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/85">
+    <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(340px,88vw)] shrink-0 flex-col border-l border-border bg-surface/95 shadow-xl backdrop-blur lg:static lg:z-auto lg:w-[340px] lg:bg-surface/85 lg:shadow-none lg:backdrop-blur-0">
       <Tabs value={rightRailTab} onValueChange={setRightRailTab} className="flex h-full flex-col">
         <TabsList className="mx-2 mt-3 grid w-auto grid-cols-7 self-stretch">
           <TabsTrigger value="trade" aria-label="Trade" title="Trade" className="h-8 px-0">

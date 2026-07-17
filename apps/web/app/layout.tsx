@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Barlow_Semi_Condensed, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme-provider';
 import { Toaster } from '@/components/toaster';
@@ -55,9 +56,19 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+// Design-pack fonts (lib/designs.ts). Loaded once; each design picks via --font-sans.
+const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
+const barlow = Barlow_Semi_Condensed({
+  subsets: ['latin'],
+  weight: ['400', '500', '600'],
+  variable: '--font-condensed',
+  display: 'swap',
+});
+const jetbrains = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono-ui', display: 'swap' });
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${barlow.variable} ${jetbrains.variable}`}>
       <body className="min-h-screen bg-background text-foreground antialiased">
         <ThemeProvider>
           <SessionProvider>{children}</SessionProvider>

@@ -4,6 +4,9 @@ import { Cog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
+import { useTheme } from '@/components/theme-provider';
+import { SKINS } from '@/lib/skins';
+import { DESIGNS } from '@/lib/designs';
 import { useTerminalStore } from './terminal-store';
 
 function SettingRow({
@@ -28,11 +31,49 @@ function SettingRow({
   );
 }
 
+/** One selectable skin card: name + bg/accent/bull/bear swatch strip. */
+function SkinCard({
+  id,
+  label,
+  preview,
+  active,
+  onPick,
+}: {
+  id: string;
+  label: string;
+  preview: { bg: string; accent: string; bull: string; bear: string };
+  active: boolean;
+  onPick: (id: string) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onPick(id)}
+      aria-pressed={active}
+      className={`flex flex-col gap-1.5 rounded-md border p-2 text-left transition-colors ${
+        active ? 'border-accent bg-surface-raised' : 'border-border hover:bg-surface-raised'
+      }`}
+    >
+      <span className="flex h-4 overflow-hidden rounded-sm border border-border/60">
+        <span className="flex-[3]" style={{ backgroundColor: preview.bg }} />
+        <span className="flex-1" style={{ backgroundColor: preview.accent }} />
+        <span className="flex-1" style={{ backgroundColor: preview.bull }} />
+        <span className="flex-1" style={{ backgroundColor: preview.bear }} />
+      </span>
+      <span className={`text-[11px] leading-none ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
 /**
  * Workspace settings behind the top-bar cog. Every switch is a real store flag:
- * UI chrome (rails / script dock) + active-pane chart toggles.
+ * UI chrome (rails / script dock) + active-pane chart toggles. The Theme grid
+ * live-applies a skin (CSS vars + chart palette) via the theme provider.
  */
 export function WorkspaceSettingsPopover() {
+  const { theme, setTheme, design, setDesign } = useTheme();
   const showLeftRail = useTerminalStore((s) => s.showLeftRail);
   const setShowLeftRail = useTerminalStore((s) => s.setShowLeftRail);
   const showRightRail = useTerminalStore((s) => s.showRightRail);
@@ -51,6 +92,45 @@ export function WorkspaceSettingsPopover() {
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72 p-2">
+        <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Design
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 px-2 pb-2">
+          {DESIGNS.map((d) => (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => setDesign(d.id)}
+              aria-pressed={design === d.id}
+              title={d.tagline}
+              className={`flex items-center gap-2 rounded-md border p-2 text-left transition-colors ${
+                design === d.id ? 'border-accent bg-surface-raised' : 'border-border hover:bg-surface-raised'
+              }`}
+            >
+              <span className="text-sm font-semibold leading-none text-foreground">{d.specimen}</span>
+              <span
+                className={`text-[11px] leading-none ${design === d.id ? 'text-foreground' : 'text-muted-foreground'}`}
+              >
+                {d.label}
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Theme
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 px-2 pb-2">
+          {SKINS.map((s) => (
+            <SkinCard
+              key={s.id}
+              id={s.id}
+              label={s.label}
+              preview={s.preview}
+              active={theme === s.id}
+              onPick={setTheme}
+            />
+          ))}
+        </div>
         <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
           Workspace
         </div>

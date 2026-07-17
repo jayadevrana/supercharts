@@ -47,14 +47,17 @@ const config: Config = {
         warn: 'hsl(var(--warn) / <alpha-value>)',
       },
       borderRadius: {
-        sm: '0.25rem',
-        DEFAULT: '0.375rem',
-        md: '0.5rem',
-        lg: '0.75rem',
-        xl: '1rem',
+        // Skin-controllable: flat skins tighten these via --radius-* (globals.css);
+        // fallbacks keep the classic look when a skin doesn't set them.
+        sm: 'var(--radius-sm, 0.25rem)',
+        DEFAULT: 'var(--radius, 0.375rem)',
+        md: 'var(--radius-md, 0.5rem)',
+        lg: 'var(--radius-lg, 0.75rem)',
+        xl: 'var(--radius-xl, 1rem)',
       },
       boxShadow: {
-        glass: '0 1px 0 hsl(var(--border) / 0.6) inset, 0 12px 24px -16px rgba(0,0,0,0.55)',
+        glass:
+          'var(--panel-shadow, 0 1px 0 hsl(var(--border) / 0.6) inset, 0 12px 24px -16px rgba(0,0,0,0.55))',
         floating: '0 24px 48px -24px rgba(0,0,0,0.5), 0 4px 12px -4px rgba(0,0,0,0.25)',
       },
       keyframes: {

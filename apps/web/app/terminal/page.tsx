@@ -13,7 +13,7 @@ import { getWSClient } from '@/lib/ws-client';
 import { useSession } from '@/lib/auth';
 
 export default function TerminalPage() {
-  const { showLeftRail, showRightRail } = useTerminalStore();
+  const { showLeftRail, showRightRail, setShowLeftRail, setShowRightRail } = useTerminalStore();
   const { user, loading: sessionLoading } = useSession();
   const ingestMT5 = useMT5Store((s) => s.ingestEvent);
   const refreshAccounts = useMT5Store((s) => s.refreshAccounts);
@@ -27,6 +27,17 @@ export default function TerminalPage() {
     if (!user) window.location.href = '/login';
     else if (!user.emailVerified) window.location.href = '/verify';
   }, [sessionLoading, user]);
+
+  // Mobile: the rails are fixed-width (48px + 340px) and would crush the flex-1 chart to a sliver
+  // on a phone. Default both closed under lg (<1024px) so the chart gets the full viewport; the
+  // rails still open as overlays (drawer-style) via the top-bar/settings toggles.
+  useEffect(() => {
+    if (typeof window === 'undefined' || window.innerWidth >= 1024) return;
+    setShowLeftRail(false);
+    setShowRightRail(false);
+    // once, on first mount — a user reopening a rail on mobile must stick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Docs deep link: /terminal?pulse=<base64url(code)> loads the snippet into the Script dock
   // (one-shot, then stripped from the URL so refresh doesn't re-apply it).
