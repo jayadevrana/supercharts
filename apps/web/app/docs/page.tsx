@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, BookOpen, Bot, ChefHat, Rocket, Zap } from 'lucide-react';
+import { ArrowRight, BookOpen, Bot, ChefHat, Radar, Rocket, Zap } from 'lucide-react';
 import { PulseCodeBlock } from '@/components/docs/pulse-code-block';
 import { HERO } from '@/features/docs/samples';
 
@@ -27,6 +27,12 @@ const CARDS = [
     icon: ChefHat,
     title: 'Cookbook',
     body: 'Copy-paste recipes for real strategies — MA-cross filters, SuperTrend, breakouts, momentum, volume-spike alerts, HTF gates.',
+  },
+  {
+    href: '/docs/screener',
+    icon: Radar,
+    title: 'Code a screener',
+    body: 'One script, every symbol — screen the whole catalog with any condition you can write. Matches fire on the newest closed bar, never a repaint.',
   },
   {
     href: '/docs/automation',
