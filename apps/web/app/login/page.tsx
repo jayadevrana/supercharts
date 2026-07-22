@@ -124,6 +124,9 @@ export default function LoginPage() {
                   <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                     Password
                   </span>
+                  <Link href="/forgot-password" className="text-xs text-accent hover:underline">
+                    Forgot password?
+                  </Link>
                 </div>
                 <Input
                   type="password"

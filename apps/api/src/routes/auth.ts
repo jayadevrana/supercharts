@@ -17,7 +17,8 @@ import {
   verifyPassword,
   type SessionUser,
 } from '../auth';
-import { emailVerificationRequired, generateCode, sendVerificationEmail } from '../email';
+import { emailVerificationRequired, generateCode, sendVerificationEmail, sendPasswordResetEmail } from '../email';
+import { issuePasswordReset, consumePasswordReset } from '../auth-reset';
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 const MAX_VERIFY_ATTEMPTS = 6;
@@ -283,6 +284,50 @@ export function authRoutes(fastify: FastifyInstance, db: AppDB): void {
       return { error: 'cooldown' };
     }
     await issueVerificationCode(db, user.id, user.email);
+    return { ok: true };
+  });
+
+  // Forgot password: email a one-time reset link. ALWAYS returns { ok: true } regardless of whether
+  // the address exists — so this endpoint can't be used to enumerate accounts. Only accounts that
+  // actually have an email get a link; the token's raw value lives only in that link.
+  fastify.post('/api/auth/forgot-password', async (req, reply) => {
+    const parsed = z.object({ email: z.string().email().max(200) }).safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload' };
+    }
+    const email = parsed.data.email.trim().toLowerCase();
+    const row = db.raw.prepare('SELECT id, email FROM users WHERE email = ?').get(email) as
+      | { id: string; email: string }
+      | undefined;
+    if (row) {
+      const token = issuePasswordReset(db, row.id);
+      const link = `${appUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+      await sendPasswordResetEmail(row.email, link);
+    }
+    // Generic response regardless of existence or send outcome.
+    return { ok: true };
+  });
+
+  // Complete the reset: swap a valid one-time token for a new password. Burns the token, updates the
+  // hash, and invalidates ALL existing sessions for that user (a reset should log out every device).
+  fastify.post('/api/auth/reset-password', async (req, reply) => {
+    const parsed = z
+      .object({ token: z.string().min(1).max(400), newPassword: z.string().min(8).max(200) })
+      .safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400);
+      return { error: 'invalid_payload', detail: parsed.error.issues[0]?.message };
+    }
+    const userId = consumePasswordReset(db, parsed.data.token);
+    if (!userId) {
+      reply.code(400);
+      return { error: 'invalid_or_expired' };
+    }
+    db.raw
+      .prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?')
+      .run(hashPassword(parsed.data.newPassword), Date.now(), userId);
+    db.raw.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
     return { ok: true };
   });
 

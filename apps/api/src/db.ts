@@ -105,6 +105,16 @@ function migrate(db: DatabaseSync): void {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    -- One pending password-reset token per user (replaced on re-request). Only the SHA-256 hash
+    -- of the token is stored; the raw token lives only in the emailed link.
+    CREATE TABLE IF NOT EXISTS password_resets (
+      user_id    TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     -- OAuth provider links (Google today, more later). One row per (provider, external id);
     -- multiple providers can point at the same local user for account linking.
     CREATE TABLE IF NOT EXISTS accounts (
